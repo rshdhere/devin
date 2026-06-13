@@ -1,0 +1,14 @@
+{
+  "name": "@devin/api-v2",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "dev": "go run cmd/api/main.go"
+  },
+  "devDependencies": {
+    "@types/bun": "latest"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  }
+}
