@@ -1,0 +1,39 @@
+# Dependencies and caches (reinstalled or not used in image)
+node_modules
+.pnp
+.pnp.js
+.turbo
+
+# Version control and IDE
+.git
+.zed
+.claude
+.cursor
+.vscode
+.husky
+.github
+
+# Build outputs (rebuilt in image or not used)
+.next
+out
+build
+dist
+*.tsbuildinfo
+
+# Env and secrets (inject at runtime)
+**/.env
+**/.env.*
+!.env.sample
+!.env.example
+
+# Testing and debug
+coverage
+*.log
+*.pem
+
+# Docker assets (avoid copying into context)
+docker
+
+# Misc
+.DS_Store
+*.md
