@@ -1,0 +1,52 @@
+# dependencies
+
+node_modules
+
+# Next.js build output
+
+.next
+out
+
+# production builds
+
+dist
+build
+
+# logs
+
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# environment files
+
+.env
+.env.local
+.env.*.local
+
+# coverage reports
+
+coverage
+
+# lock files
+
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+
+# compiled / minified files
+
+*.min.js
+*.bundle.js
+*.map
+
+# OS / IDE files
+
+.DS_Store
+.vscode
+.idea
+
+# static assets (optional)
+
+public
