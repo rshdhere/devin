@@ -7,7 +7,10 @@
     "lint": "turbo run lint",
     "format": "prettier --write \"**/*.{ts,tsx,md}\"",
     "check-types": "turbo run check-types",
-    "prepare": "husky"
+    "prepare": "husky",
+    "schema": "cd packages/drizzle && bunx drizzle-lab@latest visualizer",
+    "migrate": "cd packages/drizzle && bunx drizzle-kit push",
+    "studio": "cd packages/drizzle && bunx drizzle-kit studio"
   },
   "devDependencies": {
     "eslint-config-prettier": "^10.1.8",
