@@ -8,5 +8,9 @@
   },
   "peerDependencies": {
     "typescript": "^5"
+  },
+  "dependencies": {
+    "@devin/drizzle": "workspace:*",
+    "better-auth": "^1.6.18"
   }
 }

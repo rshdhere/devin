@@ -3,6 +3,9 @@
   "module": "index.ts",
   "type": "module",
   "private": true,
+  "exports": {
+    ".": "./src/index.ts"
+  },
   "devDependencies": {
     "@types/bun": "latest",
     "@types/pg": "^8.20.0",
