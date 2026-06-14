@@ -28,6 +28,7 @@
   "workspaces": [
     "apps/*",
     "packages/*",
+    "packages/api/*",
     "tooling/*",
     "tests/*"
   ],

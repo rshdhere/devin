@@ -6,6 +6,10 @@
   "scripts": {
     "dev": "npx tsx watch src/bin.ts"
   },
+  "dependencies": {
+    "@devin/api-v1": "workspace:*",
+    "@devin/drizzle": "workspace:*"
+  },
   "devDependencies": {
     "@types/bun": "latest"
   },

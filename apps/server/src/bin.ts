@@ -1,1 +1,3 @@
-console.log(`your server is live`);
+import { main } from "./main.js";
+
+main();

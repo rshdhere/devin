@@ -4,7 +4,9 @@
   "type": "module",
   "private": true,
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./health": "./src/health.ts",
+    "./schema": "./src/database/schema.ts"
   },
   "devDependencies": {
     "@types/bun": "latest",

@@ -3,6 +3,9 @@
   "module": "index.ts",
   "type": "module",
   "private": true,
+  "exports": {
+    ".": "./src/index.ts"
+  },
   "devDependencies": {
     "@types/bun": "latest"
   },
@@ -10,7 +13,10 @@
     "typescript": "^5"
   },
   "dependencies": {
+    "@devin/validators": "workspace:*",
     "@devin/drizzle": "workspace:*",
-    "better-auth": "^1.6.18"
+    "@types/express": "^5.0.6",
+    "better-auth": "^1.6.18",
+    "express": "^5.2.1"
   }
 }
