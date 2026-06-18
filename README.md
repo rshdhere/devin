@@ -1,159 +1,180 @@
-# Turborepo starter
+# Devin
 
-This Turborepo starter is maintained by the Turborepo core team.
+Devin is an AI software engineer that helps teams plan, code, review, and ship faster. This repository contains the dashboard, API gateway, shared packages, and infrastructure definitions that power the platform.
 
-## Using this example
+## Architecture
 
-Run the following command:
+![Devin system architecture](apps/web/public/devin-architecture.png)
 
-```sh
-npx create-turbo@latest
+Devin follows a cloud-native architecture. A Next.js dashboard talks to an API gateway, which delegates sandbox lifecycle management to a Kubernetes controller. Each sandbox runs as an isolated pod with persistent storage, network policies, and real-time status feedback.
+
+### Components
+
+#### Frontend & Authentication
+
+| Component | Role | Implementation |
+| --- | --- | --- |
+| **Dashboard** | User-facing workspace for sessions, prompts, and agent activity | `apps/web` (Next.js) |
+| **Better Auth** | Session management, magic links, and OAuth | `packages/api/v1` |
+| **Resend** | Email delivery for verification and magic links | `packages/email` |
+
+#### API Gateway
+
+The API gateway is the central entry point between the dashboard and backend services.
+
+| Version | Runtime | Location | Status |
+| --- | --- | --- | --- |
+| **V1** | Bun / Express | `apps/server`, `packages/api/v1` | Active |
+| **V2** | Go | `packages/api/v2` | Planned |
+
+The gateway receives task requests from the dashboard, forwards sandbox operations to the orchestrator, and relays asynchronous status updates from sandbox pods back to the client.
+
+#### Sandbox Orchestrator
+
+A Kubernetes controller that reconciles `Sandbox` custom resources into running infrastructure. For each sandbox it ensures:
+
+- A **Pod** running the `devin-runtime` image
+- A **PersistentVolumeClaim** mounted at `/workspace`
+- A **NetworkPolicy** for pod isolation
+- **Status updates** written back to the CRD
+
+```go
+func Reconcile(ctx context.Context, req ctrl.Request) {
+  sandbox := getSandbox(req)
+  ensurePod()
+  ensurePVC()
+  ensureNetworkPolicy()
+  updateStatus()
+}
 ```
 
-## What's inside?
+The orchestrator uses `@kubernetes/client-node` (TypeScript) or `k8s.io/client-go` (Go) to interact with the Kubernetes API and returns `202 Accepted` while provisioning proceeds asynchronously.
 
-This Turborepo includes the following packages/apps:
+#### Kubernetes Resources
 
-### Apps and Packages
+Sandboxes are declared as a custom resource:
 
-- `docs`: a [Next.js](https://nextjs.org/) app
-- `web`: another [Next.js](https://nextjs.org/) app
-- `@repo/ui`: a stub React component library shared by both `web` and `docs` applications
-- `@repo/eslint-config`: `eslint` configurations (includes `eslint-config-next` and `eslint-config-prettier`)
-- `@repo/typescript-config`: `tsconfig.json`s used throughout the monorepo
-
-Each package/app is 100% [TypeScript](https://www.typescriptlang.org/).
-
-### Utilities
-
-This Turborepo has some additional tools already setup for you:
-
-- [TypeScript](https://www.typescriptlang.org/) for static type checking
-- [ESLint](https://eslint.org/) for code linting
-- [Prettier](https://prettier.io) for code formatting
-
-### Build
-
-To build all apps and packages, run the following command:
-
-With [global `turbo`](https://turborepo.dev/docs/getting-started/installation#global-installation) installed (recommended):
-
-```sh
-cd my-turborepo
-turbo build
+```yaml
+apiVersion: devin.ai/v1
+kind: Sandbox
+metadata:
+  name: sbx-123
+spec:
+  cpu: 2
+  memory: 4Gi
+  image: devin-runtime
 ```
 
-Without global `turbo`, use your package manager:
+The Kubernetes API persists CRD state in etcd. The controller watches for changes and drives the cluster toward the desired state.
 
-```sh
-cd my-turborepo
-npx turbo build
-bun dlx turbo build
-bun exec turbo build
+#### Sandbox Runtime
+
+Each sandbox pod is the isolated execution environment where the agent workflow runs:
+
+- **Agent workflow** — code generation, testing, and task execution inside `/workspace`
+- **Status updates** — streamed back to the API gateway for live dashboard feedback
+- **Network policy** — restricts ingress and egress for security
+- **PVC `/workspace`** — durable workspace storage backed by AWS EBS (`gp3` storage class)
+
+Long-term artifacts such as snapshots and logs are archived to **AWS S3**.
+
+### Request Flow
+
+1. User authenticates via the dashboard through Better Auth (email verification via Resend).
+2. Dashboard sends a task request to the API gateway.
+3. Gateway forwards the request to the sandbox orchestrator.
+4. Orchestrator creates or updates a `Sandbox` CRD in the Kubernetes API.
+5. Controller reconciles the CRD — provisioning the pod, PVC, and network policy.
+6. Agent runs inside the sandbox pod, persisting work to `/workspace`.
+7. Pod sends status updates to the API gateway, which reflects them on the dashboard.
+
+## Repository Structure
+
+```
+devin/
+├── apps/
+│   ├── web/              # Next.js dashboard
+│   └── server/           # Bun API server (V1 gateway entrypoint)
+├── packages/
+│   ├── api/
+│   │   ├── v1/           # Express + Better Auth routes (Bun)
+│   │   └── v2/           # Go API gateway (planned)
+│   ├── drizzle/          # PostgreSQL schema and migrations
+│   ├── email/            # Resend email templates and client
+│   ├── types/            # Shared TypeScript types
+│   ├── validators/       # Shared validation schemas
+│   ├── config/           # Shared configuration
+│   └── ui/               # Shared React components
+├── docker/               # Dockerfiles and Compose stacks
+├── tests/
+│   ├── e2e/              # End-to-end tests
+│   └── integration/      # Integration tests
+└── tooling/              # ESLint and TypeScript configs
 ```
 
-You can build a specific package by using a [filter](https://turborepo.dev/docs/crafting-your-repository/running-tasks#using-filters):
+## Getting Started
 
-With [global `turbo`](https://turborepo.dev/docs/getting-started/installation#global-installation) installed:
+### Prerequisites
 
-```sh
-turbo build --filter=docs
-```
+- [Bun](https://bun.sh) >= 1.2.3
+- [Node.js](https://nodejs.org) >= 18
+- Docker (for containerized development)
 
-Without global `turbo`:
+### Local Development
 
-```sh
-npx turbo build --filter=docs
-bun exec turbo build --filter=docs
-bun exec turbo build --filter=docs
-```
-
-### Develop
-
-To develop all apps and packages, run the following command:
-
-With [global `turbo`](https://turborepo.dev/docs/getting-started/installation#global-installation) installed (recommended):
+Install dependencies:
 
 ```sh
-cd my-turborepo
-turbo dev
+bun install
 ```
 
-Without global `turbo`, use your package manager:
+Run all apps with Turborepo:
 
 ```sh
-cd my-turborepo
-npx turbo dev
-bun exec turbo dev
-bun exec turbo dev
+bun run dev
 ```
 
-You can develop a specific package by using a [filter](https://turborepo.dev/docs/crafting-your-repository/running-tasks#using-filters):
-
-With [global `turbo`](https://turborepo.dev/docs/getting-started/installation#global-installation) installed:
+Or run individual apps:
 
 ```sh
-turbo dev --filter=web
+bun run dev --filter=@devin/web
+bun run dev --filter=@devin/server
 ```
 
-Without global `turbo`:
+### Docker Compose
+
+Start the full stack (PostgreSQL, API server, and web app):
 
 ```sh
-npx turbo dev --filter=web
-bun exec turbo dev --filter=web
-bun exec turbo dev --filter=web
+docker compose -f docker/compose-dev.yaml up
 ```
 
-### Remote Caching
+| Service | URL |
+| --- | --- |
+| Dashboard | http://localhost:3000 |
+| API server | http://localhost:8080 |
+| PostgreSQL | localhost:5432 |
 
-> [!TIP]
-> Vercel Remote Cache is free for all plans. Get started today at [vercel.com](https://vercel.com/signup?utm_source=remote-cache-sdk&utm_campaign=free_remote_cache).
-
-Turborepo can use a technique known as [Remote Caching](https://turborepo.dev/docs/core-concepts/remote-caching) to share cache artifacts across machines, enabling you to share build caches with your team and CI/CD pipelines.
-
-By default, Turborepo will cache locally. To enable Remote Caching you will need an account with Vercel. If you don't have an account you can [create one](https://vercel.com/signup?utm_source=turborepo-examples), then enter the following commands:
-
-With [global `turbo`](https://turborepo.dev/docs/getting-started/installation#global-installation) installed (recommended):
+Copy environment files before running:
 
 ```sh
-cd my-turborepo
-turbo login
+cp apps/server/.env.sample apps/server/.env
+cp apps/web/.env.local.example apps/web/.env.local
 ```
 
-Without global `turbo`, use your package manager:
+### Database
 
 ```sh
-cd my-turborepo
-npx turbo login
-bun exec turbo login
-bun exec turbo login
+bun run migrate    # Push schema to PostgreSQL
+bun run studio     # Open Drizzle Studio
 ```
 
-This will authenticate the Turborepo CLI with your [Vercel account](https://vercel.com/docs/concepts/personal-accounts/overview).
+## Scripts
 
-Next, you can link your Turborepo to your Remote Cache by running the following command from the root of your Turborepo:
-
-With [global `turbo`](https://turborepo.dev/docs/getting-started/installation#global-installation) installed:
-
-```sh
-turbo link
-```
-
-Without global `turbo`:
-
-```sh
-npx turbo link
-bun exec turbo link
-bun exec turbo link
-```
-
-## Useful Links
-
-Learn more about the power of Turborepo:
-
-- [Tasks](https://turborepo.dev/docs/crafting-your-repository/running-tasks)
-- [Caching](https://turborepo.dev/docs/crafting-your-repository/caching)
-- [Remote Caching](https://turborepo.dev/docs/core-concepts/remote-caching)
-- [Filtering](https://turborepo.dev/docs/crafting-your-repository/running-tasks#using-filters)
-- [Configuration Options](https://turborepo.dev/docs/reference/configuration)
-- [CLI Usage](https://turborepo.dev/docs/reference/command-line-reference)
+| Command | Description |
+| --- | --- |
+| `bun run dev` | Start all apps in development mode |
+| `bun run build` | Build all apps and packages |
+| `bun run lint` | Lint the monorepo |
+| `bun run check-types` | Run TypeScript type checking |
+| `bun run format` | Format code with Prettier |

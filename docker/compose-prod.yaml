@@ -1,0 +1,55 @@
+name: devin-prod
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    env_file:
+      - .env.prod
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - internal
+
+  server:
+    image: ${DOCKERHUB_USERNAME:-rshdhere}/devin-server:${IMAGE_TAG:-latest}
+    build:
+      context: ..
+      dockerfile: docker/server/Dockerfile
+    restart: unless-stopped
+    env_file:
+      - .env.prod
+    ports:
+      - "${SERVER_PORT:-8080}:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - internal
+
+  web:
+    image: ${DOCKERHUB_USERNAME:-rshdhere}/devin-web:${IMAGE_TAG:-latest}
+    build:
+      context: ..
+      dockerfile: docker/web/Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8080}
+        NEXT_PUBLIC_WEB_APP_URL: ${NEXT_PUBLIC_WEB_APP_URL:-http://localhost:3000}
+    restart: unless-stopped
+    ports:
+      - "${WEB_PORT:-3000}:3000"
+    depends_on:
+      - server
+    networks:
+      - internal
+
+networks:
+  internal:
+
+volumes:
+  postgres_data:
