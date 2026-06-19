@@ -4,10 +4,16 @@ import { formatSSE, TaskService } from "@devin/scheduler";
 const port = Number(process.env.SCHEDULER_PORT ?? 9091);
 const orchestratorUrl = process.env.ORCHESTRATOR_URL ?? "http://localhost:9090";
 const runtimeUrl = process.env.RUNTIME_URL ?? "http://localhost:8081";
+const defaultAgent = process.env.DEFAULT_AGENT as
+  | "cursor"
+  | "claude"
+  | "mock"
+  | undefined;
 
 const tasks = new TaskService({
   orchestratorUrl,
   runtimeUrl,
+  defaultAgent,
 });
 
 tasks.startWorker();
@@ -30,8 +36,14 @@ const server = createServer(async (req, res) => {
   if (req.method === "POST" && url.pathname === "/api/v1/tasks") {
     const body = await readBody(req);
     try {
-      const parsed = JSON.parse(body) as { prompt?: string };
-      const task = tasks.createTask({ prompt: parsed.prompt ?? "" });
+      const parsed = JSON.parse(body) as {
+        prompt?: string;
+        agent?: "cursor" | "claude" | "mock";
+      };
+      const task = tasks.createTask({
+        prompt: parsed.prompt ?? "",
+        agent: parsed.agent,
+      });
       res.writeHead(202, { "Content-Type": "application/json" });
       res.end(JSON.stringify(task));
     } catch (error) {

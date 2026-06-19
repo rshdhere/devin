@@ -1,7 +1,9 @@
 import { RuntimeClient } from "@devin/agent-sdk";
 import { EventBus } from "@devin/events";
+import type { TaskEventType } from "@devin/events";
 import { createQueue, type TaskQueue } from "@devin/queue";
 import type {
+  AgentProvider,
   CreateTaskInput,
   ScheduleJob,
   Task,
@@ -11,6 +13,7 @@ import type {
 export interface TaskServiceOptions {
   orchestratorUrl: string;
   runtimeUrl: string;
+  defaultAgent?: AgentProvider;
   eventBus?: EventBus;
   queue?: TaskQueue<ScheduleJob>;
 }
@@ -30,11 +33,13 @@ export class TaskService {
   private readonly queue: TaskQueue<ScheduleJob>;
   private readonly orchestratorUrl: string;
   private readonly runtimeUrl: string;
+  private readonly defaultAgent: AgentProvider;
   private workerStarted = false;
 
   constructor(options: TaskServiceOptions) {
     this.orchestratorUrl = options.orchestratorUrl.replace(/\/$/, "");
     this.runtimeUrl = options.runtimeUrl.replace(/\/$/, "");
+    this.defaultAgent = options.defaultAgent ?? resolveDefaultAgent();
     this.eventBus = options.eventBus ?? new EventBus();
     this.queue = options.queue ?? createQueue<ScheduleJob>();
   }
@@ -45,9 +50,11 @@ export class TaskService {
 
   createTask(input: CreateTaskInput): Task {
     const now = new Date().toISOString();
+    const agent = input.agent ?? this.defaultAgent;
     const task: Task = {
       id: crypto.randomUUID(),
       prompt: input.prompt.trim(),
+      agent,
       status: "queued",
       createdAt: now,
       updatedAt: now,
@@ -58,12 +65,13 @@ export class TaskService {
     }
 
     this.tasks.set(task.id, task);
-    this.emit("task.created", task.id, "Task accepted");
+    this.emit("task.created", task.id, "Task accepted", { agent: task.agent });
 
     void this.queue
       .enqueue({
         taskId: task.id,
         prompt: task.prompt,
+        agent: task.agent,
         enqueuedAt: now,
       })
       .catch((error) => {
@@ -108,14 +116,19 @@ export class TaskService {
       return;
     }
 
+    let sandboxName: string | undefined;
+
     try {
       this.updateTask(task.id, "scheduling", "Scheduler picked up task");
-      this.emit("task.scheduled", task.id, "Task scheduled");
+      this.emit("task.scheduled", task.id, "Task scheduled", {
+        agent: task.agent,
+      });
 
-      const sandboxName = `sbx-${task.id.slice(0, 8)}`;
+      sandboxName = `sbx-${task.id.slice(0, 8)}`;
       task.sandboxName = sandboxName;
       this.updateTask(task.id, "sandbox_starting", "Creating sandbox");
 
+      const runtimeImage = runtimeForAgent(task.agent);
       const createResponse = await fetch(
         `${this.orchestratorUrl}/internal/v1/sandboxes`,
         {
@@ -125,7 +138,7 @@ export class TaskService {
             name: sandboxName,
             spec: {
               taskId: task.id,
-              runtime: "nextjs",
+              runtime: runtimeImage,
               cpu: 2,
               memory: "4Gi",
             },
@@ -144,6 +157,7 @@ export class TaskService {
         sandboxName,
         vmId: sandbox.status?.vmId,
         host: sandbox.status?.host,
+        runtime: runtimeImage,
       });
 
       const runtimeBaseUrl =
@@ -154,15 +168,21 @@ export class TaskService {
         runtimeURL: runtimeBaseUrl,
       });
 
-      this.updateTask(task.id, "running", "Agent executing task");
-      this.emit("agent.running", task.id, "Agent started", {
+      const stopEvents = this.forwardRuntimeEvents(runtimeBaseUrl, task.id);
+
+      this.updateTask(task.id, "running", `${task.agent} agent executing task`);
+      this.emit("agent.running", task.id, `${task.agent} agent started`, {
         prompt: task.prompt,
+        agent: task.agent,
       });
 
       const runResult = await runtime.run({
         taskId: task.id,
         prompt: task.prompt,
+        agent: task.agent,
       });
+
+      stopEvents();
 
       if (runResult.status === "failed") {
         throw new Error(runResult.message);
@@ -175,12 +195,99 @@ export class TaskService {
       );
       this.emit("task.completed", task.id, "Task completed", {
         output: runResult.output,
+        agent: runResult.agent ?? task.agent,
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : "Task failed";
       this.updateTask(task.id, "failed", message);
       this.emit("task.failed", task.id, message);
       throw error;
+    } finally {
+      if (sandboxName) {
+        await this.deleteSandbox(sandboxName);
+      }
+    }
+  }
+
+  private forwardRuntimeEvents(
+    runtimeBaseUrl: string,
+    taskId: string,
+  ): () => void {
+    const controller = new AbortController();
+
+    void (async () => {
+      try {
+        const response = await fetch(
+          `${runtimeBaseUrl}/events?taskId=${encodeURIComponent(taskId)}`,
+          { signal: controller.signal },
+        );
+        if (!response.ok || !response.body) {
+          return;
+        }
+
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) {
+            break;
+          }
+          buffer += decoder.decode(value, { stream: true });
+
+          let splitIndex = buffer.indexOf("\n\n");
+          while (splitIndex >= 0) {
+            const chunk = buffer.slice(0, splitIndex);
+            buffer = buffer.slice(splitIndex + 2);
+            this.relayRuntimeChunk(taskId, chunk);
+            splitIndex = buffer.indexOf("\n\n");
+          }
+        }
+      } catch {
+        // stream closed when task finishes
+      }
+    })();
+
+    return () => controller.abort();
+  }
+
+  private relayRuntimeChunk(taskId: string, chunk: string): void {
+    const dataLine = chunk
+      .split("\n")
+      .find((line) => line.startsWith("data: "));
+    if (!dataLine) {
+      return;
+    }
+
+    try {
+      const payload = JSON.parse(dataLine.slice(6)) as {
+        type?: string;
+        message?: string;
+        data?: Record<string, unknown>;
+      };
+      if (!payload.type || !payload.message) {
+        return;
+      }
+      this.emitRuntime(
+        taskId,
+        payload.type as TaskEventType,
+        payload.message,
+        payload.data,
+      );
+    } catch {
+      // ignore malformed chunks
+    }
+  }
+
+  private async deleteSandbox(sandboxName: string): Promise<void> {
+    try {
+      await fetch(
+        `${this.orchestratorUrl}/internal/v1/sandboxes/${encodeURIComponent(sandboxName)}`,
+        { method: "DELETE" },
+      );
+    } catch {
+      // best-effort cleanup
     }
   }
 
@@ -259,6 +366,37 @@ export class TaskService {
       data,
     });
   }
+
+  private emitRuntime(
+    taskId: string,
+    type: TaskEventType,
+    message: string,
+    data?: Record<string, unknown>,
+  ): void {
+    this.eventBus.publish({
+      id: crypto.randomUUID(),
+      taskId,
+      type,
+      message,
+      timestamp: new Date().toISOString(),
+      data,
+    });
+  }
+}
+
+function runtimeForAgent(agent: AgentProvider): string {
+  if (agent === "mock") {
+    return "nextjs";
+  }
+  return "agent";
+}
+
+function resolveDefaultAgent(): AgentProvider {
+  const raw = (process.env.DEFAULT_AGENT ?? "mock").trim();
+  if (raw === "cursor" || raw === "claude" || raw === "mock") {
+    return raw;
+  }
+  return "mock";
 }
 
 function sleep(ms: number): Promise<void> {

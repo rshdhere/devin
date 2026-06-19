@@ -25,6 +25,7 @@ curl -fsSL -o /var/lib/devin/linux/vmlinux \
 | Directory | Image tag | Stack |
 | --- | --- | --- |
 | `nextjs/` | `devin-runtime-nextjs:latest` | Node 22, Bun, Git — Next.js apps |
+| `agent/` | `devin-runtime-agent:latest` | Cursor CLI + Claude Code + supervisor |
 | `go/` | `devin-runtime-go:latest` | Go 1.23, Git |
 | `rust/` | `devin-runtime-rust:latest` | Rust 1.83, OpenSSL/pkg-config |
 | `node/` | `devin-runtime-node:latest` | Node 22 |
@@ -33,6 +34,7 @@ curl -fsSL -o /var/lib/devin/linux/vmlinux \
 ## Build Docker images
 
 ```sh
+docker build -f runtime-images/agent/Dockerfile -t devin-runtime-agent:latest .
 docker build -f runtime-images/nextjs/Dockerfile -t devin-runtime-nextjs:latest .
 docker build -f runtime-images/go/Dockerfile -t devin-runtime-go:latest .
 docker build -f runtime-images/rust/Dockerfile -t devin-runtime-rust:latest .

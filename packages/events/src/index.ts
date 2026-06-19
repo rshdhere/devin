@@ -4,7 +4,13 @@ export type TaskEventType =
   | "sandbox.started"
   | "runtime.ready"
   | "agent.running"
+  | "agent.started"
+  | "agent.log"
+  | "agent.tool"
+  | "agent.completed"
+  | "agent.failed"
   | "git.clone"
+  | "git.commit"
   | "tests.running"
   | "task.completed"
   | "task.failed";

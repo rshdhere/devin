@@ -2,23 +2,33 @@ package supervisor
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
+
+	"github.com/rshdhere/devin/apps/runtime/internal/agent"
+	"github.com/rshdhere/devin/apps/runtime/internal/events"
+	"github.com/rshdhere/devin/apps/runtime/internal/executil"
 )
 
 type Server struct {
 	workspace string
 	logs      []string
 	mu        sync.RWMutex
+	agents    *agent.Service
+	eventBus  *events.Bus
 }
 
 func New(workspace string) *Server {
 	return &Server{
 		workspace: workspace,
 		logs:      []string{},
+		agents:    agent.NewService(agent.LoadConfig(workspace)),
+		eventBus:  events.NewBus(),
 	}
 }
 
@@ -49,6 +59,7 @@ func (s *Server) handleLogs(w http.ResponseWriter, _ *http.Request) {
 type runRequest struct {
 	TaskID string `json:"taskId"`
 	Prompt string `json:"prompt"`
+	Agent  string `json:"agent,omitempty"`
 }
 
 func (s *Server) handleRun(w http.ResponseWriter, r *http.Request) {
@@ -57,18 +68,39 @@ func (s *Server) handleRun(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
+	if strings.TrimSpace(req.TaskID) == "" || strings.TrimSpace(req.Prompt) == "" {
+		writeError(w, http.StatusBadRequest, "taskId and prompt are required")
+		return
+	}
 
-	s.appendLog("agent running task " + req.TaskID + ": " + req.Prompt)
+	s.appendLog("agent running task " + req.TaskID + " via " + firstNonEmpty(req.Agent, "default"))
 
-	writeJSON(w, http.StatusOK, map[string]any{
+	result, err := s.agents.Run(r.Context(), agent.RunRequest{
+		TaskID: req.TaskID,
+		Prompt: req.Prompt,
+		Agent:  req.Agent,
+	}, s.eventBus)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	status := http.StatusOK
+	if result.Status == "failed" {
+		status = http.StatusUnprocessableEntity
+	}
+
+	writeJSON(w, status, map[string]any{
 		"taskId":  req.TaskID,
-		"status":  "completed",
-		"message": "agent accepted prompt",
-		"output":  "devin.baby runtime processed: " + req.Prompt,
+		"status":  result.Status,
+		"message": result.Message,
+		"output":  result.Output,
+		"agent":   result.Agent,
 	})
 }
 
 type terminalRequest struct {
+	TaskID  string `json:"taskId,omitempty"`
 	Command string `json:"command"`
 	CWD     string `json:"cwd"`
 }
@@ -79,13 +111,37 @@ func (s *Server) handleTerminal(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
+
+	cwd := s.resolveCWD(req.CWD)
 	s.appendLog("terminal: " + req.Command)
-	writeJSON(w, http.StatusOK, map[string]string{"status": "accepted", "command": req.Command})
+
+	result, err := executil.Run(r.Context(), cwd, req.Command, nil)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	if req.TaskID != "" {
+		s.eventBus.Publish(req.TaskID, "agent.tool", "terminal command finished", map[string]any{
+			"command":  req.Command,
+			"exitCode": result.ExitCode,
+			"stdout":   result.Stdout,
+			"stderr":   result.Stderr,
+		})
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"status":   "completed",
+		"exitCode": result.ExitCode,
+		"stdout":   result.Stdout,
+		"stderr":   result.Stderr,
+	})
 }
 
 type gitCloneRequest struct {
-	URL  string `json:"url"`
-	Path string `json:"path"`
+	TaskID string `json:"taskId,omitempty"`
+	URL    string `json:"url"`
+	Path   string `json:"path"`
 }
 
 func (s *Server) handleGitClone(w http.ResponseWriter, r *http.Request) {
@@ -94,11 +150,40 @@ func (s *Server) handleGitClone(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
+
+	target := req.Path
+	if target == "" {
+		target = "repo"
+	}
+	targetPath := filepath.Join(s.workspace, filepath.Clean("/"+target))
+	command := fmt.Sprintf("git clone %s %s", shellQuote(req.URL), shellQuote(targetPath))
 	s.appendLog("git clone " + req.URL)
-	writeJSON(w, http.StatusOK, map[string]string{"status": "accepted", "url": req.URL})
+
+	result, err := executil.Run(r.Context(), s.workspace, command, nil)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if result.ExitCode != 0 {
+		writeError(w, http.StatusUnprocessableEntity, executil.CombinedOutput(result))
+		return
+	}
+
+	if req.TaskID != "" {
+		s.eventBus.Publish(req.TaskID, "git.clone", "repository cloned", map[string]any{
+			"url":  req.URL,
+			"path": target,
+		})
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"status": "completed",
+		"path":   target,
+	})
 }
 
 type gitCommitRequest struct {
+	TaskID  string   `json:"taskId,omitempty"`
 	Message string   `json:"message"`
 	Paths   []string `json:"paths"`
 }
@@ -109,8 +194,44 @@ func (s *Server) handleGitCommit(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
+
+	addPaths := "."
+	if len(req.Paths) > 0 {
+		addPaths = strings.Join(req.Paths, " ")
+	}
+	command := fmt.Sprintf(
+		"git add %s && git commit -m %s",
+		addPaths,
+		shellQuote(req.Message),
+	)
 	s.appendLog("git commit: " + req.Message)
-	writeJSON(w, http.StatusOK, map[string]string{"status": "accepted", "message": req.Message})
+
+	result, err := executil.Run(r.Context(), s.workspace, command, []string{
+		"GIT_AUTHOR_NAME=devin-agent",
+		"GIT_AUTHOR_EMAIL=agent@devin.baby",
+		"GIT_COMMITTER_NAME=devin-agent",
+		"GIT_COMMITTER_EMAIL=agent@devin.baby",
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if result.ExitCode != 0 {
+		writeError(w, http.StatusUnprocessableEntity, executil.CombinedOutput(result))
+		return
+	}
+
+	if req.TaskID != "" {
+		s.eventBus.Publish(req.TaskID, "git.commit", "changes committed", map[string]any{
+			"message": req.Message,
+		})
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"status":  "completed",
+		"message": req.Message,
+		"output":  executil.CombinedOutput(result),
+	})
 }
 
 type fileWriteRequest struct {
@@ -150,20 +271,87 @@ func (s *Server) handleBrowserOpen(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.appendLog("browser open " + req.URL)
-	writeJSON(w, http.StatusOK, map[string]string{"status": "accepted", "url": req.URL})
+	writeJSON(w, http.StatusOK, map[string]string{
+		"status":  "accepted",
+		"url":     req.URL,
+		"message": "browser automation is not configured in this runtime image",
+	})
 }
 
-func (s *Server) handleEvents(w http.ResponseWriter, _ *http.Request) {
+func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
+	taskID := r.URL.Query().Get("taskId")
+
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
 	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write([]byte("event: runtime.ready\ndata: {\"message\":\"supervisor online\"}\n\n"))
+
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		writeError(w, http.StatusInternalServerError, "streaming not supported")
+		return
+	}
+
+	if taskID == "" {
+		_, _ = w.Write(events.FormatSSE(events.Event{
+			Type:      "runtime.ready",
+			Message:   "supervisor online",
+			Timestamp: time.Now().UTC().Format(time.RFC3339Nano),
+		}))
+		flusher.Flush()
+		return
+	}
+
+	for _, event := range s.eventBus.History(taskID) {
+		_, _ = w.Write(events.FormatSSE(event))
+	}
+	flusher.Flush()
+
+	ctx := r.Context()
+	updates, unsubscribe := s.eventBus.Subscribe(taskID)
+	defer unsubscribe()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case event, ok := <-updates:
+			if !ok {
+				return
+			}
+			_, _ = w.Write(events.FormatSSE(event))
+			flusher.Flush()
+		}
+	}
+}
+
+func (s *Server) resolveCWD(path string) string {
+	if path == "" {
+		return s.workspace
+	}
+	if filepath.IsAbs(path) {
+		return path
+	}
+	return filepath.Join(s.workspace, filepath.Clean("/"+path))
 }
 
 func (s *Server) appendLog(line string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.logs = append(s.logs, time.Now().UTC().Format(time.RFC3339)+" "+line)
+}
+
+func shellQuote(value string) string {
+	return "'" + strings.ReplaceAll(value, "'", `'"'"'`) + "'"
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func writeJSON(w http.ResponseWriter, status int, payload any) {

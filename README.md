@@ -32,15 +32,49 @@ flowchart TB
 
 ### Request flow
 
-1. User → `POST /api/v1/tasks` `{ "prompt": "Build a Next.js auth system" }`
+1. User → `POST /api/v1/tasks` `{ "prompt": "...", "agent": "cursor" }`
 2. **Server** authenticates and forwards to **Scheduler**
 3. **Scheduler** enqueues work and emits `task.created`
 4. Worker creates a **Sandbox CRD** via **Orchestrator** (internal API)
 5. **Sandbox controller** creates a **FirecrackerMachine CR** (no Pods)
 6. **Machine controller** selects a **FirecrackerHost**, clones a warm snapshot, boots the microVM
 7. **Runtime supervisor** starts inside the VM and exposes the fixed HTTP contract
-8. Scheduler reads `status.runtimeURL` and calls `POST /run` — never shell on the host
-9. Events stream over SSE: `GET /api/v1/tasks/{id}/events`
+8. Scheduler opens `GET /events?taskId=...` and calls `POST /run` with the selected agent
+9. **Cursor CLI** or **Claude Code** runs headlessly inside `/workspace`
+10. Agent output streams over SSE: `GET /api/v1/tasks/{id}/events`
+11. Scheduler deletes the sandbox when the task finishes
+
+### Agent workflow
+
+Tasks choose an **agent provider** that runs inside the sandbox microVM:
+
+| Agent | CLI | Auth env | Runtime image |
+| --- | --- | --- | --- |
+| `mock` | built-in planner | none | `nextjs` (local dev default) |
+| `cursor` | `agent -p --force --trust` | `CURSOR_API_KEY` | `agent` |
+| `claude` | `claude -p --bare` | `ANTHROPIC_API_KEY` | `agent` |
+
+The scheduler never shells into the host. It only talks HTTP to the runtime supervisor, which invokes the agent CLI inside the Firecracker VM:
+
+```text
+POST /tasks
+  → Sandbox CRD (runtime=agent)
+  → Firecracker microVM
+  → POST /run { taskId, prompt, agent }
+  → cursor-cli | claude-code
+  → GET /events?taskId=...  (agent.log, agent.tool, git.*)
+  → SSE /tasks/{id}/events
+```
+
+Create a task with Cursor or Claude Code:
+
+```sh
+curl -X POST http://localhost:8080/api/v1/tasks \
+  -H 'Content-Type: application/json' \
+  -d '{"prompt":"Add JWT auth to the Next.js app","agent":"cursor"}'
+```
+
+For local development without API keys, omit `agent` or set `"agent":"mock"`. The mock agent writes `AGENT_TASK.md`, initializes git, and commits a plan so the full workflow can be tested end-to-end.
 
 ### Repository layout
 
@@ -65,7 +99,7 @@ devin/
 ├── deploy/
 │   ├── kubernetes/          # CRDs, RBAC, orchestrator, firecracker-host
 │   └── helm/                # Helm chart scaffold
-└── runtime-images/          # nextjs, go, rust, node, python → snapshots
+└── runtime-images/          # agent, nextjs, go, rust, node, python → snapshots
 ```
 
 ### Kubernetes namespaces
