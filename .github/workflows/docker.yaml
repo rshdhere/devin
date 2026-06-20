@@ -25,6 +25,15 @@ jobs:
           - app: server
             image: devin-server
             dockerfile: docker/server/Dockerfile
+          - app: orchestrator
+            image: devin-orchestrator
+            dockerfile: docker/orchestrator/Dockerfile
+          - app: scheduler
+            image: devin-scheduler
+            dockerfile: docker/scheduler/Dockerfile
+          - app: firecracker-host
+            image: devin-firecracker-host
+            dockerfile: docker/firecracker-host/Dockerfile
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -49,7 +58,8 @@ jobs:
             type=sha,prefix=
             type=ref,event=tag
 
-      - name: Build and push
+      - name: Build and push web
+        if: matrix.app == 'web'
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -62,3 +72,15 @@ jobs:
           build-args: |
             NEXT_PUBLIC_API_URL=${{ vars.NEXT_PUBLIC_API_URL }}
             NEXT_PUBLIC_WEB_APP_URL=${{ vars.NEXT_PUBLIC_WEB_APP_URL }}
+
+      - name: Build and push
+        if: matrix.app != 'web'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=${{ matrix.app }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.app }}
