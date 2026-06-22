@@ -52,3 +52,25 @@ module "execution_hosts" {
 
   depends_on = [module.eks]
 }
+
+# --- HashiCorp Vault (optional) ---
+
+module "vault" {
+  source = "./modules/vault"
+  count  = var.enable_vault ? 1 : 0
+
+  name_prefix         = local.name_prefix
+  cluster_name        = var.cluster_name
+  aws_region          = var.aws_region
+  oidc_provider_arn   = module.eks.oidc_provider_arn
+  oidc_provider_url   = module.eks.oidc_provider_url
+  namespace           = var.vault_namespace
+  ha_enabled          = var.vault_ha_enabled
+  ha_replicas         = var.vault_ha_replicas
+  ingress_enabled     = var.vault_ingress_enabled
+  ingress_host        = var.vault_ingress_host
+  injector_enabled    = var.vault_injector_enabled
+  tags                = var.tags
+
+  depends_on = [module.eks]
+}

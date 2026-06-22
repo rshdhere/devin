@@ -146,3 +146,47 @@ variable "container_image_tag" {
   type        = string
   default     = "latest"
 }
+
+# --- HashiCorp Vault ---
+
+variable "enable_vault" {
+  description = "Deploy HashiCorp Vault on EKS with AWS KMS auto-unseal."
+  type        = bool
+  default     = false
+}
+
+variable "vault_namespace" {
+  description = "Kubernetes namespace for Vault."
+  type        = string
+  default     = "vault"
+}
+
+variable "vault_ha_enabled" {
+  description = "Run Vault in HA mode with integrated Raft (recommended for prod)."
+  type        = bool
+  default     = false
+}
+
+variable "vault_ha_replicas" {
+  description = "Vault server replicas when HA is enabled."
+  type        = number
+  default     = 3
+}
+
+variable "vault_ingress_enabled" {
+  description = "Expose Vault via Ingress (use internal hostname + TLS in GitOps)."
+  type        = bool
+  default     = false
+}
+
+variable "vault_ingress_host" {
+  description = "Ingress hostname for Vault API/UI."
+  type        = string
+  default     = "vault.internal"
+}
+
+variable "vault_injector_enabled" {
+  description = "Enable Vault Agent Injector for pod-side secret injection."
+  type        = bool
+  default     = true
+}

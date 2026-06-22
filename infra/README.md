@@ -90,6 +90,11 @@ After `terraform apply`, note:
 4. **GitOps** — sync `overlays/<env>-external`; register `FirecrackerHost` CRs with `terraform output execution_hosts`
 5. **Ingress** — AWS Load Balancer Controller + ACM in GitOps
 6. **Orchestrator NLB** — internal NLB on `:9090` for execution host schedulers
+7. **Vault** (optional) — `enable_vault = true` in Terraform; see [vault/README.md](../vault/README.md)
+
+## HashiCorp Vault
+
+When `enable_vault = true`, Terraform provisions Vault on EKS with AWS KMS auto-unseal. Store all app secrets in Vault KV (`secret/prod/server`, `secret/prod/scheduler`) instead of plain Kubernetes Secrets. Bootstrap with `./vault/bootstrap/kubernetes.sh` after `vault operator init`.
 
 ## Networking
 
@@ -158,5 +163,6 @@ infra/
 └── modules/
     ├── vpc/
     ├── eks/
-    └── execution-hosts/
+    ├── execution-hosts/
+    └── vault/
 ```

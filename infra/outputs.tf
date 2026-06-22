@@ -83,3 +83,19 @@ output "configure_kubectl" {
   description = "Command to configure kubectl for the EKS cluster."
   value       = "aws eks update-kubeconfig --region ${var.aws_region} --name ${module.eks.cluster_name}"
 }
+
+output "vault_namespace" {
+  description = "Kubernetes namespace where Vault is deployed (null if disabled)."
+  value       = try(module.vault[0].namespace, null)
+}
+
+output "vault_kms_key_arn" {
+  description = "KMS key ARN for Vault auto-unseal (null if disabled)."
+  value       = try(module.vault[0].kms_key_arn, null)
+}
+
+output "vault_init_commands" {
+  description = "Post-apply Vault initialization and bootstrap steps."
+  value       = try(module.vault[0].init_commands, null)
+  sensitive   = true
+}

@@ -57,3 +57,6 @@ infra/*.tfstate
 infra/*.tfstate.*
 infra/*.tfvars
 !infra/*.tfvars.example
+
+# Vault local state
+vault/.local/

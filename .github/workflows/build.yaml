@@ -1,4 +1,4 @@
-name: go lang build-check
+name: build-check
 
 on:
   push:
