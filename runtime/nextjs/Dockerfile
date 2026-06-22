@@ -2,7 +2,7 @@
 #
 # Build from repo root:
 #   go build -o apps/runtime/bin/runtime ./apps/runtime/cmd/runtime
-#   docker build -f runtime-images/nextjs/Dockerfile -t devin-runtime-nextjs:latest .
+#   docker build -f runtime/nextjs/Dockerfile -t devin-runtime-nextjs:latest .
 
 FROM node:22-bookworm-slim
 

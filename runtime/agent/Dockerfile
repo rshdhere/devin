@@ -2,7 +2,7 @@
 #
 # Build from repo root:
 #   go build -o apps/runtime/bin/runtime ./apps/runtime/cmd/runtime
-#   docker build -f runtime-images/agent/Dockerfile -t devin-runtime-agent:latest .
+#   docker build -f runtime/agent/Dockerfile -t devin-runtime-agent:latest .
 
 FROM node:22-bookworm-slim
 

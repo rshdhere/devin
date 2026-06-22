@@ -1,16 +1,18 @@
-# Rust runtime — toolchain for systems work and native tooling.
+# Go runtime — toolchain for services, CLIs, and backend work.
 #
 # Build from repo root:
 #   go build -o apps/runtime/bin/runtime ./apps/runtime/cmd/runtime
-#   docker build -f runtime-images/rust/Dockerfile -t devin-runtime-rust:latest .
+#   docker build -f runtime/go/Dockerfile -t devin-runtime-go:latest .
 
-FROM rust:1.83-bookworm
+FROM golang:1.23-bookworm
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates git pkg-config libssl-dev \
+    ca-certificates git \
     && rm -rf /var/lib/apt/lists/*
 
-ENV RUST_BACKTRACE=1
+ENV CGO_ENABLED=0
+ENV GOPATH=/go
+ENV PATH="${GOPATH}/bin:${PATH}"
 
 WORKDIR /workspace
 COPY apps/runtime/bin/runtime /usr/local/bin/devin-runtime-supervisor

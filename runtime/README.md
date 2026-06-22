@@ -34,12 +34,12 @@ curl -fsSL -o /var/lib/devin/linux/vmlinux \
 ## Build Docker images
 
 ```sh
-docker build -f runtime-images/agent/Dockerfile -t devin-runtime-agent:latest .
-docker build -f runtime-images/nextjs/Dockerfile -t devin-runtime-nextjs:latest .
-docker build -f runtime-images/go/Dockerfile -t devin-runtime-go:latest .
-docker build -f runtime-images/rust/Dockerfile -t devin-runtime-rust:latest .
-docker build -f runtime-images/node/Dockerfile -t devin-runtime-node:latest .
-docker build -f runtime-images/python/Dockerfile -t devin-runtime-python:latest .
+docker build -f runtime/agent/Dockerfile -t devin-runtime-agent:latest .
+docker build -f runtime/nextjs/Dockerfile -t devin-runtime-nextjs:latest .
+docker build -f runtime/go/Dockerfile -t devin-runtime-go:latest .
+docker build -f runtime/rust/Dockerfile -t devin-runtime-rust:latest .
+docker build -f runtime/node/Dockerfile -t devin-runtime-node:latest .
+docker build -f runtime/python/Dockerfile -t devin-runtime-python:latest .
 ```
 
 ## Build Firecracker snapshots

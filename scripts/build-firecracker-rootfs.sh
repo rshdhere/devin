@@ -28,7 +28,7 @@ if [[ ! -f "${ROOT}/apps/runtime/bin/runtime" ]]; then
 fi
 
 echo "building docker image ${IMAGE}..."
-docker build -f "${ROOT}/runtime-images/${RUNTIME}/Dockerfile" -t "${IMAGE}" "${ROOT}"
+docker build -f "${ROOT}/runtime/${RUNTIME}/Dockerfile" -t "${IMAGE}" "${ROOT}"
 
 mkdir -p "${OUT_DIR}"
 rm -f "${ROOTFS}"

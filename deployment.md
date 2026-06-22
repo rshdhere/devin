@@ -126,8 +126,8 @@ go build -o apps/runtime/bin/runtime ./apps/runtime/cmd/runtime
 sudo mkdir -p /var/lib/devin/linux
 sudo curl -fsSL -o /var/lib/devin/linux/vmlinux \
   https://s3.amazonaws.com/spec.ccfc.min/img/quickstart_guide/x86_64/kernels/vmlinux
-docker build -f runtime-images/nextjs/Dockerfile -t devin-runtime-nextjs:latest .
-docker build -f runtime-images/agent/Dockerfile -t devin-runtime-agent:latest .
+docker build -f runtime/nextjs/Dockerfile -t devin-runtime-nextjs:latest .
+docker build -f runtime/agent/Dockerfile -t devin-runtime-agent:latest .
 sudo ./scripts/build-firecracker-rootfs.sh nextjs devin-runtime-nextjs:latest
 sudo ./scripts/build-firecracker-snapshot.sh nextjs
 sudo ./scripts/build-firecracker-rootfs.sh agent devin-runtime-agent:latest
@@ -329,8 +329,8 @@ sudo curl -fsSL -o /var/lib/devin/linux/vmlinux \
   https://s3.amazonaws.com/spec.ccfc.min/img/quickstart_guide/x86_64/kernels/vmlinux
 
 # Build runtime Docker images
-docker build -f runtime-images/nextjs/Dockerfile -t devin-runtime-nextjs:latest .
-docker build -f runtime-images/agent/Dockerfile -t devin-runtime-agent:latest .
+docker build -f runtime/nextjs/Dockerfile -t devin-runtime-nextjs:latest .
+docker build -f runtime/agent/Dockerfile -t devin-runtime-agent:latest .
 
 # Export rootfs + golden snapshots (requires root + KVM)
 sudo ./scripts/build-firecracker-rootfs.sh nextjs devin-runtime-nextjs:latest
@@ -349,7 +349,7 @@ Verify layout:
     └── agent/
 ```
 
-See `runtime-images/README.md` for all supported runtimes.
+See `runtime/README.md` for all supported runtimes.
 
 **AWS tip:** after building on one EC2 instance, create an AMI from it or sync `/var/lib/devin` to additional execution hosts with `rsync` or S3 — avoid rebuilding snapshots on every machine.
 

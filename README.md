@@ -98,7 +98,7 @@ devin/
 │   └── agent-sdk/           # Runtime HTTP client contract
 ├── deploy/
 │   └── helm/                # Helm chart scaffold
-└── runtime-images/          # agent, nextjs, go, rust, node, python → snapshots
+└── runtime/                 # agent, nextjs, go, rust, node, python → snapshots
 ```
 
 ### Kubernetes namespaces
@@ -139,7 +139,7 @@ The orchestrator **never** executes shell commands — it only provisions infras
 
 ### Warm snapshots
 
-Production hosts maintain a pool of ready microVMs restored from golden snapshots (~300ms) instead of cold booting kernels (~8–12s). Each `runtime-images/*` directory builds a snapshot consumed by `firecracker-host`.
+Production hosts maintain a pool of ready microVMs restored from golden snapshots (~300ms) instead of cold booting kernels (~8–12s). Each `runtime/*` directory builds a snapshot consumed by `firecracker-host`.
 
 Build snapshots on a Linux Firecracker host:
 
