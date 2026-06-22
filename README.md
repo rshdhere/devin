@@ -97,7 +97,6 @@ devin/
 │   ├── events/              # Event bus + SSE helpers
 │   └── agent-sdk/           # Runtime HTTP client contract
 ├── deploy/
-│   ├── kubernetes/          # CRDs, RBAC, orchestrator, firecracker-host
 │   └── helm/                # Helm chart scaffold
 └── runtime-images/          # agent, nextjs, go, rust, node, python → snapshots
 ```
@@ -194,17 +193,14 @@ curl -N http://localhost:9091/api/v1/tasks/{taskId}/events
 
 ## Kubernetes deploy
 
-Production on **AWS** uses Path B (EKS + external EC2 execution hosts + Neon). See `deployment.md` for full details:
+Kubernetes manifests live in your **GitOps repository** (not this app repo). See `migration.md` for the full manifest bundle, overlay layout, and Argo CD / Flux wiring.
 
-```sh
-# Path B: EKS control plane + external EC2 execution hosts (recommended)
-kubectl apply -k deploy/kubernetes/external/ --load-restrictor LoadRestrictionsNone
-kubectl apply -f deploy/kubernetes/firecracker/external-host.yaml
+Production on **AWS** uses Path B (EKS + external EC2 execution hosts + Neon). Operational procedures — snapshots, EC2 hosts, Neon, ingress — are in `deployment.md`.
 
-# Path A: in-cluster KVM worker pool (self-managed K8s only — not EKS)
-kubectl label node <kvm-node> devin.baby/firecracker-host=true
-kubectl apply -k deploy/kubernetes/in-cluster/ --load-restrictor LoadRestrictionsNone
-```
+Sync the control plane from GitOps:
+
+- **Path B (recommended):** `apps/devin-baby/overlays/<env>-external`
+- **Path A (in-cluster KVM):** `apps/devin-baby/overlays/<env>-in-cluster` + label workers `devin.baby/firecracker-host=true`
 
 Set on server: `DATABASE_URL` to your Neon connection string; `SCHEDULER_URL` to your execution host scheduler URL (`http://<private-ip>:9091`).
 

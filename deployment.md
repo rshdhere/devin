@@ -2,6 +2,8 @@
 
 This guide covers production deployment of devin.baby: web, API server, orchestrator, and Firecracker microVM sandboxes.
 
+**Kubernetes manifests** are maintained in your GitOps repository. This app repo ships container images and operational runbooks only. See `migration.md` for the full manifest bundle and GitOps layout.
+
 Unlike generic container sandboxing (Kata Containers + containerd + devmapper), devin.baby uses **golden snapshot pools** and a **custom runtime supervisor** inside each microVM. We borrow the **dedicated KVM worker pool** idea from Kata/Firecracker-on-K8s guides — labeled nodes, co-located daemons, host-local networking — without adopting Kata itself.
 
 ## Recommended production stack (AWS)
@@ -20,10 +22,10 @@ Follow **Path B** below. Provision a Neon project first, point `DATABASE_URL` at
 
 ## Choose a deployment path
 
-| Path | When to use | Manifest bundle |
+| Path | When to use | GitOps overlay |
 | --- | --- | --- |
-| **B — External execution hosts** | **Recommended** — EKS, GKE standard, and other managed K8s without nested KVM | `kubectl apply -k deploy/kubernetes/external/ --load-restrictor LoadRestrictionsNone` + EC2 hosts |
-| **A — In-cluster KVM pool** | Self-managed K8s with dedicated `/dev/kvm` worker nodes (not EKS) | `kubectl apply -k deploy/kubernetes/in-cluster/ --load-restrictor LoadRestrictionsNone` |
+| **B — External execution hosts** | **Recommended** — EKS, GKE standard, and other managed K8s without nested KVM | `overlays/<env>-external` + EC2 hosts |
+| **A — In-cluster KVM pool** | Self-managed K8s with dedicated `/dev/kvm` worker nodes (not EKS) | `overlays/<env>-in-cluster` |
 
 Both paths share the same control-plane CRDs (`Sandbox`, `FirecrackerMachine`, `FirecrackerHost`) and the same app tier (server, web). Postgres is **external** in production (managed provider).
 
@@ -54,14 +56,9 @@ When your Kubernetes workers lack hardware KVM (typical on EKS/GKE), run `firecr
          Neon (serverless Postgres) — outside the cluster
 ```
 
-Deploy the control plane:
+Deploy the control plane by syncing your GitOps overlay (Path B: `overlays/<env>-external`). The overlay includes `FirecrackerHost` CRs or a separate `firecracker-hosts.yaml` per environment — replace placeholder IPs with each execution host's VPC private address.
 
-```sh
-kubectl apply -k deploy/kubernetes/external/ --load-restrictor LoadRestrictionsNone
-kubectl apply -f deploy/kubernetes/firecracker/external-host.yaml
-```
-
-Set `ORCHESTRATOR_NODE_REGISTER_ENABLED=false` is applied automatically by the external kustomize overlay. Register each execution host manually in `external-host.yaml`.
+`ORCHESTRATOR_NODE_REGISTER_ENABLED=false` is set automatically by the external kustomize overlay. Register each execution host in your GitOps `firecracker-hosts.yaml`.
 
 See [§2–§4 below](#2-prepare-firecracker-snapshots-on-execution-hosts) for EC2 provisioning, snapshot prep, and security group rules.
 
@@ -112,17 +109,12 @@ scheduler → runtime inside microVM (host-local CNI)
 
 ### A.2 Build and push images
 
-See [§1 Build and push container images](#1-build-and-push-container-images) below, then:
+See [§1 Build and push container images](#1-build-and-push-container-images) below, then sync the in-cluster overlay from GitOps and pin image tags in your overlay `images` block:
 
 ```sh
-kubectl apply -k deploy/kubernetes/in-cluster/ --load-restrictor LoadRestrictionsNone
-
-kubectl -n devin-system set image deployment/devin-orchestrator \
-  orchestrator=$REGISTRY/devin-orchestrator:$TAG
-kubectl -n devin-firecracker set image daemonset/devin-firecracker-host \
-  firecracker-host=$REGISTRY/devin-firecracker-host:$TAG
-kubectl -n devin-firecracker set image daemonset/devin-scheduler \
-  scheduler=$REGISTRY/devin-scheduler:$TAG
+# After GitOps sync — verify workloads
+kubectl -n devin-system get deployment/devin-orchestrator
+kubectl -n devin-firecracker get daemonset
 ```
 
 ### A.3 Prepare snapshots on each KVM worker
@@ -319,7 +311,7 @@ docker push $REGISTRY/devin-scheduler:$TAG
 docker push $REGISTRY/devin-firecracker-host:$TAG
 ```
 
-Update image references in `deploy/kubernetes/` before applying in-cluster manifests.
+Pin image tags in your GitOps overlay `images` block (see `migration.md` §3).
 
 ---
 
@@ -467,17 +459,13 @@ Load-balance schedulers from the API server with one of:
 
 ### Path A (in-cluster KVM)
 
-Already covered in [Path A](#path-a--in-cluster-kvm-worker-pool-self-managed-clusters-only). Use `kubectl apply -k deploy/kubernetes/in-cluster/ --load-restrictor LoadRestrictionsNone`.
+Already covered in [Path A](#path-a--in-cluster-kvm-worker-pool-self-managed-clusters-only). Sync `overlays/<env>-in-cluster` from GitOps.
 
 ### Path B (external hosts) — orchestrator only
 
-```sh
-kubectl apply -k deploy/kubernetes/external/ --load-restrictor LoadRestrictionsNone
-kubectl -n devin-system set image deployment/devin-orchestrator \
-  orchestrator=$REGISTRY/devin-orchestrator:$TAG
-```
+Sync `overlays/<env>-external` from GitOps. Pin `devin-orchestrator` image tag in the overlay.
 
-**Do not** apply `deploy/kubernetes/firecracker/daemonset.yaml` or `deploy/kubernetes/scheduler/daemonset.yaml` on Path B.
+**Do not** include the in-cluster `firecracker-host` DaemonSet or co-located `scheduler` DaemonSet on Path B — those run on EC2 outside the cluster.
 
 Confirm orchestrator env:
 
@@ -491,10 +479,10 @@ FIRECRACKER_NAMESPACE=devin-firecracker
 
 ### 4.3 Register external execution hosts (Path B only)
 
-Create one CR per execution host. Use the host's **VPC private IP** (reachable from orchestrator Pods):
+Create one CR per execution host in your GitOps `firecracker-hosts.yaml`. Use the host's **VPC private IP** (reachable from orchestrator Pods):
 
 ```yaml
-# deploy/kubernetes/firecracker/external-host.yaml
+# GitOps: apps/devin-baby/overlays/<env>-external/firecracker-hosts.yaml
 apiVersion: devin.baby/v1
 kind: FirecrackerHost
 metadata:
@@ -518,8 +506,9 @@ spec:
     memory: 16Gi
 ```
 
+After GitOps sync:
+
 ```sh
-kubectl apply -f deploy/kubernetes/firecracker/external-host.yaml
 kubectl -n devin-firecracker get firecrackerhosts -w
 ```
 
@@ -608,7 +597,7 @@ Set `DATABASE_URL` in the `devin-server` secret (see [§6](#6-deploy-api-server-
 For local experimentation only — not for production on AWS:
 
 ```yaml
-# deploy/kubernetes/app/postgres.yaml
+# GitOps: apps/devin-baby/overlays/<env>/postgres.yaml (local/dev only)
 apiVersion: v1
 kind: Secret
 metadata:
@@ -677,7 +666,7 @@ spec:
 ```
 
 ```sh
-kubectl apply -f deploy/kubernetes/app/postgres.yaml
+kubectl apply -f <your-gitops-path>/postgres.yaml
 export DATABASE_URL=postgres://postgres:change-me@<postgres-host>:5432/devin
 bun run migrate
 psql "$DATABASE_URL" -f packages/drizzle/drizzle/0001_github_settings.sql
@@ -695,7 +684,7 @@ Set `SCHEDULER_URL` to your scheduler endpoint:
 - **Path B:** `http://<execution-host-private-ip>:9091` or internal NLB URL
 
 ```yaml
-# deploy/kubernetes/app/secrets.yaml
+# GitOps: apps/devin-baby/overlays/<env>/secrets.yaml
 apiVersion: v1
 kind: Secret
 metadata:
@@ -721,13 +710,14 @@ stringData:
 
 **GitHub OAuth callback URL:** `https://api.yourdomain.com/api/v1/auth/callback/github`
 
-Deploy server and web (see full manifests in previous sections or `deploy/kubernetes/app/`):
+Deploy server and web from your GitOps repo (see example manifests in §5–6 of this guide):
 
 ```sh
-kubectl apply -f deploy/kubernetes/app/secrets.yaml
-kubectl apply -f deploy/kubernetes/app/server.yaml
-kubectl apply -f deploy/kubernetes/app/web.yaml
-kubectl apply -f deploy/kubernetes/app/ingress.yaml
+# Sync app tier via GitOps, or apply overlay manifests directly:
+kubectl apply -f <your-gitops-path>/secrets.yaml
+kubectl apply -f <your-gitops-path>/server.yaml
+kubectl apply -f <your-gitops-path>/web.yaml
+kubectl apply -f <your-gitops-path>/ingress.yaml
 ```
 
 Point DNS at your ingress load balancer.
@@ -869,16 +859,7 @@ docker logs -f scheduler
 
 ## 11. Appendix: local dev without KVM
 
-For dry-run local development, use the legacy scheduler Deployment and sample host:
-
-```sh
-kubectl apply -f deploy/kubernetes/namespaces.yaml
-kubectl apply -f deploy/kubernetes/crd/
-kubectl apply -f deploy/kubernetes/orchestrator/
-kubectl apply -f deploy/kubernetes/firecracker/daemonset.yaml
-kubectl apply -f deploy/kubernetes/scheduler/deployment.yaml
-kubectl apply -f deploy/kubernetes/firecracker/sample-host.yaml
-```
+For dry-run local development, use `bun run dev` (see `README.md`) instead of deploying to a cluster. If you need a minimal in-cluster dry-run, apply the legacy scheduler Deployment and sample `FirecrackerHost` from `migration.md` §9 (`scheduler/deployment.yaml`, `firecracker/sample-host.yaml`) via your GitOps dev overlay.
 
 Set `FIRECRACKER_DRY_RUN=true` for mock VMs without `/dev/kvm`.
 
@@ -892,9 +873,8 @@ Set `FIRECRACKER_DRY_RUN=true` for mock VMs without `/dev/kvm`.
 # 1. Build + push images (§1)
 # 2. Snapshots on each KVM worker (A.3)
 kubectl label node <kvm-node> devin.baby/firecracker-host=true
-kubectl apply -k deploy/kubernetes/in-cluster/ --load-restrictor LoadRestrictionsNone
-# Set images to your registry (A.2)
-# deploy app tier (§5–6), bun run migrate
+# 3. Sync GitOps overlay: overlays/<env>-in-cluster
+# 4. Deploy app tier from GitOps (§5–6), bun run migrate
 kubectl -n devin-firecracker get firecrackerhosts
 SCHEDULER_URL=$(kubectl -n devin-firecracker get fch -o jsonpath='{.items[0].spec.schedulerAddress}')
 ```
@@ -904,8 +884,7 @@ SCHEDULER_URL=$(kubectl -n devin-firecracker get fch -o jsonpath='{.items[0].spe
 ```sh
 # 1. Build + push images (§1)
 # 2–3. Snapshots + EC2 hosts (§2–3)
-kubectl apply -k deploy/kubernetes/external/ --load-restrictor LoadRestrictionsNone
-kubectl apply -f deploy/kubernetes/firecracker/external-host.yaml
-# Expose orchestrator internal NLB for execution hosts (§4.4)
-# deploy app tier (§5–6), bun run migrate
+# 4. Sync GitOps overlay: overlays/<env>-external
+# 5. Expose orchestrator internal NLB for execution hosts (§4.4)
+# 6. Deploy app tier from GitOps (§5–6), bun run migrate
 ```

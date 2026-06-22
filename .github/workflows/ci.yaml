@@ -43,18 +43,3 @@ jobs:
       - name: Vet sandbox API
         working-directory: packages/sandbox
         run: go vet ./...
-
-  kustomize:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up kubectl
-        uses: azure/setup-kubectl@v4
-
-      - name: Validate in-cluster overlay
-        run: kubectl kustomize deploy/kubernetes/in-cluster/ --load-restrictor LoadRestrictionsNone > /dev/null
-
-      - name: Validate external overlay
-        run: kubectl kustomize deploy/kubernetes/external/ --load-restrictor LoadRestrictionsNone > /dev/null
