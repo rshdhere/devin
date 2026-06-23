@@ -41,15 +41,31 @@ Container images are expected on **Docker Hub** (not ECR). Configure `imagePullS
 
 ## Quick start
 
+`terraform.tfvars` is **gitignored** on purpose (it holds account-specific values). It is not missing — you create it locally from the example:
+
 ```sh
 cd infra
 cp terraform.tfvars.example terraform.tfvars
 # Edit terraform.tfvars (region, container_registry, SSH key, admin CIDRs)
+```
 
+Minimum edits in `terraform.tfvars`:
+
+| Variable | Example |
+| --- | --- |
+| `container_registry` | `docker.io/rshdhere` (required — no default) |
+| `execution_host_ssh_key_name` | your EC2 key pair name in AWS |
+| `execution_host_admin_ssh_cidr_blocks` | `["203.0.113.10/32"]` (your public IP) |
+
+Then:
+
+```sh
 terraform init
 terraform plan
 terraform apply
 ```
+
+If `terraform plan` errors on the Helm provider (`kubernetes` block), run `terraform init -upgrade` after pulling the latest `infra/providers.tf` (Helm provider v3 syntax).
 
 Configure kubectl after apply:
 

@@ -33,7 +33,9 @@ provider "kubernetes" {
 }
 
 provider "helm" {
-  kubernetes {
+  # Helm provider v3 uses a nested object (not a block). See:
+  # https://registry.terraform.io/providers/hashicorp/helm/latest/docs/guides/v3-upgrade-guide
+  kubernetes = {
     host                   = data.aws_eks_cluster.cluster.endpoint
     cluster_ca_certificate = base64decode(data.aws_eks_cluster.cluster.certificate_authority[0].data)
     token                  = data.aws_eks_cluster_auth.cluster.token
