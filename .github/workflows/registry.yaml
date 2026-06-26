@@ -84,3 +84,59 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha,scope=${{ matrix.app }}
           cache-to: type=gha,mode=max,scope=${{ matrix.app }}
+
+  bump-gitops:
+    needs: build
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Resolve target overlay and image tag
+        id: target
+        run: |
+          set -euo pipefail
+          SHORT_SHA="${GITHUB_SHA::7}"
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            ENVIRONMENT="production"
+            OVERLAY="production/devin/overlays/external/kustomization.yaml"
+          else
+            ENVIRONMENT="staging"
+            OVERLAY="staging/devin/overlays/external/kustomization.yaml"
+          fi
+          {
+            echo "sha=${SHORT_SHA}"
+            echo "environment=${ENVIRONMENT}"
+            echo "overlay=${OVERLAY}"
+          } >> "${GITHUB_OUTPUT}"
+
+      - name: Checkout ops (GitOps) repo
+        uses: actions/checkout@v4
+        with:
+          repository: rshdhere/ops
+          token: ${{ secrets.OPS_REPO_TOKEN }}
+          path: ops
+
+      - name: Bump image SHA
+        working-directory: ops
+        run: |
+          set -euo pipefail
+          OVERLAY="${{ steps.target.outputs.overlay }}"
+          SHA="${{ steps.target.outputs.sha }}"
+          # devin-orchestrator, devin-server, devin-web all carry `newTag:` in this overlay.
+          sed -i -E "s|^([[:space:]]*newTag:).*|\1 ${SHA}|" "${OVERLAY}"
+          echo "Updated ${OVERLAY}:"
+          git --no-pager diff -- "${OVERLAY}"
+
+      - name: Commit and push as actions-user
+        working-directory: ops
+        run: |
+          set -euo pipefail
+          OVERLAY="${{ steps.target.outputs.overlay }}"
+          if git diff --quiet -- "${OVERLAY}"; then
+            echo "No image changes — nothing to commit."
+            exit 0
+          fi
+          git config user.name "actions-user"
+          git config user.email "actions@github.com"
+          git add "${OVERLAY}"
+          git commit -m "chore(devin): update ${{ steps.target.outputs.environment }} images to ${{ steps.target.outputs.sha }}"
+          git push
