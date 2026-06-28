@@ -59,13 +59,11 @@ const authPlugins = [
     : []),
 ];
 
-if (githubClientId && githubClientSecret) {
+if (shouldUseOAuthProxy()) {
   authPlugins.unshift(
     oAuthProxy({
-      productionURL: resolveOAuthProductionUrl() ?? process.env.BETTER_AUTH_URL,
-      ...(shouldUseOAuthProxy()
-        ? { currentURL: process.env.BETTER_AUTH_URL }
-        : {}),
+      productionURL: resolveOAuthProductionUrl(),
+      currentURL: process.env.BETTER_AUTH_URL,
     }),
   );
 }

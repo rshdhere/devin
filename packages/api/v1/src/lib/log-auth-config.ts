@@ -7,30 +7,29 @@ import {
 } from "./auth-url.js";
 
 export function logAuthConfig() {
-  const githubClientId = process.env.GITHUB_CLIENT_ID?.trim();
+  const hasOAuth =
+    process.env.GITHUB_CLIENT_ID?.trim() ||
+    process.env.GOOGLE_CLIENT_ID?.trim();
 
-  if (!githubClientId) {
+  if (!hasOAuth) {
     return;
   }
 
   console.log(`auth base URL: ${getAuthPublicBaseUrl()}`);
-
-  if (shouldUseOAuthProxy()) {
-    console.log(
-      `GitHub OAuth proxy enabled via ${resolveOAuthProductionUrl()} (staging uses production callback URL).`,
-    );
-    console.log(
-      `Ensure production API (${resolveOAuthProductionUrl()}) has the same GITHUB_CLIENT_ID, GITHUB_CLIENT_SECRET, and BETTER_AUTH_SECRET.`,
-    );
-  }
-
   console.log(
-    `GitHub OAuth callback URL (register in GitHub App settings): ${getEffectiveGitHubOAuthCallbackUrl()}`,
+    `OAuth callback URLs (register in provider consoles): ${getAuthPublicBaseUrl()}/callback/{provider}`,
   );
 
   if (shouldUseOAuthProxy()) {
     console.log(
-      `Local callback URL (not sent to GitHub): ${getGitHubOAuthCallbackUrl()}`,
+      `OAuth proxy enabled via ${resolveOAuthProductionUrl()} (sign-in uses production callback URL).`,
     );
+    console.log(
+      `Ensure production API (${resolveOAuthProductionUrl()}) shares GITHUB/GOOGLE credentials and BETTER_AUTH_SECRET.`,
+    );
+    console.log(
+      `Proxied GitHub callback URL: ${getEffectiveGitHubOAuthCallbackUrl()}`,
+    );
+    console.log(`Local callback URL: ${getGitHubOAuthCallbackUrl()}`);
   }
 }

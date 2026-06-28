@@ -708,11 +708,14 @@ stringData:
 
 **GitHub OAuth callback URL:** `https://api.yourdomain.com/api/v1/auth/callback/github`
 
-**Staging (`staging-api.devin.baby`):** also register `https://staging-api.devin.baby/api/v1/auth/callback/github` in the same GitHub OAuth App. Without it, GitHub rejects the redirect with “The redirect_uri is not associated with this application.”
+**Staging (`staging-api.devin.baby`):** register provider callbacks on the staging API host, for example:
 
-Alternatively, set `OAUTH_PRODUCTION_URL=https://api.devin.baby` on the staging server so sign-in flows reuse the production callback URL. That requires the production API (`api.devin.baby`) to use the same `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, and `BETTER_AUTH_SECRET` as staging. Account-linking flows (`linkSocial`, e.g. “Request repository access”) still need the staging callback URL registered in GitHub.
+- GitHub: `https://staging-api.devin.baby/api/v1/auth/callback/github`
+- Google: `https://staging-api.devin.baby/api/v1/auth/callback/google`
 
-The server logs the exact callback URL to register on startup when `GITHUB_CLIENT_ID` is set.
+Do **not** set `OAUTH_PRODUCTION_URL` on staging unless you intentionally want sign-in to proxy through production. When that variable is set, Better Auth sends `https://api.devin.baby/...` to GitHub/Google instead of the staging host, which breaks OAuth if only staging callbacks are registered.
+
+The server logs the callback URL pattern on startup when OAuth providers are configured.
 
 Deploy server and web from your GitOps repo (see example manifests in §5–6 of this guide):
 

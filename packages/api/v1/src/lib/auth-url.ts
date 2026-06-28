@@ -24,17 +24,11 @@ export function getGitHubOAuthCallbackUrl(): string {
 
 export function resolveOAuthProductionUrl(): string | undefined {
   const explicit = process.env.OAUTH_PRODUCTION_URL?.trim();
-  if (explicit) {
-    return trimTrailingSlashes(explicit);
+  if (!explicit) {
+    return undefined;
   }
 
-  const authOrigin = getAuthPublicOrigin();
-
-  if (authOrigin === "https://staging-api.devin.baby") {
-    return "https://api.devin.baby";
-  }
-
-  return undefined;
+  return trimTrailingSlashes(explicit);
 }
 
 export function shouldUseOAuthProxy(): boolean {
