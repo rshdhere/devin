@@ -190,6 +190,13 @@ func Delete(ctx context.Context, containerID string, cfg Config) error {
 		NetNS:       netNSPath,
 		IfName:      "veth0",
 	}
+	if ip := strings.TrimSpace(cfg.GuestIP); ip != "" {
+		if !strings.Contains(ip, "/") {
+			ip += "/24"
+		}
+		runtimeConf.Args = [][2]string{{"IP", ip}}
+	}
+
 	if err := cniPlugin.DelNetworkList(ctx, networkConf, runtimeConf); err != nil {
 		return fmt.Errorf("delete cni network: %w", err)
 	}

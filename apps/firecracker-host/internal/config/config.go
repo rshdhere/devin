@@ -35,7 +35,8 @@ func LoadFromEnv() Config {
 		Port:            envInt("FIRECRACKER_HOST_PORT", 9092),
 		DryRun:          envBool("FIRECRACKER_DRY_RUN", true),
 		RuntimeFallback: envString("RUNTIME_URL", "http://localhost:8081"),
-		PoolSize:        envInt("FIRECRACKER_POOL_SIZE", 4),
+		// Golden snapshots embed a fixed guest IP; only one warmed VM can bind it.
+		PoolSize: envInt("FIRECRACKER_POOL_SIZE", 1),
 		DefaultRuntime:  envString("FIRECRACKER_DEFAULT_RUNTIME", "nextjs"),
 		KernelPath:      envString("FIRECRACKER_KERNEL_PATH", "/var/lib/devin/linux/vmlinux"),
 		SnapshotDir:     envString("FIRECRACKER_SNAPSHOT_DIR", "/var/lib/devin/snapshots"),

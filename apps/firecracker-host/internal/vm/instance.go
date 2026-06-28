@@ -3,11 +3,16 @@ package vm
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"net"
 	"net/http"
+	"os"
+	"path/filepath"
 	"time"
 
 	firecracker "github.com/firecracker-microvm/firecracker-go-sdk"
+
+	"github.com/rshdhere/devin/apps/firecracker-host/internal/cnihelper"
 )
 
 type Instance struct {
@@ -19,8 +24,9 @@ type Instance struct {
 	Phase      string
 	Message    string
 
-	machine *firecracker.Machine
-	cancel  context.CancelFunc
+	machine   *firecracker.Machine
+	cancel    context.CancelFunc
+	cniConfig cnihelper.Config
 }
 
 func (i *Instance) HealthCheck(ctx context.Context) error {
@@ -44,8 +50,20 @@ func (i *Instance) Shutdown(ctx context.Context) error {
 	if i.cancel != nil {
 		i.cancel()
 	}
-	if i.machine == nil {
-		return nil
+	var stopErr error
+	if i.machine != nil {
+		stopErr = i.machine.StopVMM()
 	}
-	return i.machine.StopVMM()
+	cniCfg := i.cniConfig
+	if cniCfg.GuestIP == "" && i.IP != nil {
+		cniCfg.GuestIP = i.IP.String()
+	}
+	if err := cnihelper.Delete(ctx, i.ID, cniCfg); err != nil {
+		slog.Warn("failed to release cni network", "vmId", i.ID, "error", err)
+		if stopErr == nil {
+			stopErr = err
+		}
+	}
+	_ = os.Remove(filepath.Join("/var/run/netns", i.ID))
+	return stopErr
 }

@@ -146,6 +146,12 @@ func (l *Launcher) Restore(ctx context.Context, vmID, name, runtime string, cpu 
 		Message:    "microVM restored from snapshot",
 		machine:    machine,
 		cancel:     cancel,
+		cniConfig: cnihelper.Config{
+			NetworkName: l.cfg.CNINetworkName,
+			ConfDir:     l.cfg.CNIConfDir,
+			BinPath:     l.cfg.CNIBinPath,
+			GuestIP:     meta.GuestIP,
+		},
 	}
 
 	slog.Info("waiting for runtime health",

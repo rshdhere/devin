@@ -61,6 +61,18 @@ if [[ "\$SCHEDULER_NEEDS_RESTART" -eq 1 ]]; then
   systemctl daemon-reload
 fi
 
+if [[ -f /etc/systemd/system/devin-scheduler.service ]] && ! grep -q SANDBOX_READY_TIMEOUT_SECONDS /etc/systemd/system/devin-scheduler.service; then
+  sed -i '/-e DEFAULT_AGENT=mock/a\  -e SANDBOX_READY_TIMEOUT_SECONDS=120 \\\n  -e RUNTIME_READY_TIMEOUT_SECONDS=60 \\' /etc/systemd/system/devin-scheduler.service
+  systemctl daemon-reload
+  SCHEDULER_NEEDS_RESTART=1
+fi
+
+if [[ -f /etc/systemd/system/devin-firecracker-host.service ]] && grep -q 'FIRECRACKER_POOL_SIZE=8' /etc/systemd/system/devin-firecracker-host.service; then
+  sed -i 's/FIRECRACKER_POOL_SIZE=8/FIRECRACKER_POOL_SIZE=1/' /etc/systemd/system/devin-firecracker-host.service
+  systemctl daemon-reload
+  systemctl restart devin-firecracker-host.service 2>/dev/null || true
+fi
+
 if [[ -d /var/lib/devin/snapshots/nextjs ]] || [[ -d /var/lib/devin/snapshots/agent ]]; then
   systemctl enable --now devin-firecracker-host.service 2>/dev/null || true
 fi
