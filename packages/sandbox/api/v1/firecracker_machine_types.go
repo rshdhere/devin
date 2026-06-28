@@ -36,7 +36,7 @@ type FirecrackerMachineStatus struct {
 
 type FirecrackerMachine struct {
 	metav1.TypeMeta   `json:",inline"`
-	metav1.ObjectMeta `json:",inline"`
+	metav1.ObjectMeta `json:"metadata,omitempty"`
 
 	Spec   FirecrackerMachineSpec   `json:"spec,omitempty"`
 	Status FirecrackerMachineStatus `json:"status,omitempty"`
@@ -44,7 +44,7 @@ type FirecrackerMachine struct {
 
 type FirecrackerMachineList struct {
 	metav1.TypeMeta `json:",inline"`
-	metav1.ListMeta `json:",inline"`
+	metav1.ListMeta `json:"metadata,omitempty"`
 	Items           []FirecrackerMachine `json:"items"`
 }
 

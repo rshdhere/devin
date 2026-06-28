@@ -73,6 +73,10 @@ func (s *InternalServer) handleCreateSandbox(w http.ResponseWriter, r *http.Requ
 	}
 
 	sandbox := &devinv1.Sandbox{
+		TypeMeta: metav1.TypeMeta{
+			APIVersion: devinv1.GroupVersion.String(),
+			Kind:       "Sandbox",
+		},
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      req.Name,
 			Namespace: s.namespace,

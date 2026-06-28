@@ -37,7 +37,7 @@ type SandboxStatus struct {
 
 type Sandbox struct {
 	metav1.TypeMeta   `json:",inline"`
-	metav1.ObjectMeta `json:",inline"`
+	metav1.ObjectMeta `json:"metadata,omitempty"`
 
 	Spec   SandboxSpec   `json:"spec,omitempty"`
 	Status SandboxStatus `json:"status,omitempty"`
@@ -45,7 +45,7 @@ type Sandbox struct {
 
 type SandboxList struct {
 	metav1.TypeMeta `json:",inline"`
-	metav1.ListMeta `json:",inline"`
+	metav1.ListMeta `json:"metadata,omitempty"`
 	Items           []Sandbox `json:"items"`
 }
 

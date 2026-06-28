@@ -104,10 +104,21 @@ After `terraform apply`, note:
 
 ## Access execution hosts (private subnet)
 
-Execution hosts have **no public IP**. Use **SSM Session Manager** (not direct SSH from the internet):
+Execution hosts have **no public IP**. Use **SSM Session Manager** (not direct SSH from the internet).
+
+### One-time: Session Manager plugin
+
+`aws ssm start-session` requires the [Session Manager plugin](https://docs.aws.amazon.com/systems-manager/latest/userguide/session-manager-working-with-install-plugin.html) on your laptop (separate from the AWS CLI):
 
 ```sh
-# Requires enable_ssm_iam = true and a recent terraform apply
+./infra/scripts/install-session-manager-plugin.sh
+session-manager-plugin --version
+```
+
+### Connect
+
+```sh
+cd infra
 INSTANCE_ID=$(terraform output -json execution_hosts | jq -r '.["fc-01"].instance_id')
 aws ssm start-session --region ap-south-1 --target "$INSTANCE_ID"
 ```

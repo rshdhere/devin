@@ -10,7 +10,9 @@ INSTANCE_ID="$1"
 AWS_REGION="${2:-${AWS_REGION:-ap-south-1}}"
 SSM_PREFIX="${3:-/${DEVIN_NAME_PREFIX:-devin-production}/platform}"
 
+# SSM RunShellScript uses /bin/sh unless the script starts with #!/bin/bash
 COMMAND=$(cat <<EOS
+#!/bin/bash
 set -euo pipefail
 export AWS_REGION="${AWS_REGION}"
 export SSM_PREFIX="${SSM_PREFIX}"

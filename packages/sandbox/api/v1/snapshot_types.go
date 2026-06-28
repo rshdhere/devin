@@ -17,7 +17,7 @@ type SnapshotStatus struct {
 
 type Snapshot struct {
 	metav1.TypeMeta   `json:",inline"`
-	metav1.ObjectMeta `json:",inline"`
+	metav1.ObjectMeta `json:"metadata,omitempty"`
 
 	Spec   SnapshotSpec   `json:"spec,omitempty"`
 	Status SnapshotStatus `json:"status,omitempty"`
@@ -25,7 +25,7 @@ type Snapshot struct {
 
 type SnapshotList struct {
 	metav1.TypeMeta `json:",inline"`
-	metav1.ListMeta `json:",inline"`
+	metav1.ListMeta `json:"metadata,omitempty"`
 	Items           []Snapshot `json:"items"`
 }
 
