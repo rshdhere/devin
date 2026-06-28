@@ -4,6 +4,7 @@ import { sendMagicLinkEmail, sendVerificationEmail } from "@devin/email";
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { genericOAuth, magicLink } from "better-auth/plugins";
+import { getAllowedOrigins } from "./cors.js";
 import { deliverVerificationEmail } from "./verification-email.js";
 
 const githubClientId = process.env.GITHUB_CLIENT_ID;
@@ -48,10 +49,7 @@ export const auth = betterAuth({
   basePath: "/api/v1/auth",
   baseURL: process.env.BETTER_AUTH_URL,
   secret: process.env.BETTER_AUTH_SECRET,
-  trustedOrigins: [
-    process.env.WEB_APP_URL ?? "http://localhost:3000",
-    process.env.BETTER_AUTH_URL ?? "http://localhost:8080",
-  ],
+  trustedOrigins: getAllowedOrigins(),
   emailAndPassword: {
     enabled: true,
     requireEmailVerification: true,

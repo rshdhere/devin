@@ -1,16 +1,15 @@
 import express from "express";
 import { toNodeHandler } from "better-auth/node";
 import { auth } from "./lib/auth.js";
+import { isAllowedOrigin } from "./lib/cors.js";
 import { router } from "./routes/index.js";
 
 export const app = express();
 
-const webAppUrl = process.env.WEB_APP_URL ?? "http://localhost:3000";
-
 app.use((req, res, next) => {
   const origin = req.headers.origin;
 
-  if (origin === webAppUrl) {
+  if (isAllowedOrigin(origin)) {
     res.setHeader("Access-Control-Allow-Origin", origin);
     res.setHeader("Access-Control-Allow-Credentials", "true");
     res.setHeader(
