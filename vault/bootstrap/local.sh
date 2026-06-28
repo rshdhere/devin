@@ -61,7 +61,9 @@ vault kv put secret/dev/scheduler \
 
 vault kv put secret/dev/ci \
   DOCKERHUB_USERNAME="" \
-  DOCKERHUB_TOKEN=""
+  DOCKERHUB_TOKEN="" \
+  NEXT_PUBLIC_API_URL="http://localhost:8080" \
+  NEXT_PUBLIC_WEB_APP_URL="http://localhost:3000"
 
 echo ""
 echo "Local Vault is ready."

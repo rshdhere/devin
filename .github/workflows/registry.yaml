@@ -58,6 +58,19 @@ jobs:
             type=sha,prefix=,format=long
             type=ref,event=tag
 
+      - name: Validate web build args
+        if: matrix.app == 'web' && github.event_name != 'pull_request'
+        run: |
+          set -euo pipefail
+          missing=()
+          [[ -z "${{ vars.NEXT_PUBLIC_API_URL }}" ]] && missing+=("NEXT_PUBLIC_API_URL")
+          [[ -z "${{ vars.NEXT_PUBLIC_WEB_APP_URL }}" ]] && missing+=("NEXT_PUBLIC_WEB_APP_URL")
+          if ((${#missing[@]} > 0)); then
+            echo "::error::Missing GitHub repository variables: ${missing[*]}"
+            echo "Set them to match secret/prod/ci in Vault (e.g. NEXT_PUBLIC_API_URL=https://api.devin.baby)."
+            exit 1
+          fi
+
       - name: Build and push web
         if: matrix.app == 'web'
         uses: docker/build-push-action@v6

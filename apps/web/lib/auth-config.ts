@@ -1,6 +1,7 @@
-const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080";
+const apiUrl =
+  process.env.NEXT_PUBLIC_API_URL?.trim() || "http://localhost:8080";
 const webAppUrl =
-  process.env.NEXT_PUBLIC_WEB_APP_URL ?? "http://localhost:3000";
+  process.env.NEXT_PUBLIC_WEB_APP_URL?.trim() || "http://localhost:3000";
 
 export const authConfig = {
   baseURL: apiUrl,

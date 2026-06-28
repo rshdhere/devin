@@ -8,7 +8,7 @@ All application secrets live in **Vault KV v2** instead of `.env` files, plain K
 | --- | --- | --- |
 | `secret/dev/server` | API server (local) | `BETTER_AUTH_SECRET`, `DATABASE_URL`, `SCHEDULER_URL`, OAuth, Resend |
 | `secret/dev/scheduler` | Scheduler (local / EC2) | `ORCHESTRATOR_URL`, `CURSOR_API_KEY`, `ANTHROPIC_API_KEY` |
-| `secret/dev/ci` | GitHub Actions | `DOCKERHUB_USERNAME`, `DOCKERHUB_TOKEN` |
+| `secret/dev/ci` | GitHub Actions | `DOCKERHUB_USERNAME`, `DOCKERHUB_TOKEN`, `NEXT_PUBLIC_API_URL`, `NEXT_PUBLIC_WEB_APP_URL` |
 | `secret/prod/server` | EKS `devin-server` | Same as dev |
 | `secret/prod/scheduler` | EC2 execution hosts | Scheduler + agent keys |
 
@@ -114,7 +114,9 @@ Migrate GitHub Actions secrets to Vault:
 ```sh
 vault kv put secret/prod/ci \
   DOCKERHUB_USERNAME="..." \
-  DOCKERHUB_TOKEN="..."
+  DOCKERHUB_TOKEN="..." \
+  NEXT_PUBLIC_API_URL="https://api.devin.baby" \
+  NEXT_PUBLIC_WEB_APP_URL="https://devin.baby"
 ```
 
 In `.github/workflows/registry.yaml`, replace `${{ secrets.* }}` with a job that authenticates to Vault (OIDC or AppRole) and exports credentials before `docker login`. A full CI integration can be added in a follow-up.
