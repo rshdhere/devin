@@ -586,7 +586,6 @@ Use **Neon** for production Postgres. Do not run Postgres in the Kubernetes clus
 ```sh
 export DATABASE_URL='postgres://user:pass@ep-xxx.us-east-1.aws.neon.tech/devin?sslmode=require'
 bun run migrate
-psql "$DATABASE_URL" -f packages/drizzle/drizzle/0001_github_settings.sql
 ```
 
 Set `DATABASE_URL` in the `devin-server` secret (see [§6](#6-deploy-api-server-and-web)). Use the Neon hostname — not an in-cluster service name.
@@ -669,7 +668,6 @@ spec:
 kubectl apply -f <your-gitops-path>/postgres.yaml
 export DATABASE_URL=postgres://postgres:change-me@<postgres-host>:5432/devin
 bun run migrate
-psql "$DATABASE_URL" -f packages/drizzle/drizzle/0001_github_settings.sql
 ```
 
 </details>

@@ -9,7 +9,7 @@
     "check-types": "turbo run check-types",
     "prepare": "husky",
     "schema": "cd packages/drizzle && bunx drizzle-lab@latest visualizer",
-    "migrate": "cd packages/drizzle && bunx drizzle-kit push",
+    "migrate": "cd packages/drizzle && bun run migrate",
     "studio": "cd packages/drizzle && bunx drizzle-kit studio"
   },
   "devDependencies": {
