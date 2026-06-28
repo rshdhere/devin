@@ -62,6 +62,22 @@ resource "aws_security_group" "execution_host" {
   }
 
   egress {
+    description = "HTTP for apt and package mirrors"
+    from_port   = 80
+    to_port     = 80
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  egress {
+    description = "DNS resolution"
+    from_port   = 53
+    to_port     = 53
+    protocol    = "udp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  egress {
     description = "HTTPS for GitHub, agent APIs, Docker Hub"
     from_port   = 443
     to_port     = 443
@@ -121,6 +137,6 @@ resource "aws_instance" "execution_host" {
   })
 
   lifecycle {
-    ignore_changes = [ami, user_data]
+    ignore_changes = [ami]
   }
 }

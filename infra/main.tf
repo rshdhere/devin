@@ -93,6 +93,7 @@ resource "null_resource" "sync_execution_host_config" {
     instance_id      = module.execution_hosts[0].hosts[each.key].instance_id
     orchestrator_url = try(module.platform_connectivity[0].orchestrator_url, "")
     scheduler_url    = try(module.execution_hosts[0].hosts[each.key].scheduler, "")
+    nested_virt      = tostring(var.execution_host_enable_nested_virtualization)
   }
 
   provisioner "local-exec" {
@@ -100,7 +101,24 @@ resource "null_resource" "sync_execution_host_config" {
     interpreter = ["bash", "-c"]
   }
 
-  depends_on = [module.platform_connectivity]
+  depends_on = [null_resource.enable_execution_host_nested_virt, module.platform_connectivity]
+}
+
+resource "null_resource" "enable_execution_host_nested_virt" {
+  for_each = var.execution_host_enable_nested_virtualization && var.execution_host_count > 0 ? {
+    for i in range(var.execution_host_count) : format("fc-%02d", i + 1) => i
+  } : {}
+
+  triggers = {
+    instance_id = module.execution_hosts[0].hosts[each.key].instance_id
+  }
+
+  provisioner "local-exec" {
+    command     = "chmod +x ${path.module}/scripts/enable-nested-virtualization.sh && ${path.module}/scripts/enable-nested-virtualization.sh ${module.execution_hosts[0].hosts[each.key].instance_id} ${var.aws_region}"
+    interpreter = ["bash", "-c"]
+  }
+
+  depends_on = [module.execution_hosts]
 }
 
 # --- HashiCorp Vault (optional) ---

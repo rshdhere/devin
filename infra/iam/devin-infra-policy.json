@@ -60,6 +60,7 @@
         "ec2:DisassociateAddress",
         "ec2:DisassociateRouteTable",
         "ec2:ModifyInstanceAttribute",
+        "ec2:ModifyInstanceCpuOptions",
         "ec2:AssociateIamInstanceProfile",
         "ec2:ReplaceIamInstanceProfile",
         "ec2:DisassociateIamInstanceProfile",

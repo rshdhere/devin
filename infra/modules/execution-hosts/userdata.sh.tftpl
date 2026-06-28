@@ -8,7 +8,16 @@ set -euo pipefail
 export DEBIAN_FRONTEND=noninteractive
 
 apt-get update -y
-apt-get install -y curl ca-certificates gnupg jq awscli
+apt-get install -y curl ca-certificates gnupg jq unzip
+
+# AWS CLI v2 (the awscli apt package is unavailable on Ubuntu 24.04 noble)
+if ! command -v aws &>/dev/null; then
+  tmpdir="$(mktemp -d)"
+  curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "$tmpdir/awscliv2.zip"
+  unzip -q "$tmpdir/awscliv2.zip" -d "$tmpdir"
+  "$tmpdir/aws/install"
+  rm -rf "$tmpdir"
+fi
 
 # SSM Agent — required for Session Manager on private execution hosts (no public IP)
 if ! systemctl is-active --quiet amazon-ssm-agent 2>/dev/null; then
@@ -26,12 +35,35 @@ if ! command -v docker &>/dev/null; then
   systemctl enable --now docker
 fi
 
-# CNI directories for firecracker-host
+# CNI directories for firecracker-host and snapshot builds
 mkdir -p /etc/cni/conf.d /opt/cni/bin /var/lib/devin/linux /var/lib/devin/snapshots /var/lib/devin/vms
 
+cat >/etc/cni/conf.d/fcnet.conflist <<'CNI'
+{
+  "cniVersion": "0.4.0",
+  "name": "fcnet",
+  "plugins": [
+    {
+      "type": "ptp",
+      "ipMasq": true,
+      "ipam": {
+        "type": "host-local",
+        "subnet": "192.168.127.0/24",
+        "resolvConf": "/etc/resolv.conf"
+      }
+    },
+    {
+      "type": "tc-redirect-tap"
+    }
+  ]
+}
+CNI
+
 # Verify KVM (required for Firecracker)
-if [[ ! -e /dev/kvm ]]; then
-  echo "WARNING: /dev/kvm not found — instance type may not support hardware virtualization" >&2
+if [[ -d /dev/kvm && ! -c /dev/kvm ]]; then
+  echo "WARNING: /dev/kvm is a directory — remove before starting firecracker-host" >&2
+elif [[ ! -c /dev/kvm ]]; then
+  echo "WARNING: /dev/kvm not found — enable nested virtualization on C7i (see infra/README.md)" >&2
 fi
 
 # Systemd unit templates — scheduler ORCHESTRATOR_URL is updated by devin-sync-platform-config
@@ -47,6 +79,7 @@ RestartSec=5
 ExecStart=/usr/bin/docker run --rm --name firecracker-host \\
   --privileged \\
   --network host \\
+  -v /dev/kvm:/dev/kvm \\
   -v /var/lib/devin:/var/lib/devin \\
   -v /etc/cni/conf.d:/etc/cni/conf.d:ro \\
   -e FIRECRACKER_DRY_RUN=false \\
@@ -119,8 +152,12 @@ EOF
   systemctl daemon-reload
 fi
 
-if [[ -d /var/lib/devin/snapshots/nextjs ]] || [[ -d /var/lib/devin/snapshots/agent ]]; then
-  systemctl enable --now devin-firecracker-host.service || true
+if [[ -d /var/lib/devin/snapshots/nextjs ]] || [[ -f /var/lib/devin/snapshots/nextjs/meta.json ]] || [[ -d /var/lib/devin/snapshots/agent ]]; then
+  if [[ -c /dev/kvm ]]; then
+    systemctl enable --now devin-firecracker-host.service || true
+  else
+    echo "Skipping firecracker-host until /dev/kvm is a character device" >&2
+  fi
 fi
 
 systemctl enable --now devin-scheduler.service || true

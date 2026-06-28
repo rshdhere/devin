@@ -113,9 +113,15 @@ variable "execution_host_count" {
 }
 
 variable "execution_host_instance_type" {
-  description = "EC2 instance type with hardware KVM (c7i.2xlarge or c5.metal per deployment.md)."
+  description = "EC2 instance type with nested virtualization support (c7i.2xlarge recommended; c5.metal for bare metal)."
   type        = string
   default     = "c7i.2xlarge"
+}
+
+variable "execution_host_enable_nested_virtualization" {
+  description = "Set NestedVirtualization=enabled on execution hosts (required for Firecracker /dev/kvm)."
+  type        = bool
+  default     = true
 }
 
 variable "execution_host_root_volume_size" {

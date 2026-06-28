@@ -30,7 +30,7 @@ variable "host_count" {
 }
 
 variable "instance_type" {
-  description = "EC2 instance type (compute-optimized with KVM; see deployment.md)."
+  description = "EC2 instance type (c7i.2xlarge with nested virt, or c5.metal bare metal)."
   type        = string
   default     = "c7i.2xlarge"
 }

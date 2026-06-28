@@ -140,7 +140,51 @@ terraform apply -replace='module.execution_hosts[0].aws_instance.execution_host[
 
 SSH on port 22 is only reachable from `execution_host_admin_ssh_cidr_blocks` **inside the VPC** (e.g. via SSM port forwarding or a bastion), not from the public internet.
 
-## Post-apply checklist (deployment.md)
+## Execution host bootstrap (Path B)
+
+After `terraform apply`, the execution host needs **nested virtualization**, **platform sync**, and **Firecracker snapshots**.
+
+### 1. IAM — nested virtualization
+
+`devin-infra` needs `ec2:ModifyInstanceCpuOptions` (added in `infra/iam/devin-infra-policy.json`). Merge to `main` so GitHub Actions syncs the policy, or apply as admin:
+
+```sh
+cd infra/iam && terraform apply   # admin credentials only
+```
+
+Then enable nested virt on C7i:
+
+```sh
+./infra/scripts/enable-nested-virtualization.sh $(terraform -chdir=infra output -json execution_hosts | jq -r '."fc-01".instance_id')
+```
+
+### 2. Host bootstrap (if cloud-init failed)
+
+Ubuntu 24.04 has no `awscli` apt package — userdata installs AWS CLI v2. If the first boot failed (missing egress HTTP/DNS), re-run:
+
+```sh
+./infra/scripts/rebootstrap-execution-host.sh <instance-id> ap-south-1
+```
+
+### 3. Firecracker snapshots
+
+```sh
+./infra/scripts/run-ssm-bootstrap-snapshots.sh <instance-id> ap-south-1
+```
+
+Verify on the host:
+
+```sh
+curl -s http://127.0.0.1:9091/health
+curl -s http://127.0.0.1:9092/v1/status   # readyVMs > 0 after snapshots
+ls -l /dev/kvm                             # must be a character device
+```
+
+### 4. GitOps (separate repo)
+
+Sync `infra/generated/firecracker-hosts.yaml` into `rshdhere/ops` (`staging/devin/overlays/external/firecracker-hosts.yaml`) so the orchestrator registers the host IP.
+
+---
 
 1. **Neon** — create Postgres project; set `DATABASE_URL` in GitOps secrets
 2. **Build & push images** to Docker Hub

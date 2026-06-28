@@ -6,8 +6,8 @@ metadata:
   name: devin-production-fc-01
   namespace: devin-firecracker
 spec:
-  address: http://10.0.7.138:9092
-  schedulerAddress: http://10.0.7.138:9091
+  address: http://10.0.4.73:9092
+  schedulerAddress: http://10.0.4.73:9091
   capacity:
     cpu: 8
     memory: 16Gi
