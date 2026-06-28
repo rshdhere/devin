@@ -79,6 +79,31 @@ output "execution_hosts" {
   value       = try(module.execution_hosts[0].hosts, {})
 }
 
+output "scheduler_url" {
+  description = "Primary scheduler URL — set on devin-server as SCHEDULER_URL."
+  value       = try(module.platform_connectivity[0].scheduler_url, try(values(local.execution_hosts)[0].scheduler, null))
+}
+
+output "orchestrator_url" {
+  description = "Orchestrator URL published to execution host schedulers via SSM."
+  value       = try(module.platform_connectivity[0].orchestrator_url, null)
+}
+
+output "firecracker_hosts_gitops_path" {
+  description = "Generated FirecrackerHost YAML for GitOps sync."
+  value       = try(module.platform_connectivity[0].firecracker_hosts_gitops_path, null)
+}
+
+output "ssm_scheduler_url_parameter" {
+  description = "SSM parameter storing scheduler_url."
+  value       = try(module.platform_connectivity[0].ssm_scheduler_url_parameter, null)
+}
+
+output "ssm_orchestrator_url_parameter" {
+  description = "SSM parameter storing orchestrator_url."
+  value       = try(module.platform_connectivity[0].ssm_orchestrator_url_parameter, null)
+}
+
 output "configure_kubectl" {
   description = "Command to configure kubectl for the EKS cluster."
   value       = "aws eks update-kubeconfig --region ${var.aws_region} --name ${module.eks.cluster_name}"

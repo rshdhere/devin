@@ -32,6 +32,15 @@ module "eks" {
   depends_on = [module.vpc]
 }
 
+locals {
+  execution_hosts = try(module.execution_hosts[0].hosts, {})
+  primary_scheduler_url = try(
+    values(local.execution_hosts)[0].scheduler,
+    null,
+  )
+  ssm_parameter_prefix = "/${local.name_prefix}/platform"
+}
+
 module "execution_hosts" {
   source = "./modules/execution-hosts"
   count  = var.execution_host_count > 0 ? 1 : 0
@@ -48,9 +57,50 @@ module "execution_hosts" {
   admin_ssh_cidr_blocks      = var.execution_host_admin_ssh_cidr_blocks
   container_registry         = var.container_registry
   image_tag                  = var.container_image_tag
+  aws_region                 = var.aws_region
+  ssm_parameter_prefix       = local.ssm_parameter_prefix
+  enable_ssm_iam             = var.enable_ssm_iam
   tags                       = var.tags
 
   depends_on = [module.eks]
+}
+
+module "platform_connectivity" {
+  source = "./modules/platform-connectivity"
+  count  = var.execution_host_count > 0 && local.primary_scheduler_url != null ? 1 : 0
+
+  name_prefix                      = local.name_prefix
+  scheduler_url                    = local.primary_scheduler_url
+  manage_orchestrator_nlb          = var.manage_orchestrator_nlb
+  orchestrator_namespace           = var.orchestrator_namespace
+  orchestrator_url_override        = var.orchestrator_url_override
+  manage_ssm_parameters            = var.manage_ssm_parameters
+  sync_scheduler_url_to_kubernetes = var.sync_scheduler_url_to_kubernetes
+  server_secret_namespaces         = var.server_secret_namespaces
+  firecracker_hosts_gitops_path    = var.generate_firecracker_hosts_gitops ? "${path.module}/generated/firecracker-hosts.yaml" : null
+  execution_hosts                  = local.execution_hosts
+  tags                             = var.tags
+
+  depends_on = [module.execution_hosts]
+}
+
+resource "null_resource" "sync_execution_host_config" {
+  for_each = var.sync_execution_host_config && length(local.execution_hosts) > 0 ? {
+    for key, host in local.execution_hosts : key => host.instance_id
+  } : {}
+
+  triggers = {
+    instance_id      = each.value
+    orchestrator_url = try(module.platform_connectivity[0].orchestrator_url, "")
+    scheduler_url    = local.primary_scheduler_url
+  }
+
+  provisioner "local-exec" {
+    command     = "${path.module}/scripts/sync-execution-host-config.sh ${each.value} ${var.aws_region} ${local.ssm_parameter_prefix}"
+    interpreter = ["bash", "-c"]
+  }
+
+  depends_on = [module.platform_connectivity]
 }
 
 # --- HashiCorp Vault (optional) ---

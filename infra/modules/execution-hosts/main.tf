@@ -94,6 +94,7 @@ resource "aws_instance" "execution_host" {
   subnet_id              = var.private_subnet_ids[each.value % length(var.private_subnet_ids)]
   vpc_security_group_ids = [aws_security_group.execution_host.id]
   key_name               = var.ssh_key_name
+  iam_instance_profile   = var.enable_ssm_iam ? aws_iam_instance_profile.execution_host[0].name : null
 
   root_block_device {
     volume_size = var.root_volume_size
@@ -107,9 +108,11 @@ resource "aws_instance" "execution_host" {
   }
 
   user_data = base64encode(templatefile("${path.module}/userdata.sh.tftpl", {
-    host_name          = "${var.name_prefix}-${each.key}"
-    container_registry = var.container_registry
-    image_tag          = var.image_tag
+    host_name            = "${var.name_prefix}-${each.key}"
+    container_registry     = var.container_registry
+    image_tag              = var.image_tag
+    aws_region             = var.aws_region
+    ssm_parameter_prefix   = var.ssm_parameter_prefix
   }))
 
   tags = merge(var.tags, {

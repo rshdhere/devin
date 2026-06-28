@@ -97,17 +97,46 @@ After `terraform apply`, note:
 
 - `container_registry` — Docker Hub prefix for image references
 - `execution_hosts` — private IPs for GitOps `FirecrackerHost` CRs
+- `scheduler_url` — primary scheduler URL for `devin-server` (`SCHEDULER_URL`)
+- `orchestrator_url` — orchestrator endpoint for execution host schedulers
+- `firecracker_hosts_gitops_path` — generated YAML to sync into GitOps
 - `eks_oidc_provider_arn` — install [AWS Load Balancer Controller](https://docs.aws.amazon.com/eks/latest/userguide/aws-load-balancer-controller.html) via IRSA in GitOps
 
 ## Post-apply checklist (deployment.md)
 
 1. **Neon** — create Postgres project; set `DATABASE_URL` in GitOps secrets
 2. **Build & push images** to Docker Hub
-3. **Execution hosts** — SSH in, `docker login` if needed, build snapshots (§2), copy CNI config, set `ORCHESTRATOR_URL`, enable systemd units
-4. **GitOps** — sync `overlays/<env>-external`; register `FirecrackerHost` CRs with `terraform output execution_hosts`
+3. **Execution hosts** — Terraform writes SSM platform URLs and runs SSM bootstrap; verify `curl http://127.0.0.1:9091/health` on the host
+4. **GitOps** — sync `infra/generated/firecracker-hosts.yaml` (or `terraform output execution_hosts`) into your ops repo `firecracker-hosts.yaml`
 5. **Ingress** — AWS Load Balancer Controller + ACM in GitOps
-6. **Orchestrator NLB** — internal NLB on `:9090` for execution host schedulers
-7. **Vault** (optional) — `enable_vault = true` in Terraform; see [vault/README.md](../vault/README.md)
+6. **Vault / External Secrets** — set `SCHEDULER_URL` to `terraform output -raw scheduler_url` in `secret/prod/server` and `secret/staging/server` so ESO does not overwrite kubectl patches
+7. **Verify** — `kubectl -n devin-staging exec deploy/devin-server -- wget -qO- $(terraform output -raw scheduler_url)/health`
+
+Terraform now also:
+
+- Creates an **internal NLB** Service for `devin-orchestrator` (port 9090)
+- Publishes **`scheduler_url`** and **`orchestrator_url`** to SSM (`/devin-production/platform/*`)
+- Patches **`SCHEDULER_URL`** into `devin-server` secrets in `devin-app` and `devin-staging` (requires `kubectl` configured)
+- Bootstraps execution hosts via **SSM** to start the scheduler with the correct `ORCHESTRATOR_URL`
+
+Disable automation when needed:
+
+```hcl
+sync_scheduler_url_to_kubernetes = false
+sync_execution_host_config       = false
+manage_orchestrator_nlb          = false
+enable_ssm_iam                   = false
+manage_ssm_parameters            = false
+```
+
+Root `terraform.tfvars` keys (do not use module-internal names):
+
+| Variable | Purpose |
+| --- | --- |
+| `enable_ssm_iam` | EC2 instance profile for Session Manager on execution hosts |
+| `manage_ssm_parameters` | Write scheduler/orchestrator URLs to SSM |
+| `sync_execution_host_config` | SSM Run Command bootstrap after apply |
+| `sync_scheduler_url_to_kubernetes` | Patch `SCHEDULER_URL` on devin-server deployments |
 
 ## Kubernetes version upgrades
 

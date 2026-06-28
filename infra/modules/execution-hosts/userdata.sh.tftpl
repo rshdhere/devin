@@ -2,13 +2,13 @@
 set -euo pipefail
 
 # Bootstrap script for Firecracker execution hosts (Path B).
+# Platform URLs (ORCHESTRATOR_URL) are synced from SSM after Terraform apply.
 # Snapshots must be prepared separately — see deployment.md section 2.
-# Images are pulled from Docker Hub — run `docker login` on the host for private repos.
 
 export DEBIAN_FRONTEND=noninteractive
 
 apt-get update -y
-apt-get install -y curl ca-certificates gnupg jq
+apt-get install -y curl ca-certificates gnupg jq awscli
 
 # Docker
 if ! command -v docker &>/dev/null; then
@@ -24,7 +24,7 @@ if [[ ! -e /dev/kvm ]]; then
   echo "WARNING: /dev/kvm not found — instance type may not support hardware virtualization" >&2
 fi
 
-# Systemd unit templates — enable after /var/lib/devin/snapshots are populated
+# Systemd unit templates — scheduler ORCHESTRATOR_URL is updated by devin-sync-platform-config
 cat >/etc/systemd/system/devin-firecracker-host.service <<UNIT
 [Unit]
 Description=devin.baby firecracker-host
@@ -68,10 +68,11 @@ Wants=devin-firecracker-host.service
 [Service]
 Restart=always
 RestartSec=5
+Environment=ORCHESTRATOR_URL=http://pending-ssm-sync:9090
 ExecStart=/usr/bin/docker run --rm --name scheduler \\
   --network host \\
   -e SCHEDULER_PORT=9091 \\
-  -e ORCHESTRATOR_URL=http://REPLACE_WITH_ORCHESTRATOR_NLB:9090 \\
+  -e ORCHESTRATOR_URL=$${ORCHESTRATOR_URL} \\
   -e DEFAULT_AGENT=mock \\
   ${container_registry}/devin-scheduler:${image_tag}
 ExecStop=/usr/bin/docker stop scheduler
@@ -80,12 +81,74 @@ ExecStop=/usr/bin/docker stop scheduler
 WantedBy=multi-user.target
 UNIT
 
+cat >/usr/local/bin/devin-sync-platform-config.sh <<SYNC
+#!/bin/bash
+set -euo pipefail
+
+AWS_REGION="${aws_region}"
+SSM_PREFIX="${ssm_parameter_prefix}"
+
+read_ssm() {
+  local name="\$1"
+  aws ssm get-parameter \\
+    --region "\$AWS_REGION" \\
+    --name "\$name" \\
+    --query Parameter.Value \\
+    --output text 2>/dev/null || true
+}
+
+ORCHESTRATOR_URL="\$(read_ssm "\$SSM_PREFIX/orchestrator_url")"
+if [[ -z "\$ORCHESTRATOR_URL" || "\$ORCHESTRATOR_URL" == http://REPLACE_AFTER_ORCHESTRATOR_NLB:* ]]; then
+  echo "Orchestrator URL not ready in SSM yet (\$SSM_PREFIX/orchestrator_url)" >&2
+else
+  mkdir -p /etc/systemd/system/devin-scheduler.service.d
+  cat >/etc/systemd/system/devin-scheduler.service.d/orchestrator.conf <<EOF
+[Service]
+Environment=ORCHESTRATOR_URL=\$ORCHESTRATOR_URL
+EOF
+  systemctl daemon-reload
+fi
+
+if [[ -d /var/lib/devin/snapshots/nextjs ]] || [[ -d /var/lib/devin/snapshots/agent ]]; then
+  systemctl enable --now devin-firecracker-host.service || true
+fi
+
+systemctl enable --now devin-scheduler.service || true
+SYNC
+chmod +x /usr/local/bin/devin-sync-platform-config.sh
+
+cat >/etc/systemd/system/devin-platform-sync.service <<'UNIT'
+[Unit]
+Description=Sync devin.baby platform config from SSM
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/devin-sync-platform-config.sh
+UNIT
+
+cat >/etc/systemd/system/devin-platform-sync.timer <<'UNIT'
+[Unit]
+Description=Periodically sync devin.baby platform config from SSM
+
+[Timer]
+OnBootSec=30
+OnUnitActiveSec=120
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+UNIT
+
 systemctl daemon-reload
+systemctl enable --now devin-platform-sync.timer
+/usr/local/bin/devin-sync-platform-config.sh || true
 
 echo "Execution host ${host_name} bootstrapped."
+echo "Platform URLs sync from SSM prefix ${ssm_parameter_prefix}"
 echo "Next steps (deployment.md):"
 echo "  1. docker login (if using private Docker Hub repos)"
 echo "  2. Build Firecracker snapshots under /var/lib/devin"
 echo "  3. Copy CNI config: fcnet.conflist to /etc/cni/conf.d/"
-echo "  4. Set ORCHESTRATOR_URL in /etc/systemd/system/devin-scheduler.service"
-echo "  5. systemctl enable --now devin-firecracker-host devin-scheduler"
+echo "  4. terraform apply (writes SSM + patches devin-server SCHEDULER_URL)"

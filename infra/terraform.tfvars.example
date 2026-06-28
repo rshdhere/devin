@@ -30,6 +30,11 @@ execution_host_root_volume_size = 200
 
 # HashiCorp Vault on EKS (optional — see vault/README.md)
 # enable_vault          = true
+
+# Enable after applying infra/iam policy updates (CreateInstanceProfile + SSM actions)
+# enable_ssm_iam             = true
+# manage_ssm_parameters      = true
+# sync_execution_host_config = true
 # vault_ha_enabled      = false
 # vault_ingress_enabled = false
 # vault_ingress_host      = "vault.internal"

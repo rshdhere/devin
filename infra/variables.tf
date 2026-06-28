@@ -147,6 +147,62 @@ variable "container_image_tag" {
   default     = "latest"
 }
 
+# --- Platform connectivity (Path B) ---
+
+variable "manage_orchestrator_nlb" {
+  description = "Create an internal NLB Service for devin-orchestrator (Path B execution hosts)."
+  type        = bool
+  default     = true
+}
+
+variable "orchestrator_namespace" {
+  description = "Namespace where devin-orchestrator runs."
+  type        = string
+  default     = "devin-system"
+}
+
+variable "orchestrator_url_override" {
+  description = "Optional fixed orchestrator URL for execution host schedulers. Leave null to use the internal NLB."
+  type        = string
+  default     = null
+}
+
+variable "sync_scheduler_url_to_kubernetes" {
+  description = "Patch SCHEDULER_URL into devin-server secrets after apply (requires kubectl)."
+  type        = bool
+  default     = true
+}
+
+variable "server_secret_namespaces" {
+  description = "Namespaces whose devin-server secret receives SCHEDULER_URL."
+  type        = list(string)
+  default     = ["devin-app", "devin-staging"]
+}
+
+variable "sync_execution_host_config" {
+  description = "Run SSM bootstrap on execution hosts after apply to start scheduler with SSM URLs."
+  type        = bool
+  default     = true
+}
+
+variable "generate_firecracker_hosts_gitops" {
+  description = "Write infra/generated/firecracker-hosts.yaml from Terraform execution host IPs."
+  type        = bool
+  default     = true
+}
+
+variable "manage_ssm_parameters" {
+  description = "Write platform URLs to SSM (requires ssm:PutParameter)."
+  type        = bool
+  default     = true
+}
+
+variable "enable_ssm_iam" {
+  description = "Attach IAM instance profile for SSM on execution hosts (Session Manager + platform config). Requires iam:CreateInstanceProfile on the Terraform user."
+  type        = bool
+  default     = true
+}
+
 # --- HashiCorp Vault ---
 
 variable "enable_vault" {

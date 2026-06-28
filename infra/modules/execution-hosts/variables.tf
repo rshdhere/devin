@@ -81,3 +81,19 @@ variable "tags" {
   type        = map(string)
   default     = {}
 }
+
+variable "aws_region" {
+  description = "AWS region for SSM parameter reads in bootstrap scripts."
+  type        = string
+}
+
+variable "ssm_parameter_prefix" {
+  description = "SSM parameter prefix for platform connectivity values (with leading slash)."
+  type        = string
+}
+
+variable "enable_ssm_iam" {
+  description = "Create IAM instance profile for SSM platform config sync."
+  type        = bool
+  default     = true
+}

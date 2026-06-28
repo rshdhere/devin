@@ -136,7 +136,13 @@
         "iam:PutRolePolicy",
         "iam:DeleteRolePolicy",
         "iam:ListInstanceProfilesForRole",
-        "iam:RemoveRoleFromInstanceProfile"
+        "iam:RemoveRoleFromInstanceProfile",
+        "iam:CreateInstanceProfile",
+        "iam:DeleteInstanceProfile",
+        "iam:AddRoleToInstanceProfile",
+        "iam:RemoveRoleFromInstanceProfile",
+        "iam:TagInstanceProfile",
+        "iam:UntagInstanceProfile"
       ],
       "Resource": [
         "arn:aws:iam::*:role/devin-*",
@@ -190,6 +196,37 @@
         "kms:DisableKeyRotation",
         "kms:TagResource",
         "kms:UntagResource"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "SSMPlatformConnectivity",
+      "Effect": "Allow",
+      "Action": [
+        "ssm:PutParameter",
+        "ssm:DeleteParameter",
+        "ssm:GetParameter",
+        "ssm:GetParameters",
+        "ssm:GetParametersByPath",
+        "ssm:AddTagsToResource",
+        "ssm:RemoveTagsFromResource",
+        "ssm:DescribeParameters",
+        "ssm:SendCommand",
+        "ssm:GetCommandInvocation",
+        "ssm:ListCommandInvocations",
+        "ssm:DescribeInstanceInformation",
+        "ssm:StartSession",
+        "ssm:TerminateSession",
+        "ssm:ResumeSession"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "EC2DescribeForSSM",
+      "Effect": "Allow",
+      "Action": [
+        "ec2:DescribeInstances",
+        "ec2:DescribeInstanceStatus"
       ],
       "Resource": "*"
     },

@@ -75,7 +75,7 @@ export VAULT_TOKEN=<root-token>
 vault kv put secret/prod/server \
   BETTER_AUTH_SECRET="..." \
   DATABASE_URL="postgres://...@ep-xxx.neon.tech/devin?sslmode=require" \
-  SCHEDULER_URL="http://10.0.12.45:9091" \
+  SCHEDULER_URL="http://10.0.15.247:9091" \
   GITHUB_CLIENT_ID="..." \
   GITHUB_CLIENT_SECRET="..." \
   RESEND_API_KEY="..."

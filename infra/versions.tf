@@ -18,6 +18,18 @@ terraform {
       source  = "hashicorp/kubernetes"
       version = "~> 2.35"
     }
+    time = {
+      source  = "hashicorp/time"
+      version = "~> 0.11"
+    }
+    null = {
+      source  = "hashicorp/null"
+      version = "~> 3.2"
+    }
+    local = {
+      source  = "hashicorp/local"
+      version = "~> 2.5"
+    }
   }
 
   # Uncomment and configure for remote state:
