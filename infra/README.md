@@ -224,6 +224,28 @@ Terraform now also:
 - Patches **`SCHEDULER_URL`** into `devin-server` secrets in `devin-app` and `devin-staging` (requires `kubectl` configured)
 - Bootstraps execution hosts via **SSM** to start the scheduler with the correct `ORCHESTRATOR_URL`
 
+### Platform agent keys (Cursor / Claude)
+
+Store shared agent keys in **AWS SSM SecureString** parameters (not per-user). Execution hosts read them on sync:
+
+| SSM parameter | Purpose |
+| --- | --- |
+| `/devin-production/platform/cursor_api_key` | Cursor agent (`CURSOR_API_KEY`) |
+| `/devin-production/platform/anthropic_api_key` | Claude agent (`ANTHROPIC_API_KEY`) |
+| `/devin-production/platform/github_bot_token` | `baby-devin-bot` repo creation |
+
+```sh
+# Create or update (prompts for value)
+CURSOR_API_KEY="..." ./infra/scripts/set-platform-secret.sh cursor_api_key
+
+# Push config to a running execution host
+./infra/scripts/sync-execution-host-config.sh i-0123456789abcdef0
+```
+
+Use `--with-decryption` when reading SecureString params (handled by `devin-sync-platform-config.sh`). After updating SSM, sync or restart the scheduler on each execution host.
+
+Users can check status from the dashboard via **Advanced capabilities →** (reads scheduler diagnostics).
+
 Disable automation when needed:
 
 ```hcl

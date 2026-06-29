@@ -2,7 +2,9 @@
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
+import { AnimatePresence } from "motion/react";
 import { ChevronDown, GitBranch, Loader2, Sparkles } from "lucide-react";
+import { AgentCapabilitiesPanel } from "@/components/dashboard/agent-capabilities-panel";
 import {
   environmentOptions,
   fetchDashboardSettingsSafe,
@@ -102,6 +104,7 @@ export function PromptMetadataBar() {
   const [isSaving, setIsSaving] = useState(false);
   const [isLoadingRepos, setIsLoadingRepos] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [showAgentCapabilities, setShowAgentCapabilities] = useState(false);
   const repositoryTriggerRef = useRef<HTMLButtonElement>(null);
   const environmentTriggerRef = useRef<HTMLButtonElement>(null);
 
@@ -277,11 +280,20 @@ export function PromptMetadataBar() {
         </MotionButton>
         <MotionButton
           type="button"
+          onClick={() => setShowAgentCapabilities(true)}
           className="cursor-pointer transition-colors hover:text-gray-400"
         >
           Advanced capabilities →
         </MotionButton>
       </div>
+
+      <AnimatePresence>
+        {showAgentCapabilities ? (
+          <AgentCapabilitiesPanel
+            onClose={() => setShowAgentCapabilities(false)}
+          />
+        ) : null}
+      </AnimatePresence>
 
       {error ? (
         <p className="mt-2 text-center text-[12px] text-red-400">{error}</p>

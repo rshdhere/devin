@@ -113,9 +113,27 @@ function DiagnosticsPanel({
       </div>
 
       {task.message ? (
-        <p className="mb-3 rounded-lg bg-[#120d0d] px-3 py-2 font-mono text-[12px] leading-relaxed text-red-300">
-          {task.message}
-        </p>
+        <div className="mb-3 space-y-2">
+          <p className="rounded-lg bg-[#120d0d] px-3 py-2 font-mono text-[12px] leading-relaxed text-red-300">
+            {task.message}
+          </p>
+          {task.message.includes("CURSOR_API_KEY") ? (
+            <p className="text-[12px] leading-relaxed text-amber-200/90">
+              The platform Cursor key is missing on the scheduler. An admin
+              should store it in AWS SSM at{" "}
+              <span className="font-mono text-amber-100">
+                /devin-production/platform/cursor_api_key
+              </span>{" "}
+              (SecureString), then run{" "}
+              <span className="font-mono text-amber-100">
+                devin-sync-platform-config
+              </span>{" "}
+              on the execution host. Open{" "}
+              <span className="text-white">Advanced capabilities</span> on the
+              dashboard for the full checklist.
+            </p>
+          ) : null}
+        </div>
       ) : null}
 
       {error ? <p className="mb-3 text-[12px] text-red-400">{error}</p> : null}

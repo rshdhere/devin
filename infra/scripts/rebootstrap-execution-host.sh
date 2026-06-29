@@ -137,11 +137,14 @@ AWS_REGION="${AWS_REGION}"
 SSM_PREFIX="${SSM_PREFIX}"
 
 read_ssm() {
-  aws ssm get-parameter --region "\$AWS_REGION" --name "\$1" --query Parameter.Value --output text 2>/dev/null || true
+  aws ssm get-parameter --region "\$AWS_REGION" --name "\$1" --with-decryption --query Parameter.Value --output text 2>/dev/null || true
 }
 
 ORCHESTRATOR_URL="\$(read_ssm "\$SSM_PREFIX/orchestrator_url")"
 TASK_QUEUE_URL="\$(read_ssm "\$SSM_PREFIX/task_queue_url")"
+CURSOR_API_KEY="\$(read_ssm "\$SSM_PREFIX/cursor_api_key")"
+ANTHROPIC_API_KEY="\$(read_ssm "\$SSM_PREFIX/anthropic_api_key")"
+GITHUB_BOT_TOKEN="\$(read_ssm "\$SSM_PREFIX/github_bot_token")"
 SCHEDULER_NEEDS_RESTART=0
 
 if [[ -n "\$ORCHESTRATOR_URL" && "\$ORCHESTRATOR_URL" != http://REPLACE_AFTER_ORCHESTRATOR_NLB:* ]]; then
@@ -165,6 +168,23 @@ EOF
 else
   rm -f /etc/systemd/system/devin-scheduler.service.d/queue.conf
 fi
+
+mkdir -p /etc/systemd/system/devin-scheduler.service.d /etc/devin
+umask 077
+{
+  echo "DEFAULT_AGENT=cursor"
+  printf 'CURSOR_API_KEY=%s\n' "\${CURSOR_API_KEY}"
+  printf 'ANTHROPIC_API_KEY=%s\n' "\${ANTHROPIC_API_KEY}"
+  printf 'GITHUB_BOT_TOKEN=%s\n' "\${GITHUB_BOT_TOKEN}"
+  echo "GITHUB_BOT_NAME=baby-devin-bot"
+  echo "GITHUB_BOT_EMAIL=baby-devin-bot@users.noreply.github.com"
+} >/etc/devin/scheduler-secrets.env
+chmod 600 /etc/devin/scheduler-secrets.env
+cat >/etc/systemd/system/devin-scheduler.service.d/secrets.conf <<EOF
+[Service]
+EnvironmentFile=/etc/devin/scheduler-secrets.env
+EOF
+SCHEDULER_NEEDS_RESTART=1
 
 if [[ "\$SCHEDULER_NEEDS_RESTART" -eq 1 ]]; then
   systemctl daemon-reload

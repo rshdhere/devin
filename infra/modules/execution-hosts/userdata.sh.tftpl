@@ -151,6 +151,7 @@ read_ssm() {
   aws ssm get-parameter \\
     --region "\$AWS_REGION" \\
     --name "\$name" \\
+    --with-decryption \\
     --query Parameter.Value \\
     --output text 2>/dev/null || true
 }
@@ -186,15 +187,20 @@ else
   rm -f /etc/systemd/system/devin-scheduler.service.d/queue.conf
 fi
 
-mkdir -p /etc/systemd/system/devin-scheduler.service.d
+mkdir -p /etc/systemd/system/devin-scheduler.service.d /etc/devin
+umask 077
+{
+  echo "DEFAULT_AGENT=cursor"
+  printf 'CURSOR_API_KEY=%s\n' "\${CURSOR_API_KEY}"
+  printf 'ANTHROPIC_API_KEY=%s\n' "\${ANTHROPIC_API_KEY}"
+  printf 'GITHUB_BOT_TOKEN=%s\n' "\${GITHUB_BOT_TOKEN}"
+  echo "GITHUB_BOT_NAME=baby-devin-bot"
+  echo "GITHUB_BOT_EMAIL=baby-devin-bot@users.noreply.github.com"
+} >/etc/devin/scheduler-secrets.env
+chmod 600 /etc/devin/scheduler-secrets.env
 cat >/etc/systemd/system/devin-scheduler.service.d/secrets.conf <<EOF
 [Service]
-Environment=DEFAULT_AGENT=cursor
-Environment=CURSOR_API_KEY=\${CURSOR_API_KEY}
-Environment=ANTHROPIC_API_KEY=\${ANTHROPIC_API_KEY}
-Environment=GITHUB_BOT_TOKEN=\${GITHUB_BOT_TOKEN}
-Environment=GITHUB_BOT_NAME=baby-devin-bot
-Environment=GITHUB_BOT_EMAIL=baby-devin-bot@users.noreply.github.com
+EnvironmentFile=/etc/devin/scheduler-secrets.env
 EOF
 SCHEDULER_NEEDS_RESTART=1
 

@@ -202,6 +202,18 @@ export class TaskService {
         agent: task.agent,
       });
 
+      if (task.agent === "cursor" && !process.env.CURSOR_API_KEY?.trim()) {
+        throw new Error(
+          "CURSOR_API_KEY is not set on the scheduler. Add it to AWS SSM as a SecureString at /<env>/platform/cursor_api_key, then run devin-sync-platform-config on the execution host.",
+        );
+      }
+
+      if (task.agent === "claude" && !process.env.ANTHROPIC_API_KEY?.trim()) {
+        throw new Error(
+          "ANTHROPIC_API_KEY is not set on the scheduler. Add it to AWS SSM as a SecureString at /<env>/platform/anthropic_api_key, then run devin-sync-platform-config on the execution host.",
+        );
+      }
+
       sandboxName = `sbx-${task.id.slice(0, 8)}`;
       task.sandboxName = sandboxName;
       this.updateTask(task.id, "sandbox_starting", "Creating sandbox");

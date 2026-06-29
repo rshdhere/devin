@@ -99,6 +99,11 @@ export interface InfraDiagnostics {
   checkedAt: string;
   orchestrator: ServiceProbe;
   firecrackerHost?: ServiceProbe & FirecrackerHostStatus;
+  agent?: {
+    defaultAgent: string;
+    cursorApiKeyConfigured: boolean;
+    anthropicApiKeyConfigured: boolean;
+  };
   sandboxes: {
     total: number;
     byPhase: Record<string, number>;

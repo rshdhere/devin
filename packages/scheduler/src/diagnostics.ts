@@ -38,6 +38,11 @@ export interface InfraDiagnostics {
   checkedAt: string;
   orchestrator: ServiceProbe;
   firecrackerHost?: ServiceProbe & FirecrackerHostStatus;
+  agent?: {
+    defaultAgent: string;
+    cursorApiKeyConfigured: boolean;
+    anthropicApiKeyConfigured: boolean;
+  };
   sandboxes: {
     total: number;
     byPhase: Record<string, number>;
@@ -262,6 +267,17 @@ export async function collectInfraDiagnostics(options: {
     checkedAt: new Date().toISOString(),
     orchestrator: orchestratorProbe,
     firecrackerHost,
+    agent: {
+      defaultAgent:
+        process.env.DEFAULT_AGENT?.trim() ||
+        (process.env.CURSOR_API_KEY?.trim()
+          ? "cursor"
+          : process.env.ANTHROPIC_API_KEY?.trim()
+            ? "claude"
+            : "mock"),
+      cursorApiKeyConfigured: Boolean(process.env.CURSOR_API_KEY?.trim()),
+      anthropicApiKeyConfigured: Boolean(process.env.ANTHROPIC_API_KEY?.trim()),
+    },
     sandboxes: {
       total: sandboxes.length,
       byPhase,

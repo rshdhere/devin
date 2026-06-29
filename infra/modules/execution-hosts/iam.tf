@@ -42,6 +42,18 @@ resource "aws_iam_role_policy" "execution_host_ssm" {
       {
         Effect = "Allow"
         Action = [
+          "kms:Decrypt",
+        ]
+        Resource = "*"
+        Condition = {
+          StringEquals = {
+            "kms:ViaService" = "ssm.${var.aws_region}.amazonaws.com"
+          }
+        }
+      },
+      {
+        Effect = "Allow"
+        Action = [
           "ec2messages:AcknowledgeMessage",
           "ec2messages:DeleteMessage",
           "ec2messages:FailMessage",
