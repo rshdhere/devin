@@ -229,6 +229,22 @@ function DiagnosticsPanel({
                 </dd>
               </div>
             ) : null}
+            {host?.availableRuntimes && host.availableRuntimes.length > 0 ? (
+              <div>
+                <dt className="mb-0.5 text-gray-500">Snapshot runtimes</dt>
+                <dd className="font-mono text-[11px] text-gray-300">
+                  {host.availableRuntimes.join(", ")}
+                </dd>
+              </div>
+            ) : null}
+            {host?.lastWarmError ? (
+              <div>
+                <dt className="mb-0.5 text-gray-500">Warm pool error</dt>
+                <dd className="font-mono text-[11px] text-amber-300">
+                  {host.lastWarmError}
+                </dd>
+              </div>
+            ) : null}
             {host?.activeVMs !== undefined ? (
               <div className="flex justify-between gap-3">
                 <dt className="text-gray-500">Active microVMs</dt>
@@ -255,7 +271,13 @@ function DiagnosticsPanel({
         </div>
       </div>
 
-      {task.status === "failed" && host?.readyVMs === 0 ? (
+      {task.status === "failed" && host?.lastWarmError ? (
+        <p className="mt-3 text-[12px] leading-relaxed text-amber-200/90">
+          Firecracker snapshot warm-up failed on the execution host:{" "}
+          {host.lastWarmError}. Rebuild snapshots on the host or check{" "}
+          <span className="font-mono">docker logs firecracker-host</span>.
+        </p>
+      ) : task.status === "failed" && host?.readyVMs === 0 ? (
         <p className="mt-3 text-[12px] leading-relaxed text-amber-200/90">
           No warm microVMs are available. The firecracker-host may still be
           warming snapshots, snapshots may be missing for the requested runtime,

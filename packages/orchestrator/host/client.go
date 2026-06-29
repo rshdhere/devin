@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -29,14 +31,16 @@ type VM struct {
 }
 
 type StatusResponse struct {
-	Host           string `json:"host"`
-	CapacityCPU    int32  `json:"capacityCPU"`
-	CapacityMemory string `json:"capacityMemory"`
-	UsedCPU        int32  `json:"usedCPU"`
-	UsedMemory     string `json:"usedMemory"`
-	ReadyVMs       int    `json:"readyVMs"`
-	ActiveVMs      int    `json:"activeVMs"`
-	DefaultRuntime string `json:"defaultRuntime"`
+	Host              string `json:"host"`
+	CapacityCPU       int32  `json:"capacityCPU"`
+	CapacityMemory    string `json:"capacityMemory"`
+	UsedCPU           int32  `json:"usedCPU"`
+	UsedMemory        string `json:"usedMemory"`
+	ReadyVMs          int    `json:"readyVMs"`
+	ActiveVMs         int    `json:"activeVMs"`
+	DefaultRuntime    string `json:"defaultRuntime"`
+	AvailableRuntimes []string `json:"availableRuntimes,omitempty"`
+	LastWarmError     string `json:"lastWarmError,omitempty"`
 }
 
 type Client struct {
@@ -48,10 +52,22 @@ func NewClient(baseURL string) *Client {
 	return &Client{
 		baseURL: strings.TrimRight(baseURL, "/"),
 		httpClient: &http.Client{
-			// Cold snapshot restores can exceed 30s (VM boot + runtime health).
-			Timeout: 120 * time.Second,
+			// CreateVM returns immediately; cold restores complete asynchronously.
+			Timeout: time.Duration(hostTimeoutSeconds()) * time.Second,
 		},
 	}
+}
+
+func hostTimeoutSeconds() int {
+	raw := strings.TrimSpace(os.Getenv("FIRECRACKER_HOST_TIMEOUT_SECONDS"))
+	if raw == "" {
+		return 30
+	}
+	value, err := strconv.Atoi(raw)
+	if err != nil || value <= 0 {
+		return 30
+	}
+	return value
 }
 
 func (c *Client) CreateVM(ctx context.Context, req CreateVMRequest) (*VM, error) {

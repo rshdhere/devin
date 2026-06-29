@@ -5,6 +5,7 @@ import { createQueue, type TaskQueue } from "@devin/queue";
 import {
   collectInfraDiagnostics,
   fetchSandboxByName,
+  validateFirecrackerHostForRuntime,
   type InfraDiagnostics,
   type TaskDiagnostics,
 } from "./diagnostics.js";
@@ -24,7 +25,7 @@ export interface TaskServiceOptions {
   defaultAgent?: AgentProvider;
   eventBus?: EventBus;
   queue?: TaskQueue<ScheduleJob>;
-  /** Max time to wait for orchestrator sandbox phase Running (default 120s). */
+  /** Max time to wait for orchestrator sandbox phase Running (default 300s). */
   sandboxReadyTimeoutMs?: number;
   /** Max time to wait for runtime /health (default 60s). */
   runtimeReadyTimeoutMs?: number;
@@ -64,7 +65,7 @@ export class TaskService {
     this.defaultAgent = options.defaultAgent ?? resolveDefaultAgent();
     this.sandboxReadyTimeoutMs =
       options.sandboxReadyTimeoutMs ??
-      resolveTimeoutMs("SANDBOX_READY_TIMEOUT_SECONDS", 120);
+      resolveTimeoutMs("SANDBOX_READY_TIMEOUT_SECONDS", 300);
     this.runtimeReadyTimeoutMs =
       options.runtimeReadyTimeoutMs ??
       resolveTimeoutMs("RUNTIME_READY_TIMEOUT_SECONDS", 60);
@@ -195,6 +196,17 @@ export class TaskService {
       this.updateTask(task.id, "sandbox_starting", "Creating sandbox");
 
       const runtimeImage = runtimeForAgent(task.agent);
+
+      if (this.firecrackerHostUrl) {
+        const hostIssue = await validateFirecrackerHostForRuntime(
+          this.firecrackerHostUrl,
+          runtimeImage,
+        );
+        if (hostIssue) {
+          throw new Error(hostIssue);
+        }
+      }
+
       this.emit(
         "sandbox.requested",
         task.id,

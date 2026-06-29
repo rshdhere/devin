@@ -6,6 +6,12 @@ export interface ServiceProbe {
   latencyMs?: number;
 }
 
+export interface WarmRuntimeStatus {
+  runtime: string;
+  readyVMs: number;
+  lastWarmError?: string;
+}
+
 export interface FirecrackerHostStatus {
   host?: string;
   readyVMs?: number;
@@ -13,6 +19,9 @@ export interface FirecrackerHostStatus {
   capacityCPU?: number;
   usedCPU?: number;
   defaultRuntime?: string;
+  availableRuntimes?: string[];
+  warmRuntimes?: WarmRuntimeStatus[];
+  lastWarmError?: string;
 }
 
 export interface SandboxSummary {
@@ -188,6 +197,44 @@ export async function fetchSandboxByName(
   } catch {
     return undefined;
   }
+}
+
+export async function validateFirecrackerHostForRuntime(
+  baseUrl: string,
+  runtime: string,
+): Promise<string | undefined> {
+  const status = await fetchFirecrackerHostStatus(baseUrl);
+  if (!status) {
+    return "firecracker-host URL is not configured";
+  }
+  if (!status.reachable) {
+    return status.error ?? "firecracker-host is unreachable";
+  }
+
+  if (status.availableRuntimes && status.availableRuntimes.length === 0) {
+    return "no Firecracker snapshots are installed on this execution host";
+  }
+
+  if (
+    status.availableRuntimes &&
+    status.availableRuntimes.length > 0 &&
+    !status.availableRuntimes.includes(runtime)
+  ) {
+    return `runtime ${runtime} snapshots are not installed on this host (available: ${status.availableRuntimes.join(", ")})`;
+  }
+
+  const runtimeWarm = status.warmRuntimes?.find(
+    (entry) => entry.runtime === runtime,
+  );
+  if (runtimeWarm?.lastWarmError) {
+    return `firecracker-host cannot warm ${runtime} microVMs: ${runtimeWarm.lastWarmError}`;
+  }
+
+  if (status.lastWarmError && (status.readyVMs ?? 0) === 0) {
+    return status.lastWarmError;
+  }
+
+  return undefined;
 }
 
 export async function collectInfraDiagnostics(options: {

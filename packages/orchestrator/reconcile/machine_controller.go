@@ -72,12 +72,22 @@ func (r *FirecrackerMachineReconciler) provisionVM(ctx context.Context, machine 
 		return r.fail(ctx, machine, err)
 	}
 
+	phase := devinv1.MachinePhaseProvisioning
+	message := firstNonEmpty(vm.Message, "provisioning firecracker microVM")
+	if vm.Phase == "Running" && vm.RuntimeURL != "" {
+		phase = devinv1.MachinePhaseRunning
+		message = "firecracker microVM ready"
+	}
+	if vm.Phase == "Failed" {
+		return r.fail(ctx, machine, fmt.Errorf("%s", firstNonEmpty(vm.Message, "microVM provisioning failed")))
+	}
+
 	machine.Status = devinv1.FirecrackerMachineStatus{
-		Phase:      devinv1.MachinePhaseRunning,
+		Phase:      phase,
 		VMID:       vm.VMID,
 		Host:       firstNonEmpty(vm.Host, selectedHost.Name),
 		RuntimeURL: vm.RuntimeURL,
-		Message:    "firecracker microVM ready",
+		Message:    message,
 	}
 	machine.Spec.Host = machine.Status.Host
 
@@ -85,11 +95,18 @@ func (r *FirecrackerMachineReconciler) provisionVM(ctx context.Context, machine 
 		return ctrl.Result{}, err
 	}
 
-	if err := r.syncSandboxStatus(ctx, machine); err != nil {
+	if phase == devinv1.MachinePhaseRunning {
+		if err := r.syncSandboxStatus(ctx, machine); err != nil {
+			return ctrl.Result{}, err
+		}
+		return ctrl.Result{}, nil
+	}
+
+	if err := r.syncSandboxProvisioning(ctx, machine); err != nil {
 		return ctrl.Result{}, err
 	}
 
-	return ctrl.Result{}, nil
+	return ctrl.Result{RequeueAfter: 3 * time.Second}, nil
 }
 
 func (r *FirecrackerMachineReconciler) refreshVM(ctx context.Context, machine *devinv1.FirecrackerMachine) (ctrl.Result, error) {
@@ -117,7 +134,11 @@ func (r *FirecrackerMachineReconciler) refreshVM(ctx context.Context, machine *d
 		return ctrl.Result{}, nil
 	}
 
-	return r.writeMachineStatus(ctx, machine, devinv1.MachinePhaseProvisioning, "waiting for microVM health")
+	if vm.Phase == "Failed" {
+		return r.fail(ctx, machine, fmt.Errorf("%s", firstNonEmpty(vm.Message, "microVM provisioning failed")))
+	}
+
+	return r.writeMachineStatus(ctx, machine, devinv1.MachinePhaseProvisioning, firstNonEmpty(vm.Message, "waiting for microVM health"))
 }
 
 func (r *FirecrackerMachineReconciler) finalize(ctx context.Context, machine *devinv1.FirecrackerMachine) (ctrl.Result, error) {
@@ -135,6 +156,21 @@ func (r *FirecrackerMachineReconciler) finalize(ctx context.Context, machine *de
 		}
 	}
 	return ctrl.Result{}, nil
+}
+
+func (r *FirecrackerMachineReconciler) syncSandboxProvisioning(ctx context.Context, machine *devinv1.FirecrackerMachine) error {
+	sandbox := &devinv1.Sandbox{}
+	if err := r.Get(ctx, client.ObjectKey{Namespace: machine.Namespace, Name: machine.Spec.SandboxName}, sandbox); err != nil {
+		return client.IgnoreNotFound(err)
+	}
+
+	sandbox.Status.Phase = devinv1.SandboxPhaseProvisioning
+	sandbox.Status.VMID = machine.Status.VMID
+	sandbox.Status.Host = machine.Status.Host
+	sandbox.Status.MachineName = machine.Name
+	sandbox.Status.Message = machine.Status.Message
+
+	return r.Status().Update(ctx, sandbox)
 }
 
 func (r *FirecrackerMachineReconciler) syncSandboxStatus(ctx context.Context, machine *devinv1.FirecrackerMachine) error {

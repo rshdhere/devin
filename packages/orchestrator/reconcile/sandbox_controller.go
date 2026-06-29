@@ -2,6 +2,7 @@ package reconcile
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -52,7 +53,12 @@ func (r *SandboxReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		return ctrl.Result{}, nil
 	}
 
-	return r.writeStatus(ctx, &sandbox, devinv1.SandboxPhaseProvisioning, "provisioning firecracker microVM")
+	if sandbox.Status.Phase == devinv1.SandboxPhaseFailed {
+		return ctrl.Result{}, nil
+	}
+
+	message := firstNonEmpty(sandbox.Status.Message, "provisioning firecracker microVM")
+	return r.writeStatus(ctx, &sandbox, devinv1.SandboxPhaseProvisioning, message)
 }
 
 func (r *SandboxReconciler) ensureMachine(ctx context.Context, sandbox *devinv1.Sandbox) error {
@@ -97,7 +103,17 @@ func (r *SandboxReconciler) ensureMachine(ctx context.Context, sandbox *devinv1.
 		return r.Status().Update(ctx, sandbox)
 	}
 
-	return nil
+	if latestMachine.Status.Phase == devinv1.MachinePhaseFailed {
+		return fmt.Errorf("%s", firstNonEmpty(latestMachine.Status.Message, "firecracker machine failed"))
+	}
+
+	message := firstNonEmpty(latestMachine.Status.Message, "provisioning firecracker microVM")
+	sandbox.Status.Phase = devinv1.SandboxPhaseProvisioning
+	sandbox.Status.VMID = latestMachine.Status.VMID
+	sandbox.Status.Host = latestMachine.Status.Host
+	sandbox.Status.MachineName = latestMachine.Name
+	sandbox.Status.Message = message
+	return r.Status().Update(ctx, sandbox)
 }
 
 func (r *SandboxReconciler) finalize(ctx context.Context, sandbox *devinv1.Sandbox) (ctrl.Result, error) {

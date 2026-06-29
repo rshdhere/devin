@@ -24,15 +24,24 @@ type VMRecord struct {
 	Message    string `json:"message,omitempty"`
 }
 
+type WarmRuntimeStatus struct {
+	Runtime       string `json:"runtime"`
+	ReadyVMs      int    `json:"readyVMs"`
+	LastWarmError string `json:"lastWarmError,omitempty"`
+}
+
 type HostStatus struct {
-	Host         string `json:"host"`
-	CapacityCPU  int32  `json:"capacityCPU"`
-	CapacityMem  string `json:"capacityMemory"`
-	UsedCPU      int32  `json:"usedCPU"`
-	UsedMemory   string `json:"usedMemory"`
-	ReadyVMs     int    `json:"readyVMs"`
-	ActiveVMs    int    `json:"activeVMs"`
-	DefaultRun   string `json:"defaultRuntime"`
+	Host              string              `json:"host"`
+	CapacityCPU       int32               `json:"capacityCPU"`
+	CapacityMem       string              `json:"capacityMemory"`
+	UsedCPU           int32               `json:"usedCPU"`
+	UsedMemory        string              `json:"usedMemory"`
+	ReadyVMs          int                 `json:"readyVMs"`
+	ActiveVMs         int                 `json:"activeVMs"`
+	DefaultRun        string              `json:"defaultRuntime"`
+	AvailableRuntimes []string            `json:"availableRuntimes,omitempty"`
+	WarmRuntimes      []WarmRuntimeStatus `json:"warmRuntimes,omitempty"`
+	LastWarmError     string              `json:"lastWarmError,omitempty"`
 }
 
 type Manager struct {
@@ -40,13 +49,15 @@ type Manager struct {
 	launcher *vm.Launcher
 	hostName string
 
-	mu         sync.RWMutex
-	vms        map[string]*vm.Instance
-	assigned   map[string]*vm.Instance
-	vmCPU      map[string]int32
-	ready      map[string]chan *vm.Instance
-	readyCount int
-	usedCPU    int32
+	mu                sync.RWMutex
+	vms               map[string]*vm.Instance
+	assigned          map[string]*vm.Instance
+	vmCPU             map[string]int32
+	ready             map[string]chan *vm.Instance
+	readyCount        int
+	usedCPU           int32
+	warmErrors        map[string]string
+	availableRuntimes []string
 }
 
 func NewManager(cfg config.Config) (*Manager, error) {
@@ -55,12 +66,13 @@ func NewManager(cfg config.Config) (*Manager, error) {
 	}
 
 	m := &Manager{
-		cfg:      cfg,
-		hostName: cfg.HostName,
-		vms:      make(map[string]*vm.Instance),
-		assigned: make(map[string]*vm.Instance),
-		vmCPU:    make(map[string]int32),
-		ready:    make(map[string]chan *vm.Instance),
+		cfg:        cfg,
+		hostName:   cfg.HostName,
+		vms:        make(map[string]*vm.Instance),
+		assigned:   make(map[string]*vm.Instance),
+		vmCPU:      make(map[string]int32),
+		ready:      make(map[string]chan *vm.Instance),
+		warmErrors: make(map[string]string),
 	}
 
 	if cfg.DryRun {
@@ -91,6 +103,10 @@ func (m *Manager) Start(ctx context.Context) {
 	if len(runtimes) == 0 {
 		runtimes = []string{m.cfg.DefaultRuntime}
 	}
+
+	m.mu.Lock()
+	m.availableRuntimes = append([]string(nil), runtimes...)
+	m.mu.Unlock()
 
 	for _, runtime := range runtimes {
 		queue := make(chan *vm.Instance, m.cfg.PoolSize)
@@ -132,9 +148,16 @@ func (m *Manager) warmRuntimePool(ctx context.Context, runtime string, queue cha
 		instance, err := m.launchWarm(ctx, runtime)
 		if err != nil {
 			slog.Error("failed to warm microVM", "runtime", runtime, "error", err)
+			m.mu.Lock()
+			m.warmErrors[runtime] = err.Error()
+			m.mu.Unlock()
 			time.Sleep(5 * time.Second)
 			continue
 		}
+
+		m.mu.Lock()
+		delete(m.warmErrors, runtime)
+		m.mu.Unlock()
 
 		select {
 		case <-ctx.Done():
@@ -172,19 +195,36 @@ func (m *Manager) Create(name, runtime, taskID string, cpu int32, memory string)
 		return m.createDryRun(name, runtime)
 	}
 
-	instance, err := m.acquireRuntime(ctxBackground(), runtime, name, cpu, memory)
-	if err != nil {
+	if err := m.validateRuntime(runtime); err != nil {
 		return nil, err
 	}
 
+	if warm, ok := m.takeWarm(runtime, name); ok {
+		m.mu.Lock()
+		m.assigned[warm.ID] = warm
+		m.vms[warm.ID] = warm
+		m.vmCPU[warm.ID] = cpu
+		m.usedCPU += cpu
+		m.mu.Unlock()
+		return m.recordFromInstance(warm), nil
+	}
+
+	vmID := xid.New().String()
+	pending := &vm.Instance{
+		ID:      vmID,
+		Name:    name,
+		Runtime: runtime,
+		Phase:   "Provisioning",
+		Message: "restoring snapshot",
+	}
+
 	m.mu.Lock()
-	m.assigned[instance.ID] = instance
-	m.vms[instance.ID] = instance
-	m.vmCPU[instance.ID] = cpu
-	m.usedCPU += cpu
+	m.vms[vmID] = pending
 	m.mu.Unlock()
 
-	return m.recordFromInstance(instance), nil
+	go m.provisionCold(vmID, name, runtime, cpu, memory)
+
+	return m.recordFromInstance(pending), nil
 }
 
 func (m *Manager) createDryRun(name, runtime string) (*VMRecord, error) {
@@ -215,32 +255,65 @@ func (m *Manager) createDryRun(name, runtime string) (*VMRecord, error) {
 	return record, nil
 }
 
-func (m *Manager) acquireRuntime(ctx context.Context, runtime, name string, cpu int32, memory string) (*vm.Instance, error) {
+func (m *Manager) validateRuntime(runtime string) error {
+	if _, err := m.snapshotStore().Resolve(runtime); err != nil {
+		return fmt.Errorf("runtime %q is not provisioned on this host: %w", runtime, err)
+	}
+	return nil
+}
+
+func (m *Manager) takeWarm(runtime, name string) (*vm.Instance, bool) {
 	m.mu.RLock()
 	queue := m.ready[runtime]
 	m.mu.RUnlock()
 
-	if queue != nil {
-		select {
-		case warm := <-queue:
-			m.mu.Lock()
-			if m.readyCount > 0 {
-				m.readyCount--
-			}
-			m.mu.Unlock()
-			warm.Name = name
-			warm.Message = "assigned from warm pool"
-			return warm, nil
-		default:
-		}
+	if queue == nil {
+		return nil, false
 	}
 
-	vmID := xid.New().String()
-	instance, err := m.launcher.Restore(ctx, vmID, name, runtime, cpu, memory)
-	if err != nil {
-		return nil, err
+	select {
+	case warm := <-queue:
+		m.mu.Lock()
+		if m.readyCount > 0 {
+			m.readyCount--
+		}
+		m.mu.Unlock()
+		warm.Name = name
+		warm.Message = "assigned from warm pool"
+		return warm, true
+	default:
+		return nil, false
 	}
-	return instance, nil
+}
+
+func (m *Manager) provisionCold(vmID, name, runtime string, cpu int32, memory string) {
+	ctx := context.Background()
+	instance, err := m.launcher.Restore(ctx, vmID, name, runtime, cpu, memory)
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	pending, ok := m.vms[vmID]
+	if !ok {
+		if err == nil {
+			_ = instance.Shutdown(ctx)
+		}
+		return
+	}
+
+	if err != nil {
+		pending.Phase = "Failed"
+		pending.Message = err.Error()
+		return
+	}
+
+	m.assigned[instance.ID] = instance
+	m.vms[instance.ID] = instance
+	m.vmCPU[instance.ID] = cpu
+	m.usedCPU += cpu
+	if instance.ID != vmID {
+		delete(m.vms, vmID)
+	}
 }
 
 func (m *Manager) Get(vmID string) (*VMRecord, error) {
@@ -295,15 +368,33 @@ func (m *Manager) Status() HostStatus {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
+	warmRuntimes := make([]WarmRuntimeStatus, 0, len(m.ready))
+	var lastWarmError string
+	for runtime, queue := range m.ready {
+		status := WarmRuntimeStatus{Runtime: runtime, ReadyVMs: len(queue)}
+		if warmErr, ok := m.warmErrors[runtime]; ok {
+			status.LastWarmError = warmErr
+			if lastWarmError == "" {
+				lastWarmError = fmt.Sprintf("%s: %s", runtime, warmErr)
+			}
+		}
+		warmRuntimes = append(warmRuntimes, status)
+	}
+
+	available := append([]string(nil), m.availableRuntimes...)
+
 	return HostStatus{
-		Host:        m.hostName,
-		CapacityCPU: m.cfg.CapacityCPU,
-		CapacityMem: m.cfg.CapacityMemory,
-		UsedCPU:     m.usedCPU,
-		UsedMemory:  formatUsedMemoryMiB(m.usedCPU * 512),
-		ReadyVMs:    m.readyCount,
-		ActiveVMs:   len(m.assigned),
-		DefaultRun:  m.cfg.DefaultRuntime,
+		Host:              m.hostName,
+		CapacityCPU:       m.cfg.CapacityCPU,
+		CapacityMem:       m.cfg.CapacityMemory,
+		UsedCPU:           m.usedCPU,
+		UsedMemory:        formatUsedMemoryMiB(m.usedCPU * 512),
+		ReadyVMs:          m.readyCount,
+		ActiveVMs:         len(m.assigned),
+		DefaultRun:        m.cfg.DefaultRuntime,
+		AvailableRuntimes: available,
+		WarmRuntimes:      warmRuntimes,
+		LastWarmError:     lastWarmError,
 	}
 }
 
@@ -317,10 +408,6 @@ func (m *Manager) recordFromInstance(instance *vm.Instance) *VMRecord {
 		Phase:      instance.Phase,
 		Message:    instance.Message,
 	}
-}
-
-func ctxBackground() context.Context {
-	return context.Background()
 }
 
 func formatUsedMemoryMiB(mib int32) string {

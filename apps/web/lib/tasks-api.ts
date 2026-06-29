@@ -64,6 +64,12 @@ export interface ServiceProbe {
   latencyMs?: number;
 }
 
+export interface WarmRuntimeStatus {
+  runtime: string;
+  readyVMs: number;
+  lastWarmError?: string;
+}
+
 export interface FirecrackerHostStatus {
   host?: string;
   readyVMs?: number;
@@ -71,6 +77,9 @@ export interface FirecrackerHostStatus {
   capacityCPU?: number;
   usedCPU?: number;
   defaultRuntime?: string;
+  availableRuntimes?: string[];
+  warmRuntimes?: WarmRuntimeStatus[];
+  lastWarmError?: string;
 }
 
 export interface SandboxSummary {
