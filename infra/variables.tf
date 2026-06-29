@@ -161,6 +161,12 @@ variable "manage_orchestrator_nlb" {
   default     = true
 }
 
+variable "manage_scheduler_nlb" {
+  description = "Create an internal NLB for execution host schedulers (devin-server SCHEDULER_URL)."
+  type        = bool
+  default     = true
+}
+
 variable "orchestrator_namespace" {
   description = "Namespace where devin-orchestrator runs."
   type        = string

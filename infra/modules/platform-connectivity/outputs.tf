@@ -1,6 +1,11 @@
 output "scheduler_url" {
   description = "Primary scheduler URL wired into devin-server."
-  value       = var.scheduler_url
+  value       = local.effective_scheduler_url
+}
+
+output "scheduler_nlb_hostname" {
+  description = "Internal NLB hostname for the scheduler (null when NLB disabled)."
+  value       = local.scheduler_nlb_dns
 }
 
 output "orchestrator_url" {

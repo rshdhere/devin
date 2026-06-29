@@ -118,6 +118,11 @@ if systemctl list-unit-files | grep -q devin-scheduler.service; then
     sleep 2
   done
   curl -sf http://127.0.0.1:9091/health
+  PRIVATE_IP="\$(curl -sf http://169.254.169.254/latest/meta-data/local-ipv4 || true)"
+  if [[ -n "\$PRIVATE_IP" ]]; then
+    log "Verifying scheduler on host private IP \${PRIVATE_IP}:9091"
+    curl -sf "http://\${PRIVATE_IP}:9091/health"
+  fi
 else
   log "devin-scheduler.service not installed — skipping"
 fi

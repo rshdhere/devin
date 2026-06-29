@@ -4,8 +4,38 @@ variable "name_prefix" {
 }
 
 variable "scheduler_url" {
-  description = "Primary scheduler URL for devin-server (http://<host-ip>:9091)."
+  description = "Fallback scheduler URL when NLB is disabled (http://<host-ip>:9091)."
   type        = string
+}
+
+variable "scheduler_url_override" {
+  description = "Optional fixed scheduler URL for devin-server. When null, use the internal NLB hostname when available."
+  type        = string
+  default     = null
+}
+
+variable "manage_scheduler_nlb" {
+  description = "Create an internal NLB targeting execution host scheduler ports."
+  type        = bool
+  default     = true
+}
+
+variable "scheduler_port" {
+  description = "Scheduler HTTP port on execution hosts and the internal NLB."
+  type        = number
+  default     = 9091
+}
+
+variable "vpc_id" {
+  description = "VPC ID for the scheduler internal NLB target group."
+  type        = string
+  default     = null
+}
+
+variable "private_subnet_ids" {
+  description = "Private subnet IDs for the scheduler internal NLB."
+  type        = list(string)
+  default     = []
 }
 
 variable "task_queue_url" {

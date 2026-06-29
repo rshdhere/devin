@@ -168,9 +168,9 @@ const server = createServer(async (req, res) => {
   res.end(JSON.stringify({ error: "not found" }));
 });
 
-server.listen(port, () => {
+server.listen(port, "0.0.0.0", () => {
   console.log(
-    `scheduler listening @ http://localhost:${port} (queue=${queueDriver})`,
+    `scheduler listening @ http://0.0.0.0:${port} (queue=${queueDriver})`,
   );
 });
 

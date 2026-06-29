@@ -86,16 +86,19 @@ module "platform_connectivity" {
 
   name_prefix                      = local.name_prefix
   scheduler_url                    = local.primary_scheduler_url
+  vpc_id                           = module.vpc.vpc_id
+  private_subnet_ids               = module.vpc.private_subnet_ids
+  execution_hosts                  = local.execution_hosts
   task_queue_url                   = local.task_queue_url
   publish_task_queue_url           = local.enable_execution_hosts
   manage_orchestrator_nlb          = var.manage_orchestrator_nlb
+  manage_scheduler_nlb             = var.manage_scheduler_nlb
   orchestrator_namespace           = var.orchestrator_namespace
   orchestrator_url_override        = var.orchestrator_url_override
   manage_ssm_parameters            = var.manage_ssm_parameters
   sync_scheduler_url_to_kubernetes = var.sync_scheduler_url_to_kubernetes
   server_secret_namespaces         = var.server_secret_namespaces
   firecracker_hosts_gitops_path    = var.generate_firecracker_hosts_gitops ? "${path.module}/generated/firecracker-hosts.yaml" : null
-  execution_hosts                  = local.execution_hosts
   tags                             = var.tags
 
   depends_on = [module.execution_hosts]

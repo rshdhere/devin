@@ -18,6 +18,16 @@ terraform {
 locals {
   ssm_prefix = "/${var.name_prefix}/platform"
 
+  scheduler_nlb_enabled = var.manage_scheduler_nlb && length(var.execution_hosts) > 0
+
+  scheduler_nlb_dns = local.scheduler_nlb_enabled ? aws_lb.scheduler[0].dns_name : null
+
+  effective_scheduler_url = coalesce(
+    var.scheduler_url_override,
+    local.scheduler_nlb_dns != null ? "http://${local.scheduler_nlb_dns}:${var.scheduler_port}" : null,
+    var.scheduler_url,
+  )
+
   orchestrator_nlb_hostname = var.manage_orchestrator_nlb ? try(
     one([
       for ing in kubernetes_service_v1.orchestrator_nlb[0].status[0].load_balancer[0].ingress :
@@ -88,11 +98,13 @@ resource "aws_ssm_parameter" "scheduler_url" {
 
   name  = "${local.ssm_prefix}/scheduler_url"
   type  = "String"
-  value = var.scheduler_url
+  value = local.effective_scheduler_url
 
   tags = merge(var.tags, {
     Name = "${var.name_prefix}-scheduler-url"
   })
+
+  depends_on = [time_sleep.wait_for_scheduler_nlb]
 }
 
 resource "aws_ssm_parameter" "orchestrator_url" {
@@ -125,7 +137,7 @@ resource "null_resource" "sync_scheduler_url" {
   count = var.sync_scheduler_url_to_kubernetes ? 1 : 0
 
   triggers = {
-    scheduler_url = var.scheduler_url
+    scheduler_url = local.effective_scheduler_url
     namespaces    = join(",", var.server_secret_namespaces)
   }
 
@@ -133,10 +145,12 @@ resource "null_resource" "sync_scheduler_url" {
     command     = "${path.module}/../../scripts/patch-server-scheduler-url.sh"
     interpreter = ["bash", "-c"]
     environment = {
-      SCHEDULER_URL = var.scheduler_url
+      SCHEDULER_URL = local.effective_scheduler_url
       NAMESPACES    = join(" ", var.server_secret_namespaces)
     }
   }
+
+  depends_on = [time_sleep.wait_for_scheduler_nlb]
 }
 
 resource "local_file" "firecracker_hosts_gitops" {
