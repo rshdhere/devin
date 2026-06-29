@@ -13,7 +13,7 @@ set -euo pipefail
 REPO_URL="${DEVIN_REPO_URL:-https://github.com/rshdhere/devin.git}"
 REPO_REF="${DEVIN_REPO_REF:-main}"
 BUILD_DIR="${DEVIN_BUILD_DIR:-/opt/devin-build}"
-RUNTIMES="${DEVIN_RUNTIMES:-nextjs}"
+RUNTIMES="${DEVIN_RUNTIMES:-nextjs agent}"
 CONTAINER_REGISTRY="${DEVIN_CONTAINER_REGISTRY:-docker.io/rshdhere}"
 CONTAINER_IMAGE_TAG="${DEVIN_CONTAINER_IMAGE_TAG:-latest}"
 FIRECRACKER_VERSION="${FIRECRACKER_VERSION:-1.8.0}"
@@ -125,6 +125,9 @@ build_runtime() {
     [[ -f "${df}" ]] || continue
     grep -q ' unzip ' "${df}" || sed -i 's/openssh-client \\$/openssh-client unzip \\/' "${df}"
   done
+  if [[ "${DEVIN_FORCE_SNAPSHOT_REBUILD:-false}" == "true" ]]; then
+    sed -i 's/docker build /docker build --no-cache /' "${BUILD_DIR}/scripts/build-firecracker-rootfs.sh"
+  fi
   (
     cd "${BUILD_DIR}"
     export HOME=/root
@@ -135,6 +138,7 @@ build_runtime() {
     export FIRECRACKER_RUNTIME_PORT=8081
     export FIRECRACKER_SNAPSHOT_VCPU=1
     export FIRECRACKER_SNAPSHOT_MEM_MIB=512
+    export DEVIN_FORCE_SNAPSHOT_REBUILD="${DEVIN_FORCE_SNAPSHOT_REBUILD:-false}"
     mkdir -p "${GOCACHE}" "${GOPATH}"
     (cd apps/firecracker-host && go build -o /usr/local/bin/snapshot-cni ./cmd/snapshot-cni)
     ./scripts/build-firecracker-rootfs.sh "${runtime}"
@@ -147,7 +151,12 @@ start_services() {
     /usr/local/bin/devin-sync-platform-config.sh || true
   fi
   systemctl daemon-reload
-  systemctl enable --now devin-firecracker-host.service
+  if [[ "${DEVIN_FORCE_SNAPSHOT_REBUILD:-false}" == "true" ]]; then
+    systemctl restart devin-firecracker-host.service || true
+    sleep 5
+  else
+    systemctl enable --now devin-firecracker-host.service
+  fi
   systemctl enable --now devin-scheduler.service
   sleep 3
   curl -sf http://127.0.0.1:9092/health
@@ -158,6 +167,21 @@ start_services() {
 main() {
   require_root
   require_kvm
+
+  if [[ "${DEVIN_FORCE_SNAPSHOT_REBUILD:-false}" == "true" ]]; then
+    install_packages
+    install_firecracker
+    install_cni
+    install_kernel
+    mkdir -p /var/lib/devin/snapshots /var/lib/devin/vms
+    clone_repo
+    for runtime in ${RUNTIMES}; do
+      build_runtime "${runtime}"
+    done
+    start_services
+    log "forced rebuild done for: ${RUNTIMES}"
+    exit 0
+  fi
 
   if [[ -f "${MARKER}" ]]; then
     log "snapshots already bootstrapped (${MARKER})"

@@ -26,7 +26,11 @@ echo "building runtime supervisor binary..."
 (cd "${ROOT}/apps/runtime" && go build -o bin/runtime ./cmd/runtime)
 
 echo "building docker image ${IMAGE}..."
-docker build -f "${ROOT}/runtime/${RUNTIME}/Dockerfile" -t "${IMAGE}" "${ROOT}"
+BUILD_FLAGS=()
+if [[ "${DEVIN_FORCE_SNAPSHOT_REBUILD:-false}" == "true" ]]; then
+  BUILD_FLAGS+=(--no-cache)
+fi
+docker build "${BUILD_FLAGS[@]}" -f "${ROOT}/runtime/${RUNTIME}/Dockerfile" -t "${IMAGE}" "${ROOT}"
 
 mkdir -p "${OUT_DIR}"
 rm -f "${ROOTFS}"

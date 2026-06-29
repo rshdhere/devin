@@ -26,6 +26,10 @@ PAYLOAD="$(base64 -w0 "${BOOTSTRAP}" 2>/dev/null || base64 "${BOOTSTRAP}" | tr -
 COMMAND=$(cat <<EOS
 #!/bin/bash
 set -euo pipefail
+export DEVIN_RUNTIMES="${DEVIN_RUNTIMES:-nextjs agent}"
+export DEVIN_FORCE_SNAPSHOT_REBUILD="${DEVIN_FORCE_SNAPSHOT_REBUILD:-false}"
+export DEVIN_REPO_REF="${DEVIN_REPO_REF:-main}"
+export DEVIN_CONTAINER_IMAGE_TAG="${DEVIN_CONTAINER_IMAGE_TAG:-latest}"
 echo "${PAYLOAD}" | base64 -d >/tmp/devin-bootstrap-snapshots.sh
 chmod +x /tmp/devin-bootstrap-snapshots.sh
 /tmp/devin-bootstrap-snapshots.sh
