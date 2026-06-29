@@ -18,17 +18,8 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up Bun
-        uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: "1.2.3"
-
-      - name: Install dependencies
-        run: bun install --frozen-lockfile
-
-      - name: Build scheduler image (dry-run)
-        run: |
-          docker build -f docker/scheduler/Dockerfile -t devin-scheduler:ci .
+      - name: Build scheduler image
+        run: docker build -f docker/scheduler/Dockerfile -t devin-scheduler:ci .
 
   go:
     runs-on: ubuntu-latest

@@ -33,13 +33,19 @@ usage() {
 }
 
 discover_instances() {
-  aws ec2 describe-instances \
+  local output
+  if ! output="$(aws ec2 describe-instances \
     --region "$AWS_REGION" \
     --filters \
       "Name=tag:Role,Values=firecracker-execution-host" \
       "Name=instance-state-name,Values=running" \
     --query 'Reservations[].Instances[].InstanceId' \
-    --output text | tr '\t' '\n' | sed '/^$/d'
+    --output text 2>&1)"; then
+    echo "Failed to discover execution hosts in ${AWS_REGION}: ${output}" >&2
+    echo "Set EXECUTION_HOST_INSTANCE_IDS in GitHub or pass instance IDs explicitly." >&2
+    return 1
+  fi
+  echo "$output" | tr '\t' '\n' | sed '/^$/d'
 }
 
 remote_deploy_script() {

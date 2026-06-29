@@ -18,6 +18,11 @@ output "github_iam_sync_role_arn" {
   value       = aws_iam_role.github_iam_sync.arn
 }
 
+output "github_deploy_role_arn" {
+  description = "Set as repository variable AWS_DEPLOY_ROLE_ARN for the deploy-execution-hosts workflow."
+  value       = aws_iam_role.github_deploy.arn
+}
+
 output "github_oidc_provider_arn" {
   description = "GitHub Actions OIDC provider ARN for this AWS account."
   value       = aws_iam_openid_connect_provider.github.arn

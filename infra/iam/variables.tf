@@ -33,3 +33,9 @@ variable "github_iam_sync_role_name" {
   type        = string
   default     = "devin-github-iam-sync"
 }
+
+variable "github_deploy_role_name" {
+  description = "IAM role name GitHub Actions assumes via OIDC to deploy execution host containers."
+  type        = string
+  default     = "devin-github-deploy"
+}

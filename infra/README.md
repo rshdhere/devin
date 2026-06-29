@@ -101,7 +101,9 @@ On **execution hosts**, run `docker login` before enabling the systemd units if 
 
 Execution hosts are **not** rolled by GitOps. Runtime golden snapshots require a manual deploy with `rebuild_runtime_snapshots=true` or `./infra/scripts/run-ssm-bootstrap-snapshots.sh`.
 
-GitHub variables: `AWS_IAM_SYNC_ROLE_ARN` (OIDC), optional `AWS_DEPLOY_ROLE_ARN`, `AWS_REGION`, `DEVIN_NAME_PREFIX`.
+GitHub variables: `AWS_DEPLOY_ROLE_ARN` (from `terraform output -raw github_deploy_role_arn` in `infra/iam`), optional `EXECUTION_HOST_INSTANCE_IDS`, `AWS_REGION`, `DEVIN_NAME_PREFIX`.
+
+**One-time:** `cd infra/iam && terraform apply` to create `devin-github-deploy`, then set `AWS_DEPLOY_ROLE_ARN` in GitHub.
 
 Manual deploy:
 

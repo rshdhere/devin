@@ -65,3 +65,45 @@ resource "aws_iam_role_policy" "github_iam_sync" {
   role   = aws_iam_role.github_iam_sync.id
   policy = data.aws_iam_policy_document.github_iam_sync.json
 }
+
+# Execution host deploy — SSM pull/restart on Firecracker EC2 (separate from IAM sync).
+resource "aws_iam_role" "github_deploy" {
+  name               = var.github_deploy_role_name
+  assume_role_policy = data.aws_iam_policy_document.github_iam_sync_assume_role.json
+
+  tags = merge(var.tags, {
+    Project   = "devin"
+    ManagedBy = "terraform"
+    Purpose   = "github-actions-execution-host-deploy"
+  })
+}
+
+data "aws_iam_policy_document" "github_deploy" {
+  statement {
+    sid    = "DiscoverExecutionHosts"
+    effect = "Allow"
+    actions = [
+      "ec2:DescribeInstances",
+      "ec2:DescribeInstanceStatus",
+    ]
+    resources = ["*"]
+  }
+
+  statement {
+    sid    = "SSMDeployExecutionHosts"
+    effect = "Allow"
+    actions = [
+      "ssm:SendCommand",
+      "ssm:GetCommandInvocation",
+      "ssm:ListCommandInvocations",
+      "ssm:DescribeInstanceInformation",
+    ]
+    resources = ["*"]
+  }
+}
+
+resource "aws_iam_role_policy" "github_deploy" {
+  name   = "deploy-execution-hosts"
+  role   = aws_iam_role.github_deploy.id
+  policy = data.aws_iam_policy_document.github_deploy.json
+}

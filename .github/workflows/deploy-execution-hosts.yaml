@@ -14,7 +14,7 @@ on:
         description: "Docker image tag (default: commit SHA on main, or latest)"
         required: false
       instance_ids:
-        description: "Comma-separated EC2 instance IDs (default: discover by tag)"
+        description: "Comma-separated EC2 instance IDs (overrides EXECUTION_HOST_INSTANCE_IDS var)"
         required: false
       rebuild_runtime_snapshots:
         description: "Rebuild Firecracker golden snapshots on hosts (slow, 30–90 min)"
@@ -40,7 +40,18 @@ jobs:
       (github.event.workflow_run.conclusion == 'success' &&
        github.event.workflow_run.head_branch == 'main')
     runs-on: ubuntu-latest
+    env:
+      AWS_REGION: ${{ github.event.inputs.aws_region || vars.AWS_REGION || 'ap-south-1' }}
     steps:
+      - name: Require deploy role
+        run: |
+          if [[ -z "${{ vars.AWS_DEPLOY_ROLE_ARN }}" ]]; then
+            echo "::error::Missing repository variable AWS_DEPLOY_ROLE_ARN."
+            echo "Run: cd infra/iam && terraform apply"
+            echo "Then set AWS_DEPLOY_ROLE_ARN to: terraform output -raw github_deploy_role_arn"
+            exit 1
+          fi
+
       - name: Checkout
         uses: actions/checkout@v4
 
@@ -58,15 +69,31 @@ jobs:
           echo "tag=${tag}" >> "${GITHUB_OUTPUT}"
           echo "Deploying execution host images with tag: ${tag}"
 
+      - name: Resolve execution host instance IDs
+        id: hosts
+        run: |
+          set -euo pipefail
+          ids="${{ github.event.inputs.instance_ids }}"
+          if [[ -z "${ids}" ]]; then
+            ids="${{ vars.EXECUTION_HOST_INSTANCE_IDS }}"
+          fi
+          # Trim whitespace around commas
+          ids="$(echo "${ids}" | tr -d '[:space:]')"
+          echo "instance_ids=${ids}" >> "${GITHUB_OUTPUT}"
+          if [[ -n "${ids}" ]]; then
+            echo "Using instance IDs: ${ids}"
+          else
+            echo "No instance IDs configured — will discover by EC2 tag Role=firecracker-execution-host"
+          fi
+
       - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN != '' && vars.AWS_DEPLOY_ROLE_ARN || vars.AWS_IAM_SYNC_ROLE_ARN }}
-          aws-region: ${{ github.event.inputs.aws_region || vars.AWS_REGION || 'ap-south-1' }}
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
 
       - name: Deploy scheduler and firecracker-host
         env:
-          AWS_REGION: ${{ github.event.inputs.aws_region || vars.AWS_REGION || 'ap-south-1' }}
           DEVIN_IMAGE_TAG: ${{ steps.tag.outputs.tag }}
           DEVIN_CONTAINER_REGISTRY: docker.io/${{ secrets.DOCKERHUB_USERNAME }}
           DEVIN_NAME_PREFIX: ${{ vars.DEVIN_NAME_PREFIX || 'devin-production' }}
@@ -74,10 +101,9 @@ jobs:
           set -euo pipefail
           chmod +x infra/scripts/deploy-execution-host-images.sh
 
-          ids="${{ github.event.inputs.instance_ids }}"
+          ids="${{ steps.hosts.outputs.instance_ids }}"
           if [[ -n "${ids}" ]]; then
-            # shellcheck disable=SC2206
-            instances=(${ids//,/ })
+            IFS=',' read -ra instances <<< "${ids}"
             infra/scripts/deploy-execution-host-images.sh "${instances[@]}"
           else
             infra/scripts/deploy-execution-host-images.sh --discover
@@ -85,13 +111,11 @@ jobs:
 
       - name: Rebuild runtime snapshots (optional)
         if: github.event_name == 'workflow_dispatch' && github.event.inputs.rebuild_runtime_snapshots == 'true'
-        env:
-          AWS_REGION: ${{ github.event.inputs.aws_region || vars.AWS_REGION || 'ap-south-1' }}
         run: |
           set -euo pipefail
           chmod +x infra/scripts/run-ssm-bootstrap-snapshots.sh
 
-          ids="${{ github.event.inputs.instance_ids }}"
+          ids="${{ steps.hosts.outputs.instance_ids }}"
           if [[ -n "${ids}" ]]; then
             IFS=',' read -ra instances <<< "${ids}"
           else
