@@ -43,12 +43,25 @@ jobs:
     env:
       AWS_REGION: ${{ github.event.inputs.aws_region || vars.AWS_REGION || 'ap-south-1' }}
     steps:
-      - name: Require deploy role
+      - name: Resolve deploy role ARN
+        id: aws_role
         run: |
-          if [[ -z "${{ vars.AWS_DEPLOY_ROLE_ARN }}" ]]; then
-            echo "::error::Missing repository variable AWS_DEPLOY_ROLE_ARN."
-            echo "Run: cd infra/iam && terraform apply"
-            echo "Then set AWS_DEPLOY_ROLE_ARN to: terraform output -raw github_deploy_role_arn"
+          set -euo pipefail
+          deploy_arn="${{ vars.AWS_DEPLOY_ROLE_ARN }}"
+          sync_arn="${{ vars.AWS_IAM_SYNC_ROLE_ARN }}"
+          account_id="${{ vars.AWS_ACCOUNT_ID }}"
+
+          if [[ -n "$deploy_arn" ]]; then
+            echo "Using AWS_DEPLOY_ROLE_ARN"
+            echo "arn=${deploy_arn}" >> "${GITHUB_OUTPUT}"
+          elif [[ -n "$sync_arn" ]]; then
+            echo "Using AWS_IAM_SYNC_ROLE_ARN (also has execution host deploy permissions after infra/iam apply)"
+            echo "arn=${sync_arn}" >> "${GITHUB_OUTPUT}"
+          elif [[ -n "$account_id" ]]; then
+            echo "Using default role name devin-github-deploy in account ${account_id}"
+            echo "arn=arn:aws:iam::${account_id}:role/devin-github-deploy" >> "${GITHUB_OUTPUT}"
+          else
+            echo "::error::Set GitHub variable AWS_IAM_SYNC_ROLE_ARN (recommended), or AWS_DEPLOY_ROLE_ARN, or AWS_ACCOUNT_ID"
             exit 1
           fi
 
@@ -89,7 +102,7 @@ jobs:
       - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          role-to-assume: ${{ steps.aws_role.outputs.arn }}
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Deploy scheduler and firecracker-host

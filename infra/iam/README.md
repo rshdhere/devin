@@ -62,14 +62,12 @@ Repository → Settings → Secrets and variables → Actions → **Variables**:
 
 | Variable | Value |
 | --- | --- |
-| `AWS_IAM_SYNC_ROLE_ARN` | `terraform output -raw github_iam_sync_role_arn` |
-| `AWS_DEPLOY_ROLE_ARN` | `terraform output -raw github_deploy_role_arn` |
+| `AWS_IAM_SYNC_ROLE_ARN` | `terraform output -raw github_iam_sync_role_arn` — also used for execution host deploy |
+| `AWS_DEPLOY_ROLE_ARN` | Optional — `terraform output -raw github_deploy_role_arn` (dedicated least-privilege role) |
 | `AWS_REGION` | `ap-south-1` (region where execution hosts run) |
 | `EXECUTION_HOST_INSTANCE_IDS` | Optional — comma-separated instance IDs (skips EC2 discover) |
 
-No `AWS_ACCESS_KEY_ID` / secret key in GitHub. Workflows use [OIDC](https://docs.github.com/en/actions/deployment/security-hardening-your-deployments/configuring-openid-connect-in-amazon-web-services) to mint short-lived credentials.
-
-**Do not** point `AWS_DEPLOY_ROLE_ARN` at `devin-github-iam-sync` — that role can only update IAM policies, not run SSM on EC2.
+After changing `github.tf`, run `terraform apply` in `infra/iam` so the sync role receives SSM/EC2 deploy permissions.
 
 ### 4. Verify
 
@@ -82,9 +80,9 @@ Merge a trivial change to `devin-infra-policy.json` (or run **sync-iam-policy** 
 | Long-lived access keys in GitHub Secrets | Avoid — keys can leak and are hard to rotate |
 | **GitHub OIDC → IAM role** | Preferred — scoped to `repo:rshdhere/devin`, ~1h session, no stored secrets |
 
-The sync role can **only** update `devin-infra-terraform` (not admin, not other policies).
+The sync role updates `devin-infra-terraform` **and** (after `terraform apply`) can deploy execution hosts via SSM.
 
-The deploy role (`devin-github-deploy`) can **only** describe EC2 instances and run SSM commands for execution host rolls.
+The optional deploy role (`devin-github-deploy`) has the same SSM/EC2 permissions for least-privilege setups.
 
 To tighten further, change `github_repository` in `variables.tf` or add a GitHub Environment with `token.actions.githubusercontent.com:sub` conditions.
 
