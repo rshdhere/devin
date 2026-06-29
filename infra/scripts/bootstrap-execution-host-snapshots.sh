@@ -102,8 +102,13 @@ clone_repo() {
   if [[ -d "${BUILD_DIR}/.git" ]]; then
     log "updating repo at ${BUILD_DIR}"
     git -C "${BUILD_DIR}" fetch --depth 1 origin "${REPO_REF}"
-    git -C "${BUILD_DIR}" checkout "${REPO_REF}"
-    git -C "${BUILD_DIR}" pull --ff-only origin "${REPO_REF}" 2>/dev/null || true
+    if [[ "${DEVIN_FORCE_SNAPSHOT_REBUILD:-false}" == "true" ]]; then
+      git -C "${BUILD_DIR}" reset --hard "origin/${REPO_REF}"
+      git -C "${BUILD_DIR}" clean -fdx -e .gocache -e .gomodcache
+    else
+      git -C "${BUILD_DIR}" checkout "${REPO_REF}"
+      git -C "${BUILD_DIR}" pull --ff-only origin "${REPO_REF}" 2>/dev/null || true
+    fi
     return
   fi
   log "cloning ${REPO_URL} (${REPO_REF})"
