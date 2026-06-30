@@ -113,6 +113,8 @@ function shouldUseSecureCookies(): boolean {
   return process.env.NODE_ENV === "production";
 }
 
+const useSecureCookies = shouldUseSecureCookies();
+
 export const auth = betterAuth({
   basePath: "/api/v1/auth",
   baseURL: process.env.BETTER_AUTH_URL,
@@ -125,7 +127,14 @@ export const auth = betterAuth({
     },
   },
   advanced: {
-    useSecureCookies: shouldUseSecureCookies(),
+    useSecureCookies,
+    defaultCookieAttributes: {
+      sameSite: crossSubDomainCookieDomain
+        ? ("none" as const)
+        : ("lax" as const),
+      secure: useSecureCookies,
+      path: "/",
+    },
     ...(crossSubDomainCookieDomain
       ? {
           crossSubDomainCookies: {

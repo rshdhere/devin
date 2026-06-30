@@ -55,14 +55,20 @@ export function logAuthConfig() {
   const crossSubDomainCookieDomain = resolveCrossSubDomainCookieDomain();
   const useSecureCookies = shouldUseSecureCookies();
 
+  console.log(`auth config debug:`);
+  console.log(`  WEB_APP_URL: ${process.env.WEB_APP_URL ?? "(not set)"}`);
+  console.log(
+    `  BETTER_AUTH_URL: ${process.env.BETTER_AUTH_URL ?? "(not set)"}`,
+  );
+  console.log(`  NODE_ENV: ${process.env.NODE_ENV ?? "(not set)"}`);
   console.log(`auth allowed origins: ${allowedOrigins.join(", ")}`);
   console.log(
     `auth secure cookies: ${useSecureCookies ? "enabled" : "disabled"}`,
   );
   console.log(
     crossSubDomainCookieDomain
-      ? `auth cross-subdomain cookie domain: ${crossSubDomainCookieDomain}`
-      : "auth cross-subdomain cookies: disabled",
+      ? `auth cross-subdomain cookie domain: ${crossSubDomainCookieDomain} (sameSite=none, secure=true)`
+      : "auth cross-subdomain cookies: disabled (WEB_APP_URL or BETTER_AUTH_URL not set, or same host)",
   );
 
   const hasOAuth =
