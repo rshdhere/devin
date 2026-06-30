@@ -128,13 +128,6 @@ export const auth = betterAuth({
   },
   advanced: {
     useSecureCookies,
-    defaultCookieAttributes: {
-      sameSite: crossSubDomainCookieDomain
-        ? ("none" as const)
-        : ("lax" as const),
-      secure: useSecureCookies,
-      path: "/",
-    },
     ...(crossSubDomainCookieDomain
       ? {
           crossSubDomainCookies: {
