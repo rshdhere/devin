@@ -105,7 +105,23 @@ fi
 
 AWS_REGION="${AWS_REGION}" SSM_PREFIX="${SSM_PREFIX}" /usr/local/bin/devin-sync-platform-config.sh
 systemctl is-active devin-scheduler.service || systemctl status devin-scheduler.service --no-pager || true
-curl -sf http://127.0.0.1:9091/health || echo "scheduler health check failed"
+
+# Health check with retry (scheduler may take a moment after restart)
+health_check_passed=false
+for i in 1 2 3 4 5; do
+  sleep 2
+  if curl -sf http://127.0.0.1:9091/health >/dev/null 2>&1; then
+    health_check_passed=true
+    echo "scheduler health check passed (attempt \$i)"
+    break
+  fi
+  echo "scheduler health check attempt \$i failed, retrying..."
+done
+
+if [ "\$health_check_passed" = false ]; then
+  echo "scheduler health check failed after 5 attempts"
+  journalctl -u devin-scheduler.service --no-pager -n 20 || true
+fi
 EOS
 )
 

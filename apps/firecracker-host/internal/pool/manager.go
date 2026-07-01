@@ -4,11 +4,13 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/rs/xid"
 
+	"github.com/rshdhere/devin/apps/firecracker-host/internal/cnihelper"
 	"github.com/rshdhere/devin/apps/firecracker-host/internal/config"
 	"github.com/rshdhere/devin/apps/firecracker-host/internal/snapshot"
 	"github.com/rshdhere/devin/apps/firecracker-host/internal/vm"
@@ -95,6 +97,12 @@ func (m *Manager) Start(ctx context.Context) {
 		return
 	}
 
+	if err := cnihelper.CleanupStaleAllocations(m.cfg.CNINetworkName); err != nil {
+		slog.Warn("failed to cleanup stale CNI allocations on startup", "error", err)
+	} else {
+		slog.Info("cleaned up stale CNI allocations on startup")
+	}
+
 	runtimes, err := m.snapshotStore().ListRuntimes()
 	if err != nil {
 		slog.Error("failed to list snapshot runtimes", "error", err)
@@ -174,7 +182,7 @@ func (m *Manager) warmRuntimePool(ctx context.Context, runtime string, queue cha
 
 func (m *Manager) launchWarm(ctx context.Context, runtime string) (*vm.Instance, error) {
 	vmID := xid.New().String()
-	return m.launcher.Restore(
+	instance, err := m.launcher.Restore(
 		ctx,
 		vmID,
 		"warm-"+vmID,
@@ -182,6 +190,22 @@ func (m *Manager) launchWarm(ctx context.Context, runtime string) (*vm.Instance,
 		m.cfg.WarmVCPU,
 		fmt.Sprintf("%dMi", m.cfg.WarmMemoryMiB),
 	)
+	if err != nil && isCNIAllocationError(err) {
+		slog.Warn("CNI allocation failed, cleaning stale state and retrying", "vmId", vmID, "error", err)
+		if cleanErr := cnihelper.CleanupStaleAllocations(m.cfg.CNINetworkName); cleanErr != nil {
+			slog.Warn("failed to cleanup stale CNI allocations", "error", cleanErr)
+		}
+		vmID = xid.New().String()
+		instance, err = m.launcher.Restore(
+			ctx,
+			vmID,
+			"warm-"+vmID,
+			runtime,
+			m.cfg.WarmVCPU,
+			fmt.Sprintf("%dMi", m.cfg.WarmMemoryMiB),
+		)
+	}
+	return instance, err
 }
 
 func (m *Manager) Create(name, runtime, taskID string, cpu int32, memory string) (*VMRecord, error) {
@@ -289,6 +313,24 @@ func (m *Manager) takeWarm(runtime, name string) (*vm.Instance, bool) {
 func (m *Manager) provisionCold(vmID, name, runtime string, cpu int32, memory string) {
 	ctx := context.Background()
 	instance, err := m.launcher.Restore(ctx, vmID, name, runtime, cpu, memory)
+
+	if err != nil && isCNIAllocationError(err) {
+		slog.Warn("CNI allocation failed during cold provision, cleaning stale state and retrying",
+			"vmId", vmID, "error", err)
+		if cleanErr := cnihelper.CleanupStaleAllocations(m.cfg.CNINetworkName); cleanErr != nil {
+			slog.Warn("failed to cleanup stale CNI allocations", "error", cleanErr)
+		}
+		newVMID := xid.New().String()
+		m.mu.Lock()
+		if pending, ok := m.vms[vmID]; ok {
+			pending.Message = "retrying after CNI cleanup"
+			m.vms[newVMID] = pending
+			delete(m.vms, vmID)
+		}
+		m.mu.Unlock()
+		vmID = newVMID
+		instance, err = m.launcher.Restore(ctx, vmID, name, runtime, cpu, memory)
+	}
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -415,4 +457,14 @@ func formatUsedMemoryMiB(mib int32) string {
 		return fmt.Sprintf("%dGi", mib/1024)
 	}
 	return fmt.Sprintf("%dMi", mib)
+}
+
+func isCNIAllocationError(err error) bool {
+	if err == nil {
+		return false
+	}
+	errStr := err.Error()
+	return strings.Contains(errStr, "failed to allocate") ||
+		strings.Contains(errStr, "not available in range") ||
+		strings.Contains(errStr, "failed to create CNI network")
 }

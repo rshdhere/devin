@@ -1,13 +1,16 @@
 package executil
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -15,6 +18,12 @@ type Result struct {
 	Stdout   string
 	Stderr   string
 	ExitCode int
+}
+
+type OutputLine struct {
+	Stream string // "stdout" or "stderr"
+	Line   string
+	Time   time.Time
 }
 
 func Run(ctx context.Context, cwd, command string, env []string) (*Result, error) {
@@ -78,4 +87,78 @@ func CombinedOutput(result *Result) string {
 		return result.Stderr
 	}
 	return fmt.Sprintf("%s\n%s", result.Stdout, result.Stderr)
+}
+
+type OnOutputFunc func(line OutputLine)
+
+func RunStreaming(ctx context.Context, cwd, command string, env []string, onOutput OnOutputFunc) (*Result, error) {
+	if cwd == "" {
+		cwd = "."
+	}
+	if err := os.MkdirAll(cwd, 0o755); err != nil {
+		return nil, err
+	}
+
+	cmd := exec.CommandContext(ctx, "/bin/sh", "-lc", command)
+	cmd.Dir = filepath.Clean(cwd)
+	cmd.Env = append(os.Environ(), env...)
+
+	stdoutPipe, err := cmd.StdoutPipe()
+	if err != nil {
+		return nil, fmt.Errorf("stdout pipe: %w", err)
+	}
+	stderrPipe, err := cmd.StderrPipe()
+	if err != nil {
+		return nil, fmt.Errorf("stderr pipe: %w", err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	var wg sync.WaitGroup
+
+	streamReader := func(pipe io.Reader, stream string, buf *bytes.Buffer) {
+		defer wg.Done()
+		scanner := bufio.NewScanner(pipe)
+		scanner.Buffer(make([]byte, 64*1024), 1024*1024)
+		for scanner.Scan() {
+			line := scanner.Text()
+			buf.WriteString(line)
+			buf.WriteString("\n")
+			if onOutput != nil {
+				onOutput(OutputLine{
+					Stream: stream,
+					Line:   line,
+					Time:   time.Now(),
+				})
+			}
+		}
+	}
+
+	wg.Add(2)
+	go streamReader(stdoutPipe, "stdout", &stdout)
+	go streamReader(stderrPipe, "stderr", &stderr)
+
+	if err := cmd.Start(); err != nil {
+		return nil, fmt.Errorf("start command: %w", err)
+	}
+
+	wg.Wait()
+
+	err = cmd.Wait()
+	exitCode := 0
+	if err != nil {
+		var exitErr *exec.ExitError
+		if ok := asExitError(err, &exitErr); ok {
+			exitCode = exitErr.ExitCode()
+		} else if ctx.Err() != nil {
+			return nil, ctx.Err()
+		} else {
+			return nil, err
+		}
+	}
+
+	return &Result{
+		Stdout:   strings.TrimSpace(stdout.String()),
+		Stderr:   strings.TrimSpace(stderr.String()),
+		ExitCode: exitCode,
+	}, nil
 }

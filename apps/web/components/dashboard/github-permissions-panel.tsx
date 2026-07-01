@@ -259,12 +259,17 @@ export function GitHubPermissionsPanel({
         {permissionItems.map((item) => {
           const Icon = item.icon;
           const enabled = status.permissions[item.key];
-          const disabled = isSaving || !status.hasRepoAccess;
+          const isBotRequired = item.key === "canCreateRepo";
+          const botUnavailable = isBotRequired && !status.bot.configured;
+          const disabled = isSaving || !status.hasRepoAccess || botUnavailable;
 
           return (
             <div
               key={item.key}
-              className="flex items-center justify-between gap-3 rounded-lg border border-[#252525] bg-[#111] px-3 py-2.5"
+              className={cn(
+                "flex items-center justify-between gap-3 rounded-lg border border-[#252525] bg-[#111] px-3 py-2.5",
+                botUnavailable && "opacity-60",
+              )}
             >
               <div className="flex min-w-0 items-start gap-2.5">
                 <Icon className="mt-0.5 size-4 shrink-0 text-gray-500" />
@@ -272,7 +277,9 @@ export function GitHubPermissionsPanel({
                   <p className="text-[13px] text-gray-200">{item.label}</p>
                   {!compact ? (
                     <p className="text-[11px] text-gray-600">
-                      {item.description}
+                      {botUnavailable
+                        ? "Platform bot not configured by admin"
+                        : item.description}
                     </p>
                   ) : null}
                 </div>
@@ -283,14 +290,14 @@ export function GitHubPermissionsPanel({
                 onClick={() => togglePermission(item.key)}
                 className={cn(
                   "relative h-5 w-9 shrink-0 cursor-pointer rounded-full transition-colors disabled:cursor-not-allowed disabled:opacity-40",
-                  enabled ? "bg-[#4a90e2]" : "bg-[#333]",
+                  enabled && !botUnavailable ? "bg-[#4a90e2]" : "bg-[#333]",
                 )}
                 aria-label={`Toggle ${item.label}`}
               >
                 <span
                   className={cn(
                     "absolute top-0.5 size-4 rounded-full bg-white transition-transform",
-                    enabled ? "left-[18px]" : "left-0.5",
+                    enabled && !botUnavailable ? "left-[18px]" : "left-0.5",
                   )}
                 />
               </MotionButton>
@@ -314,14 +321,23 @@ export function GitHubPermissionsPanel({
         </p>
       ) : null}
 
-      <div className="mt-4 rounded-lg border border-[#252525] bg-[#111] px-3 py-2.5">
+      <div
+        className={cn(
+          "mt-4 rounded-lg border px-3 py-2.5",
+          status.bot.configured
+            ? "border-[#252525] bg-[#111]"
+            : "border-amber-500/30 bg-amber-500/5",
+        )}
+      >
         <div className="flex items-center justify-between gap-3">
           <div>
             <p className="text-[13px] text-gray-200">
               Platform bot: @{status.bot.username}
             </p>
             <p className="text-[11px] text-gray-600">
-              Used for new repo creation when no repository is selected
+              {status.bot.configured
+                ? "Used for new repo creation when no repository is selected"
+                : "Bot token not set. Contact admin to enable repo creation."}
             </p>
           </div>
           <span

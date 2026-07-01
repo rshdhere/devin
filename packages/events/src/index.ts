@@ -10,6 +10,7 @@ export type TaskEventType =
   | "agent.running"
   | "agent.started"
   | "agent.log"
+  | "agent.output"
   | "agent.tool"
   | "agent.completed"
   | "agent.failed"

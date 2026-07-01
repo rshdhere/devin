@@ -39,6 +39,7 @@ export type TaskEventType =
   | "runtime.ready"
   | "agent.running"
   | "agent.log"
+  | "agent.output"
   | "agent.tool"
   | "git.clone"
   | "git.commit"
@@ -287,8 +288,22 @@ export function eventTypeLabel(type: TaskEventType): string {
       return "Agent";
     case "agent.log":
       return "Agent log";
+    case "agent.output":
+      return "Output";
     case "agent.tool":
       return "Tool";
+    case "git.repo":
+      return "Repo created";
+    case "git.clone":
+      return "Git clone";
+    case "git.commit":
+      return "Git commit";
+    case "git.push":
+      return "Git push";
+    case "git.pr":
+      return "Pull request";
+    case "git.issue":
+      return "Issue created";
     default:
       return type.replace(/\./g, " ");
   }

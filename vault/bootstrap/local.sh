@@ -50,6 +50,8 @@ vault kv put secret/dev/server \
   RESEND_STRICT="false" \
   GITHUB_CLIENT_ID="" \
   GITHUB_CLIENT_SECRET="" \
+  GITHUB_BOT_TOKEN="" \
+  GITHUB_BOT_NAME="baby-devin-bot" \
   GOOGLE_CLIENT_ID="" \
   GOOGLE_CLIENT_SECRET=""
 
@@ -57,7 +59,10 @@ vault kv put secret/dev/scheduler \
   ORCHESTRATOR_URL="http://localhost:9090" \
   CURSOR_API_KEY="" \
   ANTHROPIC_API_KEY="" \
-  DEFAULT_AGENT="mock"
+  DEFAULT_AGENT="mock" \
+  GITHUB_BOT_TOKEN="" \
+  GITHUB_BOT_NAME="baby-devin-bot" \
+  GITHUB_BOT_EMAIL="baby-devin-bot@users.noreply.github.com"
 
 vault kv put secret/dev/ci \
   DOCKERHUB_USERNAME="" \

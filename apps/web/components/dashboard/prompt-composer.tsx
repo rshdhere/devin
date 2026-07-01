@@ -5,6 +5,8 @@ import {
   ArrowUp,
   Bot,
   ChevronDown,
+  FolderPlus,
+  GitBranch,
   Loader2,
   Mic,
   MoreHorizontal,
@@ -27,6 +29,8 @@ function slugifyRepositoryName(prompt: string): string {
     .slice(0, 40);
   return slug || "devin-project";
 }
+
+type RepoMode = "existing" | "create";
 
 const MIN_TEXTAREA_HEIGHT = 72;
 
@@ -58,6 +62,11 @@ export function PromptComposer({ selectedRepository }: PromptComposerProps) {
   const [showAgentMenu, setShowAgentMenu] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [repoMode, setRepoMode] = useState<RepoMode>(
+    selectedRepository ? "existing" : "create",
+  );
+  const [newRepoName, setNewRepoName] = useState("");
+  const [showRepoOptions, setShowRepoOptions] = useState(false);
 
   useLayoutEffect(() => {
     const textarea = textareaRef.current;
@@ -67,6 +76,12 @@ export function PromptComposer({ selectedRepository }: PromptComposerProps) {
     const nextHeight = Math.max(MIN_TEXTAREA_HEIGHT, textarea.scrollHeight);
     setTextareaHeight(nextHeight);
   }, [prompt, showTerminalBanner]);
+
+  useLayoutEffect(() => {
+    if (selectedRepository) {
+      setRepoMode("existing");
+    }
+  }, [selectedRepository]);
 
   async function handleSubmit() {
     const trimmed = prompt.trim();
@@ -78,15 +93,22 @@ export function PromptComposer({ selectedRepository }: PromptComposerProps) {
     setError(null);
 
     try {
+      const finalRepoName =
+        repoMode === "create"
+          ? newRepoName.trim() || slugifyRepositoryName(trimmed)
+          : undefined;
+
       await startSession({
         prompt: trimmed,
         agent,
-        repository: selectedRepository ?? undefined,
-        createRepository: selectedRepository
-          ? undefined
-          : slugifyRepositoryName(trimmed),
+        repository:
+          repoMode === "existing"
+            ? (selectedRepository ?? undefined)
+            : undefined,
+        createRepository: finalRepoName,
       });
       setPrompt("");
+      setNewRepoName("");
     } catch (submitError) {
       setError(
         submitError instanceof Error
@@ -204,6 +226,99 @@ export function PromptComposer({ selectedRepository }: PromptComposerProps) {
                 ))}
               </div>
             ) : null}
+
+            <div className="relative">
+              <MotionButton
+                type="button"
+                onClick={() => setShowRepoOptions((open) => !open)}
+                className={cn(
+                  "flex cursor-pointer items-center gap-1.5 rounded-full border px-2.5 py-1 text-[13px] transition-colors hover:bg-[#222]",
+                  repoMode === "create"
+                    ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-400"
+                    : "border-[#333] bg-[#161616] text-gray-300 hover:text-white",
+                )}
+              >
+                {repoMode === "create" ? (
+                  <FolderPlus className="size-3.5" strokeWidth={1.75} />
+                ) : (
+                  <GitBranch
+                    className="size-3.5 text-gray-400"
+                    strokeWidth={1.75}
+                  />
+                )}
+                {repoMode === "create"
+                  ? newRepoName || "New repo"
+                  : selectedRepository
+                    ? selectedRepository.split("/")[1]
+                    : "Select repo"}
+                <ChevronDown className="size-3 text-gray-500" />
+              </MotionButton>
+
+              {showRepoOptions ? (
+                <div className="absolute top-full left-0 z-50 mt-1 min-w-[220px] overflow-hidden rounded-xl border border-[#333] bg-[#1e1e1e] py-1 shadow-2xl">
+                  <MotionButton
+                    type="button"
+                    onClick={() => {
+                      setRepoMode("create");
+                      setShowRepoOptions(false);
+                    }}
+                    className={cn(
+                      "flex w-full cursor-pointer items-center gap-2 px-3 py-2.5 text-left text-[13px] transition-colors hover:bg-[#252525]",
+                      repoMode === "create"
+                        ? "text-emerald-400"
+                        : "text-gray-400",
+                    )}
+                  >
+                    <FolderPlus className="size-4" />
+                    <div>
+                      <p className="font-medium">Create new repository</p>
+                      <p className="text-[11px] text-gray-500">
+                        Co-authored by baby-devin-bot
+                      </p>
+                    </div>
+                  </MotionButton>
+
+                  {selectedRepository ? (
+                    <MotionButton
+                      type="button"
+                      onClick={() => {
+                        setRepoMode("existing");
+                        setShowRepoOptions(false);
+                      }}
+                      className={cn(
+                        "flex w-full cursor-pointer items-center gap-2 px-3 py-2.5 text-left text-[13px] transition-colors hover:bg-[#252525]",
+                        repoMode === "existing"
+                          ? "text-white"
+                          : "text-gray-400",
+                      )}
+                    >
+                      <GitBranch className="size-4" />
+                      <div>
+                        <p className="font-medium">{selectedRepository}</p>
+                        <p className="text-[11px] text-gray-500">
+                          Use selected repo
+                        </p>
+                      </div>
+                    </MotionButton>
+                  ) : null}
+
+                  {repoMode === "create" ? (
+                    <div className="border-t border-[#333] px-3 py-2">
+                      <input
+                        type="text"
+                        value={newRepoName}
+                        onChange={(event) => setNewRepoName(event.target.value)}
+                        placeholder="repo-name (optional)"
+                        className="w-full rounded-lg border border-[#333] bg-[#111] px-2.5 py-1.5 text-[12px] text-white placeholder:text-gray-600 focus:border-emerald-500/50 focus:outline-none"
+                      />
+                      <p className="mt-1.5 text-[10px] text-gray-500">
+                        Leave empty to auto-generate from prompt
+                      </p>
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
+            </div>
 
             <MotionButton
               type="button"

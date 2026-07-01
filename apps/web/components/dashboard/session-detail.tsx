@@ -7,7 +7,9 @@ import {
   CheckCircle2,
   ChevronDown,
   ChevronRight,
+  Clock,
   ExternalLink,
+  FolderPlus,
   GitBranch,
   GitCommit,
   GitPullRequest,
@@ -38,6 +40,43 @@ interface SessionDetailProps {
   onBack: () => void;
 }
 
+function formatElapsedTime(startTime: string): string {
+  const start = new Date(startTime).getTime();
+  const now = Date.now();
+  const elapsed = Math.floor((now - start) / 1000);
+
+  if (elapsed < 60) {
+    return `${elapsed}s`;
+  }
+  if (elapsed < 3600) {
+    const mins = Math.floor(elapsed / 60);
+    const secs = elapsed % 60;
+    return `${mins}m ${secs}s`;
+  }
+  const hours = Math.floor(elapsed / 3600);
+  const mins = Math.floor((elapsed % 3600) / 60);
+  return `${hours}h ${mins}m`;
+}
+
+function useElapsedTime(startTime: string, isActive: boolean): string {
+  const [elapsed, setElapsed] = useState(() => formatElapsedTime(startTime));
+
+  useEffect(() => {
+    if (!isActive) {
+      setElapsed(formatElapsedTime(startTime));
+      return;
+    }
+
+    const interval = setInterval(() => {
+      setElapsed(formatElapsedTime(startTime));
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [startTime, isActive]);
+
+  return elapsed;
+}
+
 function eventIcon(type: TaskEvent["type"]) {
   if (type.startsWith("sandbox.")) {
     if (type === "sandbox.failed") return XCircle;
@@ -50,8 +89,10 @@ function eventIcon(type: TaskEvent["type"]) {
   if (type.startsWith("git.")) {
     if (type === "git.pr") return GitPullRequest;
     if (type === "git.commit") return GitCommit;
+    if (type === "git.repo") return FolderPlus;
     return GitBranch;
   }
+  if (type === "agent.output") return Terminal;
   if (type === "task.completed") return CheckCircle2;
   if (type === "task.failed") return XCircle;
   return Terminal;
@@ -71,7 +112,9 @@ function eventColor(type: TaskEvent["type"]) {
   if (type.startsWith("sandbox.") || type.startsWith("runtime.")) {
     return "text-amber-300";
   }
+  if (type === "git.repo") return "text-emerald-400";
   if (type.startsWith("git.")) return "text-[#5a9fd4]";
+  if (type === "agent.output") return "text-green-400";
   return "text-gray-400";
 }
 
@@ -315,11 +358,99 @@ function DiagnosticsPanel({
   );
 }
 
+function AgentTerminalPanel({
+  events,
+  isActive,
+}: {
+  events: TaskEvent[];
+  isActive: boolean;
+}) {
+  const terminalRef = useRef<HTMLDivElement>(null);
+  const [isExpanded, setIsExpanded] = useState(true);
+
+  const outputLines = events
+    .filter((event) => event.type === "agent.output")
+    .map((event) => ({
+      line: event.message,
+      stream: (event.data?.stream as string) ?? "stdout",
+      time: event.timestamp,
+    }));
+
+  useEffect(() => {
+    if (terminalRef.current && isExpanded) {
+      terminalRef.current.scrollTop = terminalRef.current.scrollHeight;
+    }
+  }, [outputLines.length, isExpanded]);
+
+  if (outputLines.length === 0) {
+    return null;
+  }
+
+  return (
+    <div className="mb-4 overflow-hidden rounded-xl border border-[#2a2a2a] bg-[#0a0a0a]">
+      <button
+        type="button"
+        onClick={() => setIsExpanded((prev) => !prev)}
+        className="flex w-full cursor-pointer items-center justify-between border-b border-[#252525] px-4 py-2.5 text-left transition-colors hover:bg-[#111]"
+      >
+        <div className="flex items-center gap-2">
+          <Terminal className="size-4 text-green-400" />
+          <h2 className="text-[13px] font-medium text-gray-300">
+            Agent Output
+          </h2>
+          {isActive ? (
+            <span className="flex items-center gap-1 text-[11px] text-green-400">
+              <span className="size-1.5 animate-pulse rounded-full bg-green-400" />
+              Live
+            </span>
+          ) : null}
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="text-[11px] text-gray-500">
+            {outputLines.length} lines
+          </span>
+          {isExpanded ? (
+            <ChevronDown className="size-4 text-gray-500" />
+          ) : (
+            <ChevronRight className="size-4 text-gray-500" />
+          )}
+        </div>
+      </button>
+
+      {isExpanded ? (
+        <div
+          ref={terminalRef}
+          className="max-h-[400px] overflow-auto p-3 font-mono text-[12px] leading-relaxed"
+        >
+          {outputLines.map((output, index) => (
+            <div
+              key={index}
+              className={cn(
+                "break-all whitespace-pre-wrap",
+                output.stream === "stderr" ? "text-red-400" : "text-green-300",
+              )}
+            >
+              {output.line}
+            </div>
+          ))}
+          {isActive ? (
+            <div className="mt-1 flex items-center gap-1 text-gray-500">
+              <Loader2 className="size-3 animate-spin" />
+              <span>Waiting for output...</span>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function EventRow({ event }: { event: TaskEvent }) {
   const [expanded, setExpanded] = useState(false);
   const Icon = eventIcon(event.type);
   const details = formatEventData(event.data);
   const hasDetails = details.length > 0;
+  const isRepoCreated = event.type === "git.repo";
 
   return (
     <div className="rounded-lg px-2 py-2 transition-colors hover:bg-[#1a1a1a]/50">
@@ -350,6 +481,16 @@ function EventRow({ event }: { event: TaskEvent }) {
                 Open PR
               </a>
             ) : null}
+            {event.data?.htmlUrl ? (
+              <a
+                href={String(event.data.htmlUrl)}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-[#5a9fd4] hover:underline"
+              >
+                {isRepoCreated ? "Open repo" : "View"}
+              </a>
+            ) : null}
             {hasDetails ? (
               <button
                 type="button"
@@ -365,6 +506,11 @@ function EventRow({ event }: { event: TaskEvent }) {
               </button>
             ) : null}
           </div>
+          {isRepoCreated ? (
+            <p className="mt-1 text-[11px] text-emerald-400/80">
+              Co-authored by @baby-devin-bot
+            </p>
+          ) : null}
           {expanded && hasDetails ? (
             <pre className="mt-2 overflow-x-auto rounded-md bg-[#0d0d0d] px-2.5 py-2 font-mono text-[11px] leading-relaxed text-gray-400">
               {details.join("\n")}
@@ -391,6 +537,15 @@ export function SessionDetail({
   const [diagnosticsLoading, setDiagnosticsLoading] = useState(false);
   const [diagnosticsError, setDiagnosticsError] = useState<string | null>(null);
   const feedRef = useRef<HTMLDivElement>(null);
+
+  const isActive =
+    task.status !== "completed" &&
+    task.status !== "failed" &&
+    task.status !== "cancelled";
+
+  const elapsedTime = useElapsedTime(task.createdAt, isActive);
+  const isLongRunning =
+    isActive && Date.now() - new Date(task.createdAt).getTime() > 5 * 60 * 1000;
 
   const loadDiagnostics = useCallback(async (taskId: string) => {
     setDiagnosticsLoading(true);
@@ -483,11 +638,6 @@ export function SessionDetail({
     });
   }, [events.length]);
 
-  const isActive =
-    task.status !== "completed" &&
-    task.status !== "failed" &&
-    task.status !== "cancelled";
-
   const showDiagnostics =
     task.status === "failed" ||
     task.status === "sandbox_starting" ||
@@ -521,6 +671,15 @@ export function SessionDetail({
             >
               {isActive ? <Loader2 className="size-3 animate-spin" /> : null}
               {taskStatusLabel(task.status)}
+            </span>
+            <span
+              className={cn(
+                "inline-flex items-center gap-1",
+                isLongRunning ? "text-amber-400" : "text-gray-500",
+              )}
+            >
+              <Clock className="size-3" />
+              {elapsedTime}
             </span>
             {task.repository ? (
               <>
@@ -556,6 +715,23 @@ export function SessionDetail({
         </p>
       </div>
 
+      {isLongRunning ? (
+        <div className="mb-4 flex items-center gap-2.5 rounded-xl border border-amber-500/30 bg-amber-500/5 px-4 py-3">
+          <Clock className="size-4 shrink-0 text-amber-400" />
+          <div>
+            <p className="text-[13px] font-medium text-amber-200">
+              Long-running task
+            </p>
+            <p className="text-[12px] text-amber-200/70">
+              This task has been running for {elapsedTime}. Complex tasks may
+              take longer — the agent is still working.
+            </p>
+          </div>
+        </div>
+      ) : null}
+
+      <AgentTerminalPanel events={events} isActive={isActive} />
+
       {showDiagnostics ? (
         <DiagnosticsPanel
           task={task}
@@ -582,7 +758,9 @@ export function SessionDetail({
               Waiting for sandbox and agent activity…
             </div>
           ) : (
-            events.map((event) => <EventRow key={event.id} event={event} />)
+            events
+              .filter((event) => event.type !== "agent.output")
+              .map((event) => <EventRow key={event.id} event={event} />)
           )}
         </div>
 

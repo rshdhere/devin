@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/rshdhere/devin/apps/runtime/internal/executil"
 )
@@ -41,7 +42,18 @@ func (r *ClaudeRunner) Run(
 	command := shellQuote(r.cfg.ClaudeBin) + " " + joinShellArgs(args)
 	publish("agent.log", "running claude code", map[string]any{"command": command})
 
-	result, err := executil.Run(ctx, r.cfg.Workspace, command, mergeEnv(req))
+	var lastPublish time.Time
+	onOutput := func(line executil.OutputLine) {
+		if time.Since(lastPublish) < 100*time.Millisecond && len(line.Line) < 200 {
+			return
+		}
+		lastPublish = time.Now()
+		publish("agent.output", line.Line, map[string]any{
+			"stream": line.Stream,
+		})
+	}
+
+	result, err := executil.RunStreaming(ctx, r.cfg.Workspace, command, mergeEnv(req), onOutput)
 	if err != nil {
 		return nil, err
 	}

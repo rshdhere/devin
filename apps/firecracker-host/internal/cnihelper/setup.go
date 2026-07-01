@@ -3,6 +3,7 @@ package cnihelper
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"net"
 	"os"
 	"os/exec"
@@ -239,6 +240,84 @@ func GuestIPArgs(guestIP string) [][2]string {
 		ip += "/24"
 	}
 	return [][2]string{{"IP", ip}}
+}
+
+// CleanupStaleAllocations removes orphaned CNI state from /var/lib/cni.
+// This is useful when VMs crash or timeout without proper cleanup, leaving
+// host-local IPAM to think IPs are still allocated.
+func CleanupStaleAllocations(networkName string) error {
+	cniStateDir := "/var/lib/cni"
+
+	entries, err := os.ReadDir(cniStateDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("read cni state dir: %w", err)
+	}
+
+	netNSDir := "/var/run/netns"
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		containerID := entry.Name()
+		netNSPath := filepath.Join(netNSDir, containerID)
+
+		switch err := ns.IsNSorErr(netNSPath); err.(type) {
+		case nil:
+			continue
+		case ns.NSPathNotExistErr:
+			statePath := filepath.Join(cniStateDir, containerID)
+			slog.Debug("cleaning up stale cni allocation", "containerID", containerID, "path", statePath)
+			if rmErr := os.RemoveAll(statePath); rmErr != nil {
+				slog.Warn("failed to remove stale cni state", "containerID", containerID, "error", rmErr)
+			}
+		default:
+		}
+	}
+
+	hostLocalStateDir := filepath.Join(cniStateDir, "networks", networkName)
+	if _, err := os.Stat(hostLocalStateDir); err == nil {
+		if err := cleanupOrphanedHostLocalIPs(hostLocalStateDir, netNSDir); err != nil {
+			slog.Warn("failed to clean orphaned host-local IPs", "error", err)
+		}
+	}
+
+	return nil
+}
+
+func cleanupOrphanedHostLocalIPs(stateDir, netNSDir string) error {
+	entries, err := os.ReadDir(stateDir)
+	if err != nil {
+		return err
+	}
+
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		ipFile := filepath.Join(stateDir, entry.Name())
+		data, err := os.ReadFile(ipFile)
+		if err != nil {
+			continue
+		}
+
+		containerID := strings.TrimSpace(string(data))
+		if containerID == "" {
+			continue
+		}
+
+		netNSPath := filepath.Join(netNSDir, containerID)
+		switch err := ns.IsNSorErr(netNSPath); err.(type) {
+		case nil:
+			continue
+		case ns.NSPathNotExistErr:
+			slog.Debug("releasing orphaned IP allocation", "ip", entry.Name(), "containerID", containerID)
+			_ = os.Remove(ipFile)
+		}
+	}
+	return nil
 }
 
 // Ensure types.Result is referenced for libcni compatibility.
