@@ -21,14 +21,18 @@ type Server struct {
 	mu        sync.RWMutex
 	agents    *agent.Service
 	eventBus  *events.Bus
+	runs      *runManager
 }
 
 func New(workspace string) *Server {
+	agents := agent.NewService(agent.LoadConfig(workspace))
+	bus := events.NewBus()
 	return &Server{
 		workspace: workspace,
 		logs:      []string{},
-		agents:    agent.NewService(agent.LoadConfig(workspace)),
-		eventBus:  events.NewBus(),
+		agents:    agents,
+		eventBus:  bus,
+		runs:      newRunManager(agents, bus),
 	}
 }
 
@@ -37,6 +41,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /health", s.handleHealth)
 	mux.HandleFunc("GET /logs", s.handleLogs)
 	mux.HandleFunc("POST /run", s.handleRun)
+	mux.HandleFunc("GET /run/status", s.handleRunStatus)
 	mux.HandleFunc("POST /terminal", s.handleTerminal)
 	mux.HandleFunc("POST /git/clone", s.handleGitClone)
 	mux.HandleFunc("POST /git/commit", s.handleGitCommit)
@@ -58,10 +63,11 @@ func (s *Server) handleLogs(w http.ResponseWriter, _ *http.Request) {
 }
 
 type runRequest struct {
-	TaskID string `json:"taskId"`
-	Prompt string `json:"prompt"`
-	Agent  string `json:"agent,omitempty"`
-	Env    map[string]string `json:"env,omitempty"`
+	TaskID  string            `json:"taskId"`
+	Prompt  string            `json:"prompt"`
+	Agent   string            `json:"agent,omitempty"`
+	WorkDir string            `json:"workDir,omitempty"`
+	Env     map[string]string `json:"env,omitempty"`
 }
 
 func (s *Server) handleRun(w http.ResponseWriter, r *http.Request) {
@@ -77,29 +83,59 @@ func (s *Server) handleRun(w http.ResponseWriter, r *http.Request) {
 
 	s.appendLog("agent running task " + req.TaskID + " via " + firstNonEmpty(req.Agent, "default"))
 
-	result, err := s.agents.Run(r.Context(), agent.RunRequest{
-		TaskID: req.TaskID,
-		Prompt: req.Prompt,
-		Agent:  req.Agent,
-		Env:    req.Env,
-	}, s.eventBus)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+	snapshot, _ := s.runs.start(agent.RunRequest{
+		TaskID:  req.TaskID,
+		Prompt:  req.Prompt,
+		Agent:   req.Agent,
+		WorkDir: req.WorkDir,
+		Env:     req.Env,
+	})
+
+	writeJSON(w, http.StatusAccepted, map[string]any{
+		"taskId":  req.TaskID,
+		"status":  snapshot["status"],
+		"message": snapshot["message"],
+		"output":  snapshot["output"],
+		"agent":   snapshot["agent"],
+	})
+}
+
+func (s *Server) handleRunStatus(w http.ResponseWriter, r *http.Request) {
+	taskID := strings.TrimSpace(r.URL.Query().Get("taskId"))
+	if taskID == "" {
+		writeError(w, http.StatusBadRequest, "taskId is required")
 		return
 	}
 
-	status := http.StatusOK
-	if result.Status == "failed" {
-		status = http.StatusUnprocessableEntity
+	snapshot, ok := s.runs.status(taskID)
+	if !ok {
+		writeError(w, http.StatusNotFound, "run not found")
+		return
 	}
 
-	writeJSON(w, status, map[string]any{
-		"taskId":  req.TaskID,
-		"status":  result.Status,
-		"message": result.Message,
-		"output":  result.Output,
-		"agent":   result.Agent,
+	status := runSnapshotString(snapshot, "status")
+	if status == "" {
+		status = "unknown"
+	}
+	code := http.StatusOK
+	if status == "accepted" || status == "running" {
+		code = http.StatusAccepted
+	}
+
+	writeJSON(w, code, map[string]any{
+		"taskId":  taskID,
+		"status":  status,
+		"message": runSnapshotString(snapshot, "message"),
+		"output":  runSnapshotString(snapshot, "output"),
+		"agent":   runSnapshotString(snapshot, "agent"),
 	})
+}
+
+func runSnapshotString(snapshot map[string]any, key string) string {
+	if value, ok := snapshot[key].(string); ok {
+		return value
+	}
+	return ""
 }
 
 type terminalRequest struct {

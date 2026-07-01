@@ -16,7 +16,7 @@ type Config struct {
 }
 
 func LoadConfig(workspace string) Config {
-	timeout := 60
+	timeout := 120
 	if raw := os.Getenv("AGENT_RUN_TIMEOUT_MIN"); raw != "" {
 		if value, err := parseInt(raw); err == nil && value > 0 {
 			timeout = value

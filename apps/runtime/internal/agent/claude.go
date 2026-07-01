@@ -39,8 +39,12 @@ func (r *ClaudeRunner) Run(
 	}
 	args = append(args, req.Prompt)
 
+	workDir := resolveWorkDir(r.cfg, req)
 	command := shellQuote(r.cfg.ClaudeBin) + " " + joinShellArgs(args)
-	publish("agent.log", "running claude code", map[string]any{"command": command})
+	publish("agent.log", "running claude code", map[string]any{
+		"command": command,
+		"workDir": workDir,
+	})
 
 	var lastPublish time.Time
 	onOutput := func(line executil.OutputLine) {
@@ -53,7 +57,7 @@ func (r *ClaudeRunner) Run(
 		})
 	}
 
-	result, err := executil.RunStreaming(ctx, r.cfg.Workspace, command, mergeEnv(req), onOutput)
+	result, err := executil.RunStreaming(ctx, workDir, command, mergeEnv(req), onOutput)
 	if err != nil {
 		return nil, err
 	}

@@ -35,15 +35,19 @@ func (r *CursorRunner) Run(
 		"--force",
 		"--trust",
 		"--output-format", "text",
-		"--workspace", r.cfg.Workspace,
 	}
 	if r.cfg.DefaultModel != "" {
 		args = append(args, "--model", r.cfg.DefaultModel)
 	}
+	workDir := resolveWorkDir(r.cfg, req)
+	args = append(args, "--workspace", workDir)
 	args = append(args, req.Prompt)
 
 	command := shellQuote(r.cfg.CursorBin) + " " + joinShellArgs(args)
-	publish("agent.log", "running cursor agent", map[string]any{"command": command})
+	publish("agent.log", "running cursor agent", map[string]any{
+		"command":   command,
+		"workDir":   workDir,
+	})
 
 	var lastPublish time.Time
 	onOutput := func(line executil.OutputLine) {
@@ -56,7 +60,7 @@ func (r *CursorRunner) Run(
 		})
 	}
 
-	result, err := executil.RunStreaming(ctx, r.cfg.Workspace, command, mergeEnv(req), onOutput)
+	result, err := executil.RunStreaming(ctx, workDir, command, mergeEnv(req), onOutput)
 	if err != nil {
 		return nil, err
 	}

@@ -6,7 +6,7 @@ variable "name_prefix" {
 variable "visibility_timeout_seconds" {
   description = "How long a task job is hidden while the scheduler processes it (must exceed worst-case task runtime)."
   type        = number
-  default     = 300
+  default     = 7200
 }
 
 variable "max_receive_count" {

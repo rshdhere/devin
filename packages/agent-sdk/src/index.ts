@@ -2,6 +2,7 @@ export interface RunRequest {
   taskId: string;
   prompt: string;
   agent?: string;
+  workDir?: string;
   env?: Record<string, string>;
 }
 
@@ -85,8 +86,6 @@ export class RuntimeClient {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
-      // Agent runs can take a long time; avoid client-side fetch timeouts.
-      signal: AbortSignal.timeout(2 * 60 * 60 * 1000),
     });
     if (!response.ok) {
       const errorBody = await response.text();
@@ -95,6 +94,49 @@ export class RuntimeClient {
       );
     }
     return response.json() as Promise<RunResponse>;
+  }
+
+  async runStatus(taskId: string): Promise<RunResponse> {
+    const response = await fetch(
+      `${this.base("/run/status")}?taskId=${encodeURIComponent(taskId)}`,
+    );
+    if (!response.ok) {
+      const errorBody = await response.text();
+      throw new Error(
+        errorBody || `Runtime status failed with status ${response.status}`,
+      );
+    }
+    return response.json() as Promise<RunResponse>;
+  }
+
+  async runAndWait(
+    body: RunRequest,
+    opts?: { pollIntervalMs?: number },
+  ): Promise<RunResponse> {
+    const pollIntervalMs = opts?.pollIntervalMs ?? 3_000;
+    const accepted = await this.run(body);
+    if (accepted.status === "completed" || accepted.status === "failed") {
+      return accepted;
+    }
+
+    while (true) {
+      await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
+      const status = await this.runStatus(body.taskId);
+      if (status.status === "completed" || status.status === "failed") {
+        return status;
+      }
+    }
+  }
+
+  async writeFile(
+    body: FileWriteRequest,
+  ): Promise<{ status: string; path: string }> {
+    const response = await fetch(this.base("/files/write"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    return response.json() as Promise<{ status: string; path: string }>;
   }
 
   async health(): Promise<RuntimeHealthResponse> {

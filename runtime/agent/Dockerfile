@@ -30,6 +30,7 @@ RUN npm install -g @anthropic-ai/claude-code@latest \
 
 ENV PATH="/root/.local/bin:/usr/local/bin:${PATH}"
 ENV AGENT_PROVIDER=mock
+ENV AGENT_RUN_TIMEOUT_MIN=120
 ENV RUNTIME_PORT=8081
 ENV RUNTIME_WORKSPACE=/workspace
 

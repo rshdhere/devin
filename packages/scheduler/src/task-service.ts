@@ -19,6 +19,7 @@ import {
   type GitHubUserIdentity,
 } from "./github.js";
 import { generateProjectMetadata } from "./project-metadata.js";
+import { bootstrapGreenfieldProject } from "./greenfield-bootstrap.js";
 import type {
   AgentProvider,
   CreateTaskInput,
@@ -202,6 +203,10 @@ export class TaskService {
       return;
     }
 
+    if (task.status === "running") {
+      return;
+    }
+
     let sandboxName: string | undefined;
 
     try {
@@ -357,6 +362,21 @@ export class TaskService {
           });
         }
         await this.configureSandboxGit(runtime, task.id, gitOwner);
+        if (createdNewRepo) {
+          const bot = resolveBotAuthor();
+          await bootstrapGreenfieldProject({
+            runtime,
+            taskId: task.id,
+            repoCwd,
+            prompt: task.prompt,
+            title: task.title ?? "project",
+            botName: bot.name,
+            botEmail: bot.email,
+            canPush: Boolean(job.permissions?.canPush),
+            emit: (type, message, data) =>
+              this.emitRuntime(task.id, type as TaskEventType, message, data),
+          });
+        }
         agentPrompt = buildAgentPrompt(
           task.prompt,
           repository,
@@ -390,10 +410,11 @@ export class TaskService {
 
       let runResult;
       try {
-        runResult = await runtime.run({
+        runResult = await runtime.runAndWait({
           taskId: task.id,
           prompt: agentPrompt,
           agent: task.agent,
+          workDir: repository && cloneUrl ? repoCwd : undefined,
           env: this.runtimeSecrets(githubToken),
         });
       } finally {
@@ -834,6 +855,8 @@ export class TaskService {
         secrets[key] = value;
       }
     }
+    const agentTimeout = process.env.AGENT_RUN_TIMEOUT_MIN?.trim() || "120";
+    secrets.AGENT_RUN_TIMEOUT_MIN = agentTimeout;
     if (githubToken) {
       secrets.GITHUB_TOKEN = githubToken;
     }

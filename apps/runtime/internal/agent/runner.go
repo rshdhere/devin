@@ -8,10 +8,11 @@ import (
 )
 
 type RunRequest struct {
-	TaskID string
-	Prompt string
-	Agent  string
-	Env    map[string]string
+	TaskID  string
+	Prompt  string
+	Agent   string
+	WorkDir string
+	Env     map[string]string
 }
 
 type RunResult struct {
@@ -68,7 +69,7 @@ func (s *Service) Run(ctx context.Context, req RunRequest, bus *events.Bus) (*Ru
 		"agent": runner.Name(),
 	})
 
-	runCtx, cancel := context.WithTimeout(ctx, time.Duration(s.cfg.RunTimeoutMin)*time.Minute)
+	runCtx, cancel := context.WithTimeout(ctx, s.runTimeoutFor(req))
 	defer cancel()
 
 	result, err := runner.Run(runCtx, req, publish)
@@ -88,4 +89,18 @@ func (s *Service) Run(ctx context.Context, req RunRequest, bus *events.Bus) (*Ru
 	}
 
 	return result, nil
+}
+
+func (s *Service) runTimeoutFor(req RunRequest) time.Duration {
+	timeout := s.cfg.RunTimeoutMin
+	if raw := envValue(req, "AGENT_RUN_TIMEOUT_MIN"); raw != "" {
+		if value, err := parseInt(raw); err == nil && value > 0 {
+			timeout = value
+		}
+	}
+	return time.Duration(timeout) * time.Minute
+}
+
+func (s *Service) RunTimeout(req RunRequest) time.Duration {
+	return s.runTimeoutFor(req)
 }
