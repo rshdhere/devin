@@ -1,4 +1,7 @@
-import { parseRuntimeResponse } from "./runtime-response.js";
+import {
+  parseRuntimeResponse,
+  parseRuntimeResponseAllowFailure,
+} from "./runtime-response.js";
 
 export interface RunRequest {
   taskId: string;
@@ -183,6 +186,11 @@ export class RuntimeClient {
     return response.json() as Promise<RuntimeHealthResponse>;
   }
 
+  async ensureDns(): Promise<void> {
+    const response = await this.fetchRuntime("/dns/ensure", { method: "POST" });
+    await parseRuntimeResponse(response);
+  }
+
   async terminal(body: TerminalRequest): Promise<TerminalResponse> {
     const response = await this.fetchRuntime("/terminal", {
       method: "POST",
@@ -193,6 +201,18 @@ export class RuntimeClient {
       body: JSON.stringify(body),
     });
     return parseRuntimeResponse(response);
+  }
+
+  async terminalAllowFailure(body: TerminalRequest): Promise<TerminalResponse> {
+    const response = await this.fetchRuntime("/terminal", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...this.envHeaders(body.env),
+      },
+      body: JSON.stringify(body),
+    });
+    return parseRuntimeResponseAllowFailure(response);
   }
 
   async gitClone(

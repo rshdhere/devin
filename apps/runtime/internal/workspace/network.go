@@ -12,16 +12,12 @@ nameserver 1.1.1.1
 nameserver 8.8.4.4
 `
 
-// EnsureDNS writes a public resolver config when the guest has none.
-// Firecracker snapshots often inherit a Docker stub resolv.conf that cannot
-// resolve external hosts inside the microVM.
+// EnsureDNS always writes public resolvers for sandbox egress.
+// Firecracker guests inherit host/VPC resolvers (via CNI or snapshots) that are
+// often unreachable inside the microVM NAT namespace — e.g. 169.254.169.253 or
+// the VPC DNS at the subnet base. Public resolvers work through ipMasq NAT.
 func EnsureDNS() {
 	if runtime.GOOS != "linux" {
-		return
-	}
-
-	data, err := os.ReadFile("/etc/resolv.conf")
-	if err == nil && hasUsableNameserver(string(data)) {
 		return
 	}
 
@@ -33,14 +29,19 @@ func EnsureDNS() {
 	slog.Info("configured guest DNS resolvers for sandbox egress")
 }
 
-func hasUsableNameserver(content string) bool {
+// hasUnreachableNameserver detects resolvers copied from the execution host that
+// microVM guests cannot reach. Used only by tests.
+func hasUnreachableNameserver(content string) bool {
 	for _, line := range strings.Split(content, "\n") {
 		line = strings.TrimSpace(line)
 		if !strings.HasPrefix(line, "nameserver ") {
 			continue
 		}
 		server := strings.TrimSpace(strings.TrimPrefix(line, "nameserver "))
-		if server != "" && server != "127.0.0.53" && server != "127.0.0.1" {
+		if server == "" || server == "127.0.0.53" || server == "127.0.0.1" {
+			continue
+		}
+		if strings.HasPrefix(server, "169.254.") {
 			return true
 		}
 	}

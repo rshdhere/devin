@@ -37,6 +37,7 @@ RUN chmod 755 /opt/cni/bin/tc-redirect-tap
 RUN mkdir -p /etc/cni/conf.d
 
 COPY apps/firecracker-host/config/cni/fcnet.conflist /etc/cni/conf.d/
+COPY apps/firecracker-host/config/cni/resolv.conf /etc/cni/resolv.conf
 COPY --from=build /out/firecracker-host /usr/bin/firecracker-host
 
 ENV FIRECRACKER_BIN=/usr/bin/firecracker \

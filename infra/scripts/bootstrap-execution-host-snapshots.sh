@@ -71,6 +71,15 @@ install_firecracker() {
 install_cni() {
   mkdir -p /etc/cni/conf.d /opt/cni/bin
 
+  if [[ ! -f /etc/cni/resolv.conf ]]; then
+    log "installing CNI DNS resolvers for microVM egress"
+    cat >/etc/cni/resolv.conf <<'RESOLV'
+nameserver 8.8.8.8
+nameserver 1.1.1.1
+nameserver 8.8.4.4
+RESOLV
+  fi
+
   if [[ ! -f /etc/cni/conf.d/fcnet.conflist ]]; then
     log "installing fcnet CNI config"
     local raw_base="${DEVIN_RAW_BASE:-https://raw.githubusercontent.com/rshdhere/devin/${REPO_REF}}"

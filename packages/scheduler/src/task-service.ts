@@ -361,6 +361,7 @@ export class TaskService {
         },
       );
       await this.waitForRuntime(runtime, task.id);
+      await this.ensureSandboxDns(runtime, task.id);
       this.emit("runtime.ready", task.id, "Runtime supervisor is ready", {
         runtimeURL: runtimeBaseUrl,
       });
@@ -808,11 +809,7 @@ export class TaskService {
     runtime: RuntimeClient,
     taskId: string,
   ): Promise<void> {
-    await runtime.terminal({
-      taskId,
-      command:
-        "printf '%s\\n' 'nameserver 8.8.8.8' 'nameserver 1.1.1.1' 'nameserver 8.8.4.4' > /etc/resolv.conf",
-    });
+    await runtime.ensureDns();
   }
 
   private async cloneRepositoryInSandbox(
@@ -925,13 +922,15 @@ export class TaskService {
       githubToken,
     });
 
-    if (githubToken) {
-      const syncResult = await runtime.terminal({
+    // Scaffold was already pushed from the control plane — no GitHub sync needed.
+    if (githubToken && !job.greenfieldPushed) {
+      await this.ensureSandboxDns(runtime, task.id);
+      const syncResult = await runtime.terminalAllowFailure({
         taskId: task.id,
         cwd: repoCwd,
         env: gitEnv,
         command:
-          "git fetch --depth 1 origin main && git reset --soft FETCH_HEAD",
+          "timeout 20 git fetch --depth 1 origin main && git reset --soft FETCH_HEAD",
       });
       if (syncResult.exitCode === 0) {
         this.emit(
@@ -941,6 +940,17 @@ export class TaskService {
           {
             repository: task.repository,
             synced: true,
+          },
+        );
+      } else {
+        this.emit(
+          "agent.log",
+          task.id,
+          "Skipped GitHub sync during hydration (sandbox offline)",
+          {
+            repository: task.repository,
+            synced: false,
+            detail: (syncResult.stderr || syncResult.stdout).trim(),
           },
         );
       }
@@ -953,29 +963,37 @@ export class TaskService {
   ): Promise<void> {
     await this.ensureSandboxDns(runtime, taskId);
 
-    const checks = [
-      "curl -sf --max-time 15 https://api2.cursor.sh/ >/dev/null",
-      "curl -sf --max-time 15 https://github.com/ >/dev/null",
-    ];
+    const cursorCheck = await runtime.terminalAllowFailure({
+      taskId,
+      command: "curl -sf --max-time 15 https://api2.cursor.sh/ >/dev/null",
+    });
+    const githubCheck = await runtime.terminalAllowFailure({
+      taskId,
+      command: "curl -sf --max-time 15 https://github.com/ >/dev/null",
+    });
 
-    for (const command of checks) {
-      const result = await runtime.terminal({ taskId, command });
-      if (result.exitCode === 0) {
-        this.emit(
-          "agent.log",
-          taskId,
-          "Sandbox outbound connectivity verified",
-          {
-            probe: command.includes("cursor") ? "cursor-api" : "github",
-          },
-        );
-        return;
-      }
+    if (cursorCheck.exitCode !== 0) {
+      throw new Error(
+        "Sandbox cannot reach the Cursor API. Check microVM NAT, DNS, and outbound HTTPS (443) to api2.cursor.sh.",
+      );
     }
 
-    throw new Error(
-      "Sandbox cannot reach Cursor or GitHub over the network. Check microVM NAT, DNS, and outbound firewall rules.",
-    );
+    if (githubCheck.exitCode !== 0) {
+      this.emit(
+        "agent.log",
+        taskId,
+        "GitHub unreachable from sandbox; agent will work locally and push at end may fail",
+        {
+          githubReachable: false,
+        },
+      );
+      return;
+    }
+
+    this.emit("agent.log", taskId, "Sandbox outbound connectivity verified", {
+      cursorReachable: true,
+      githubReachable: true,
+    });
   }
 
   private async emergencyPushAgentWork(

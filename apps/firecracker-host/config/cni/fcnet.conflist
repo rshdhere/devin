@@ -8,7 +8,7 @@
       "ipam": {
         "type": "host-local",
         "subnet": "192.168.127.0/24",
-        "resolvConf": "/etc/resolv.conf"
+        "resolvConf": "/etc/cni/resolv.conf"
       }
     },
     {

@@ -12,6 +12,9 @@ export async function parseRuntimeResponse<T>(response: Response): Promise<T> {
   const body = (await response.json().catch(() => ({}))) as T & {
     error?: string;
     status?: string;
+    exitCode?: number;
+    stdout?: string;
+    stderr?: string;
   };
 
   if (!response.ok) {
@@ -19,18 +22,34 @@ export async function parseRuntimeResponse<T>(response: Response): Promise<T> {
   }
 
   if (body && typeof body === "object") {
-    const status = (body as { status?: string }).status;
+    const status = body.status;
     if (status === "failed" || status === "error") {
       throw new Error(readErrorBody(body));
     }
-    if (
-      "exitCode" in body &&
-      typeof (body as { exitCode?: number }).exitCode === "number" &&
-      (body as { exitCode: number }).exitCode !== 0
-    ) {
-      const stdout = (body as { stdout?: string }).stdout ?? "";
-      const stderr = (body as { stderr?: string }).stderr ?? "";
-      throw new Error(stderr || stdout || "Command failed");
+    if (typeof body.exitCode === "number" && body.exitCode !== 0) {
+      throw new Error(body.stderr || body.stdout || "Command failed");
+    }
+  }
+
+  return body;
+}
+
+export async function parseRuntimeResponseAllowFailure<T>(
+  response: Response,
+): Promise<T> {
+  const body = (await response.json().catch(() => ({}))) as T & {
+    error?: string;
+    status?: string;
+  };
+
+  if (!response.ok) {
+    throw new Error(readErrorBody(body));
+  }
+
+  if (body && typeof body === "object") {
+    const status = body.status;
+    if (status === "failed" || status === "error") {
+      throw new Error(readErrorBody(body));
     }
   }
 

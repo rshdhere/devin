@@ -13,6 +13,7 @@ import (
 	"github.com/rshdhere/devin/apps/runtime/internal/agent"
 	"github.com/rshdhere/devin/apps/runtime/internal/events"
 	"github.com/rshdhere/devin/apps/runtime/internal/executil"
+	"github.com/rshdhere/devin/apps/runtime/internal/workspace"
 )
 
 type Server struct {
@@ -39,6 +40,7 @@ func New(workspace string) *Server {
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", s.handleHealth)
+	mux.HandleFunc("POST /dns/ensure", s.handleEnsureDNS)
 	mux.HandleFunc("GET /logs", s.handleLogs)
 	mux.HandleFunc("POST /run", s.handleRun)
 	mux.HandleFunc("GET /run/status", s.handleRunStatus)
@@ -53,6 +55,11 @@ func (s *Server) Handler() http.Handler {
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+func (s *Server) handleEnsureDNS(w http.ResponseWriter, _ *http.Request) {
+	workspace.EnsureDNS()
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
@@ -227,6 +234,7 @@ func (s *Server) handleGitClone(w http.ResponseWriter, r *http.Request) {
 		target = "repo"
 	}
 	targetPath := filepath.Join(s.workspace, filepath.Clean("/"+target))
+	workspace.EnsureDNS()
 	command := fmt.Sprintf(
 		"timeout 45 git clone --depth 1 %s %s",
 		shellQuote(req.URL),
@@ -321,6 +329,7 @@ func (s *Server) handleGitPush(w http.ResponseWriter, r *http.Request) {
 	}
 
 	cwd := s.resolveCWD(req.CWD)
+	workspace.EnsureDNS()
 	remote := firstNonEmpty(req.Remote, "origin")
 	branch := strings.TrimSpace(req.Branch)
 	command := fmt.Sprintf("git push -u %s HEAD", shellQuote(remote))

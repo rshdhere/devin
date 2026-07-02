@@ -42,6 +42,12 @@ fi
 
 mkdir -p /etc/cni/conf.d /opt/cni/bin /var/lib/devin/linux /var/lib/devin/snapshots /var/lib/devin/vms
 
+cat >/etc/cni/resolv.conf <<'RESOLV'
+nameserver 8.8.8.8
+nameserver 1.1.1.1
+nameserver 8.8.4.4
+RESOLV
+
 cat >/etc/cni/conf.d/fcnet.conflist <<'CNI'
 {
   "cniVersion": "0.4.0",
@@ -53,7 +59,7 @@ cat >/etc/cni/conf.d/fcnet.conflist <<'CNI'
       "ipam": {
         "type": "host-local",
         "subnet": "192.168.127.0/24",
-        "resolvConf": "/etc/resolv.conf"
+        "resolvConf": "/etc/cni/resolv.conf"
       }
     },
     {

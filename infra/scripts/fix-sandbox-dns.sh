@@ -1,0 +1,50 @@
+#!/usr/bin/env bash
+# Apply sandbox DNS fixes on an execution host (CNI resolvers + fcnet config).
+# Run on the host as root, or via SSM:
+#   sudo ./infra/scripts/fix-sandbox-dns.sh
+set -euo pipefail
+
+mkdir -p /etc/cni/conf.d
+
+cat >/etc/cni/resolv.conf <<'RESOLV'
+nameserver 8.8.8.8
+nameserver 1.1.1.1
+nameserver 8.8.4.4
+RESOLV
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+FCNET_SRC="${REPO_ROOT}/apps/firecracker-host/config/cni/fcnet.conflist"
+
+if [[ -f "${FCNET_SRC}" ]]; then
+  cp "${FCNET_SRC}" /etc/cni/conf.d/fcnet.conflist
+else
+  cat >/etc/cni/conf.d/fcnet.conflist <<'CNI'
+{
+  "cniVersion": "0.4.0",
+  "name": "fcnet",
+  "plugins": [
+    {
+      "type": "ptp",
+      "ipMasq": true,
+      "ipam": {
+        "type": "host-local",
+        "subnet": "192.168.127.0/24",
+        "resolvConf": "/etc/cni/resolv.conf"
+      }
+    },
+    {
+      "type": "tc-redirect-tap"
+    }
+  ]
+}
+CNI
+fi
+
+echo "CNI DNS configured:"
+echo "  /etc/cni/resolv.conf"
+echo "  /etc/cni/conf.d/fcnet.conflist"
+echo ""
+echo "Restart firecracker-host and rebuild runtime snapshots for full effect:"
+echo "  sudo systemctl restart devin-firecracker-host"
+echo "  sudo DEVIN_REPO_URL=https://github.com/rshdhere/devin.git ./infra/scripts/bootstrap-execution-host-snapshots.sh"
