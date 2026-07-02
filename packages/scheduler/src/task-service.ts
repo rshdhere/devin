@@ -656,6 +656,18 @@ export class TaskService {
       prompt: task.prompt,
     });
 
+    for (const [index, file] of scaffoldFiles.entries()) {
+      this.emit("draft.diff", task.id, `Writing ${file.path}`, {
+        phase: "draft_ready",
+        path: file.path,
+        changeType: "create",
+        summary: `Scaffold file prepared for GitHub`,
+        fileIndex: index + 1,
+        totalFiles: scaffoldFiles.length,
+        controlPlane: true,
+      });
+    }
+
     const commitMessage = buildCommitMessage(
       `devin: scaffold ${task.title ?? metadata.title}`,
     );
@@ -682,6 +694,13 @@ export class TaskService {
       repository,
       branch: created.defaultBranch,
       controlPlane: true,
+      files: scaffoldFiles.map((file) => file.path),
+    });
+
+    this.emit("task.phase_changed", task.id, "Scaffold live on GitHub", {
+      phase: "draft_ready",
+      repository,
+      scaffoldPushed: true,
     });
   }
 

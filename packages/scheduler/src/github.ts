@@ -74,10 +74,276 @@ async function githubApiRequest<T>(
 
   if (!response.ok) {
     const body = await response.text();
-    throw new Error(`GitHub API error ${response.status}: ${body}`);
+    throw new GitHubApiError(response.status, body);
   }
 
   return response.json() as Promise<T>;
+}
+
+class GitHubApiError extends Error {
+  constructor(
+    readonly status: number,
+    readonly body: string,
+  ) {
+    super(`GitHub API error ${status}: ${body}`);
+    this.name = "GitHubApiError";
+  }
+}
+
+function isGitRepositoryEmptyError(error: unknown): boolean {
+  if (!(error instanceof GitHubApiError)) {
+    return false;
+  }
+  return (
+    error.status === 409 &&
+    error.body.toLowerCase().includes("git repository is empty")
+  );
+}
+
+function encodeBase64Content(content: string): string {
+  return Buffer.from(content, "utf-8").toString("base64");
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+export async function waitForGitHubRepository(
+  token: string,
+  owner: string,
+  repo: string,
+  opts?: { timeoutMs?: number },
+): Promise<void> {
+  const timeoutMs = opts?.timeoutMs ?? 15_000;
+  const deadline = Date.now() + timeoutMs;
+
+  while (Date.now() < deadline) {
+    const response = await fetch(
+      `https://api.github.com/repos/${owner}/${repo}`,
+      {
+        headers: {
+          Accept: "application/vnd.github+json",
+          Authorization: `Bearer ${token}`,
+          "X-GitHub-Api-Version": "2022-11-28",
+        },
+      },
+    );
+
+    if (response.ok) {
+      await sleep(750);
+      return;
+    }
+
+    if (response.status !== 404 && response.status !== 409) {
+      const body = await response.text();
+      throw new Error(`GitHub API error ${response.status}: ${body}`);
+    }
+
+    await sleep(500);
+  }
+
+  throw new Error(
+    `Timed out waiting for GitHub repository ${owner}/${repo} to become available`,
+  );
+}
+
+async function createFileViaContentsApi(
+  token: string,
+  owner: string,
+  repo: string,
+  path: string,
+  content: string,
+  message: string,
+  branch?: string,
+): Promise<{ sha: string }> {
+  const response = await fetch(
+    `https://api.github.com/repos/${owner}/${repo}/contents/${path
+      .split("/")
+      .map(encodeURIComponent)
+      .join("/")}`,
+    {
+      method: "PUT",
+      headers: {
+        Accept: "application/vnd.github+json",
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+        "X-GitHub-Api-Version": "2022-11-28",
+      },
+      body: JSON.stringify({
+        message,
+        content: encodeBase64Content(content),
+        ...(branch ? { branch } : {}),
+      }),
+    },
+  );
+
+  if (!response.ok) {
+    const body = await response.text();
+    throw new GitHubApiError(response.status, body);
+  }
+
+  const payload = (await response.json()) as {
+    commit?: { sha?: string };
+  };
+  const sha = payload.commit?.sha;
+  if (!sha) {
+    throw new Error("GitHub contents API did not return a commit SHA");
+  }
+  return { sha };
+}
+
+async function getBranchHeadSha(
+  token: string,
+  owner: string,
+  repo: string,
+  branch: string,
+): Promise<string> {
+  const ref = await githubApiRequest<{ object: { sha: string } }>(
+    token,
+    `/repos/${owner}/${repo}/git/ref/heads/${branch}`,
+  );
+  return ref.object.sha;
+}
+
+async function createCommitViaGitDatabase(
+  token: string,
+  owner: string,
+  repo: string,
+  files: Array<{ path: string; content: string }>,
+  message: string,
+  branch: string,
+  parentSha?: string,
+): Promise<{ sha: string }> {
+  const treeEntries = await Promise.all(
+    files.map(async (file) => {
+      const blob = await githubApiRequest<{ sha: string }>(
+        token,
+        `/repos/${owner}/${repo}/git/blobs`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            content: file.content,
+            encoding: "utf-8",
+          }),
+        },
+      );
+      return {
+        path: file.path,
+        mode: "100644",
+        type: "blob",
+        sha: blob.sha,
+      };
+    }),
+  );
+
+  const tree = await githubApiRequest<{ sha: string }>(
+    token,
+    `/repos/${owner}/${repo}/git/trees`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ tree: treeEntries }),
+    },
+  );
+
+  const commit = await githubApiRequest<{ sha: string }>(
+    token,
+    `/repos/${owner}/${repo}/git/commits`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        message,
+        tree: tree.sha,
+        ...(parentSha ? { parents: [parentSha] } : {}),
+      }),
+    },
+  );
+
+  if (parentSha) {
+    await githubApiRequest(
+      token,
+      `/repos/${owner}/${repo}/git/refs/heads/${branch}`,
+      {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sha: commit.sha }),
+      },
+    );
+    return { sha: commit.sha };
+  }
+
+  try {
+    await githubApiRequest(token, `/repos/${owner}/${repo}/git/refs`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        ref: `refs/heads/${branch}`,
+        sha: commit.sha,
+      }),
+    });
+  } catch (error) {
+    if (!(error instanceof GitHubApiError) || error.status !== 422) {
+      throw error;
+    }
+    await githubApiRequest(
+      token,
+      `/repos/${owner}/${repo}/git/refs/heads/${branch}`,
+      {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sha: commit.sha }),
+      },
+    );
+  }
+
+  return { sha: commit.sha };
+}
+
+async function initializeEmptyRepositoryWithContentsApi(
+  token: string,
+  owner: string,
+  repo: string,
+  file: { path: string; content: string },
+  message: string,
+  branch: string,
+): Promise<{ sha: string; branch: string }> {
+  try {
+    const created = await createFileViaContentsApi(
+      token,
+      owner,
+      repo,
+      file.path,
+      file.content,
+      message,
+      branch,
+    );
+    return { sha: created.sha, branch };
+  } catch (error) {
+    if (!(error instanceof GitHubApiError) || error.status !== 404) {
+      throw error;
+    }
+  }
+
+  const created = await createFileViaContentsApi(
+    token,
+    owner,
+    repo,
+    file.path,
+    file.content,
+    message,
+  );
+
+  const repoMeta = await githubApiRequest<{ default_branch?: string }>(
+    token,
+    `/repos/${owner}/${repo}`,
+  );
+
+  return {
+    sha: created.sha,
+    branch: repoMeta.default_branch ?? branch,
+  };
 }
 
 export async function createGitHubRepository(
@@ -304,72 +570,54 @@ export async function createGitHubInitialCommit(
     throw new Error("initial commit requires at least one file");
   }
 
-  const treeEntries = await Promise.all(
-    files.map(async (file) => {
-      const blob = await githubApiRequest<{ sha: string }>(
-        token,
-        `/repos/${owner}/${repo}/git/blobs`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            content: file.content,
-            encoding: "utf-8",
-          }),
-        },
-      );
-      return {
-        path: file.path,
-        mode: "100644",
-        type: "blob",
-        sha: blob.sha,
-      };
-    }),
-  );
+  await waitForGitHubRepository(token, owner, repo);
 
-  const tree = await githubApiRequest<{ sha: string }>(
-    token,
-    `/repos/${owner}/${repo}/git/trees`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ tree: treeEntries }),
-    },
-  );
-
-  const commit = await githubApiRequest<{ sha: string }>(
-    token,
-    `/repos/${owner}/${repo}/git/commits`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        message,
-        tree: tree.sha,
-      }),
-    },
-  );
+  const orderedFiles = [...files].sort((left, right) => {
+    if (left.path === "README.md") return -1;
+    if (right.path === "README.md") return 1;
+    return left.path.localeCompare(right.path);
+  });
 
   try {
-    await githubApiRequest(token, `/repos/${owner}/${repo}/git/refs`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        ref: `refs/heads/${branch}`,
-        sha: commit.sha,
-      }),
-    });
-  } catch {
-    await githubApiRequest(
+    return await createCommitViaGitDatabase(
       token,
-      `/repos/${owner}/${repo}/git/refs/heads/${branch}`,
-      {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sha: commit.sha }),
-      },
+      owner,
+      repo,
+      orderedFiles,
+      message,
+      branch,
     );
+  } catch (error) {
+    if (!isGitRepositoryEmptyError(error)) {
+      throw error;
+    }
   }
 
-  return { sha: commit.sha };
+  const seedFile =
+    orderedFiles.find((file) => file.path === "README.md") ?? orderedFiles[0]!;
+  const initialized = await initializeEmptyRepositoryWithContentsApi(
+    token,
+    owner,
+    repo,
+    seedFile,
+    message,
+    branch,
+  );
+  const activeBranch = initialized.branch;
+
+  if (orderedFiles.length === 1) {
+    return { sha: initialized.sha };
+  }
+
+  const parentSha = await getBranchHeadSha(token, owner, repo, activeBranch);
+
+  return createCommitViaGitDatabase(
+    token,
+    owner,
+    repo,
+    orderedFiles,
+    message,
+    activeBranch,
+    parentSha,
+  );
 }
