@@ -114,7 +114,10 @@ export class RuntimeClient {
   async run(body: RunRequest): Promise<RunResponse> {
     const response = await this.fetchRuntime("/run", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        ...this.envHeaders(body.env),
+      },
       body: JSON.stringify(body),
     });
     if (!response.ok) {

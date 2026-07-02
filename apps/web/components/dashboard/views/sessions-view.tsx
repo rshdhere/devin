@@ -76,7 +76,7 @@ export function SessionsView() {
 
   if (activeTask) {
     return (
-      <div className="flex min-h-0 w-full max-w-[900px] flex-1 flex-col self-center">
+      <div className="flex min-h-0 w-full max-w-[900px] flex-1 flex-col self-center overflow-hidden">
         <SessionDetail
           key={activeTask.id}
           task={activeTask}

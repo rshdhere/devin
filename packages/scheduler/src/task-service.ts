@@ -1370,7 +1370,7 @@ export class TaskService {
         secrets[key] = value;
       }
     }
-    const agentTimeout = process.env.AGENT_RUN_TIMEOUT_MIN?.trim() || "120";
+    const agentTimeout = process.env.AGENT_RUN_TIMEOUT_MIN?.trim() || "45";
     secrets.AGENT_RUN_TIMEOUT_MIN = agentTimeout;
     if (githubToken) {
       secrets.GITHUB_TOKEN = githubToken;
@@ -1779,7 +1779,16 @@ function escapeShell(value: string): string {
 }
 
 function resolveAgentMaxWaitMs(): number {
-  return resolveTimeoutMs("AGENT_RUN_TIMEOUT_MIN", 30);
+  const raw = process.env.AGENT_RUN_TIMEOUT_MIN?.trim();
+  const defaultMinutes = 45;
+  if (!raw) {
+    return defaultMinutes * 60 * 1000;
+  }
+  const minutes = Number(raw);
+  if (!Number.isFinite(minutes) || minutes <= 0) {
+    return defaultMinutes * 60 * 1000;
+  }
+  return minutes * 60 * 1000;
 }
 
 function resolveTimeoutMs(envKey: string, defaultSeconds: number): number {

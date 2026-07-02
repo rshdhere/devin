@@ -1,6 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import {
   AlertTriangle,
   ArrowLeft,
@@ -137,6 +143,57 @@ function eventColor(type: TaskEvent["type"]) {
   return "text-gray-400";
 }
 
+function CollapsiblePanel({
+  title,
+  icon: Icon,
+  iconClassName,
+  defaultExpanded = true,
+  headerRight,
+  children,
+  className,
+}: {
+  title: string;
+  icon: typeof Terminal;
+  iconClassName?: string;
+  defaultExpanded?: boolean;
+  headerRight?: ReactNode;
+  children: ReactNode;
+  className?: string;
+}) {
+  const [expanded, setExpanded] = useState(defaultExpanded);
+
+  return (
+    <div
+      className={cn(
+        "overflow-hidden rounded-xl border border-[#2a2a2a] bg-[#111]",
+        className,
+      )}
+    >
+      <button
+        type="button"
+        onClick={() => setExpanded((value) => !value)}
+        className="flex w-full cursor-pointer items-center justify-between gap-3 px-4 py-2.5 text-left transition-colors hover:bg-[#161616]"
+      >
+        <div className="flex min-w-0 items-center gap-2">
+          <Icon className={cn("size-4 shrink-0", iconClassName)} />
+          <h2 className="text-[13px] font-medium text-gray-300">{title}</h2>
+        </div>
+        <div className="flex shrink-0 items-center gap-2">
+          {headerRight}
+          {expanded ? (
+            <ChevronDown className="size-4 text-gray-500" />
+          ) : (
+            <ChevronRight className="size-4 text-gray-500" />
+          )}
+        </div>
+      </button>
+      {expanded ? (
+        <div className="border-t border-[#252525] px-4 py-3">{children}</div>
+      ) : null}
+    </div>
+  );
+}
+
 function LiveWorkPanel({ task, events }: { task: Task; events: TaskEvent[] }) {
   const draftEvents = events.filter((event) => event.type.startsWith("draft."));
   const stepEvents = events.filter((event) => event.type === "draft.updated");
@@ -153,12 +210,18 @@ function LiveWorkPanel({ task, events }: { task: Task; events: TaskEvent[] }) {
     return null;
   }
 
+  const defaultExpanded = ["drafting", "draft_ready", "scheduling"].includes(
+    task.status,
+  );
+
   return (
-    <div className="mb-4 rounded-xl border border-indigo-500/30 bg-indigo-500/5 px-4 py-3">
-      <div className="mb-2 flex items-center gap-2">
-        <Terminal className="size-4 text-indigo-300" />
-        <h2 className="text-[13px] font-medium text-indigo-100">Live Work</h2>
-      </div>
+    <CollapsiblePanel
+      title="Live Work"
+      icon={Terminal}
+      iconClassName="text-indigo-300"
+      defaultExpanded={defaultExpanded}
+      className="border-indigo-500/30 bg-indigo-500/5"
+    >
       <p className="text-[12px] text-indigo-100/80">
         {String(
           draftSummary ?? latestDraft?.message ?? "Generating draft plan...",
@@ -186,7 +249,7 @@ function LiveWorkPanel({ task, events }: { task: Task; events: TaskEvent[] }) {
           ))}
         </div>
       ) : null}
-    </div>
+    </CollapsiblePanel>
   );
 }
 
@@ -197,6 +260,7 @@ function DiagnosticsPanel({
   loading,
   error,
   onRefresh,
+  defaultExpanded = false,
 }: {
   task: Task;
   taskDiagnostics: TaskDiagnostics | null;
@@ -204,29 +268,32 @@ function DiagnosticsPanel({
   loading: boolean;
   error: string | null;
   onRefresh: () => void;
+  defaultExpanded?: boolean;
 }) {
   const sandbox = taskDiagnostics?.sandbox;
   const host = infraDiagnostics?.firecrackerHost;
 
   return (
-    <div className="mb-4 rounded-xl border border-[#3a2a2a] bg-[#1a1212] px-4 py-3">
-      <div className="mb-3 flex items-center justify-between gap-3">
-        <div className="flex items-center gap-2">
-          <AlertTriangle className="size-4 text-amber-400" />
-          <h2 className="text-[13px] font-medium text-amber-100">
-            Sandbox diagnostics
-          </h2>
-        </div>
+    <CollapsiblePanel
+      title="Sandbox diagnostics"
+      icon={AlertTriangle}
+      iconClassName="text-amber-400"
+      defaultExpanded={defaultExpanded}
+      className="border-[#3a2a2a] bg-[#1a1212]"
+      headerRight={
         <button
           type="button"
-          onClick={onRefresh}
+          onClick={(event) => {
+            event.stopPropagation();
+            onRefresh();
+          }}
           disabled={loading}
           className="cursor-pointer rounded-md border border-[#3a2a2a] px-2.5 py-1 text-[11px] text-gray-400 transition-colors hover:bg-[#241818] hover:text-gray-200 disabled:opacity-50"
         >
           {loading ? "Refreshing…" : "Refresh"}
         </button>
-      </div>
-
+      }
+    >
       {task.message ? (
         <div className="mb-3 space-y-2">
           <p className="rounded-lg bg-[#120d0d] px-3 py-2 font-mono text-[12px] leading-relaxed text-red-300">
@@ -246,6 +313,13 @@ function DiagnosticsPanel({
               on the execution host. Open{" "}
               <span className="text-white">Advanced capabilities</span> on the
               dashboard for the full checklist.
+            </p>
+          ) : null}
+          {/timed out/i.test(task.message) ? (
+            <p className="text-[12px] leading-relaxed text-amber-200/90">
+              The Cursor agent hit a timeout before finishing. After the
+              scheduler image with the latest timeout fix is deployed, tasks can
+              run for up to 30 minutes. Retry the task or simplify the prompt.
             </p>
           ) : null}
         </div>
@@ -426,7 +500,7 @@ function DiagnosticsPanel({
           advance to Running until orchestrator connectivity is restored.
         </p>
       ) : null}
-    </div>
+    </CollapsiblePanel>
   );
 }
 
@@ -639,13 +713,45 @@ function PreviewDeployBanner({
   const deployFailed = events.some((event) => event.type === "deploy.failed");
   const deployReady = events.find((event) => event.type === "deploy.ready");
   const taskCompleted = events.some((event) => event.type === "task.completed");
-  const latestPush = events.filter((event) => event.type === "git.push").at(-1);
+  const taskFailed =
+    task.status === "failed" || events.some((e) => e.type === "task.failed");
+  const agentFinished = events.some(
+    (event) =>
+      event.type === "agent.completed" || event.type === "agent.failed",
+  );
+  const latestAgentPush = events
+    .filter(
+      (event) => event.type === "git.push" && event.data?.controlPlane !== true,
+    )
+    .at(-1);
   const previewUrl =
     task.previewUrl ||
     (deployReady?.data?.previewUrl as string | undefined) ||
     undefined;
 
-  if (!latestPush && !building && !previewUrl && !taskCompleted) {
+  const deployPhaseStarted =
+    building || deployFailed || Boolean(deployReady) || taskCompleted;
+
+  if (!deployPhaseStarted && !latestAgentPush) {
+    return null;
+  }
+
+  if (!deployPhaseStarted && agentFinished && taskFailed && !previewUrl) {
+    return (
+      <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 px-4 py-3">
+        <p className="text-[13px] font-medium text-amber-100">
+          Preview deploy skipped
+        </p>
+        <p className="mt-0.5 text-[12px] text-amber-100/70">
+          The agent did not finish successfully, so no live preview was
+          deployed.
+          {task.message ? ` ${task.message}` : ""}
+        </p>
+      </div>
+    );
+  }
+
+  if (!deployPhaseStarted) {
     return null;
   }
 
@@ -681,9 +787,11 @@ function PreviewDeployBanner({
                 ? "Running npm install, production build, and starting the app in the sandbox."
                 : deployFailed
                   ? "Preview deploy failed — code was still pushed to GitHub."
-                  : latestPush
-                    ? "Pushed to GitHub — starting production build and deploy."
-                    : "Waiting for GitHub push before deploy."}
+                  : taskCompleted && !previewUrl
+                    ? "Task finished but preview URL is not available yet."
+                    : latestAgentPush
+                      ? "Agent pushed changes — building production preview."
+                      : "Waiting for agent to finish before deploy."}
           </p>
         </div>
         <div className="flex shrink-0 flex-wrap items-center gap-2">
@@ -1011,10 +1119,10 @@ export function SessionDetail({
     task.status === "failed" ||
     task.status === "sandbox_starting" ||
     task.status === "scheduling" ||
-    events.some((event) => event.type.startsWith("sandbox."));
+    events.some((event) => event.type === "sandbox.failed");
 
   return (
-    <div className="flex min-h-0 w-full flex-1 flex-col">
+    <div className="flex min-h-0 w-full flex-1 flex-col overflow-hidden">
       <div className="mb-4 flex items-center gap-3">
         <MotionButton
           type="button"
@@ -1088,81 +1196,75 @@ export function SessionDetail({
         ) : null}
       </div>
 
-      <div className="mb-4 rounded-xl border border-[#2a2a2a] bg-[#141414] px-4 py-3">
-        <p className="text-[13px] leading-relaxed text-gray-300">
-          {task.prompt}
-        </p>
+      <div className="mb-4 max-h-[38vh] shrink-0 space-y-4 overflow-y-auto">
+        <div className="rounded-xl border border-[#2a2a2a] bg-[#141414] px-4 py-3">
+          <p className="text-[13px] leading-relaxed text-gray-300">
+            {task.prompt}
+          </p>
+        </div>
+
+        {isLongRunning ? (
+          <p className="text-[12px] text-amber-300/90">
+            Still running ({elapsedTime}) — complex tasks can take 30+ minutes.
+          </p>
+        ) : null}
+
+        <PhaseTimeline task={task} events={events} />
+
+        {awaitingSandboxApproval ? (
+          <div className="flex items-center justify-between gap-3 rounded-xl border border-indigo-500/30 bg-indigo-500/5 px-4 py-3">
+            <div>
+              <p className="text-[13px] font-medium text-indigo-100">
+                Draft is ready
+              </p>
+              <p className="text-[12px] text-indigo-100/70">
+                Review planned files below, then start sandbox execution.
+              </p>
+            </div>
+            <MotionButton
+              type="button"
+              onClick={() => void handleStartSandbox()}
+              disabled={startingSandbox}
+              className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-indigo-400/40 bg-indigo-500/20 px-3 py-1.5 text-[12px] text-indigo-100 transition-colors hover:bg-indigo-500/30 disabled:opacity-60"
+            >
+              {startingSandbox ? (
+                <Loader2 className="size-3.5 animate-spin" />
+              ) : (
+                <Server className="size-3.5" />
+              )}
+              Run in sandbox
+            </MotionButton>
+          </div>
+        ) : null}
+
+        <LiveWorkPanel task={task} events={events} />
+
+        {task.repository ? (
+          <GitHubProgressBanner
+            repository={task.repository}
+            events={events}
+            branch={task.branch}
+          />
+        ) : null}
+
+        <PreviewDeployBanner task={task} events={events} />
+
+        {showDiagnostics ? (
+          <DiagnosticsPanel
+            task={task}
+            taskDiagnostics={taskDiagnostics}
+            infraDiagnostics={infraDiagnostics}
+            loading={diagnosticsLoading}
+            error={diagnosticsError}
+            onRefresh={() => void loadDiagnostics(task.id)}
+            defaultExpanded={task.status === "failed"}
+          />
+        ) : null}
       </div>
-
-      {isLongRunning ? (
-        <div className="mb-4 flex items-center gap-2.5 rounded-xl border border-amber-500/30 bg-amber-500/5 px-4 py-3">
-          <Clock className="size-4 shrink-0 text-amber-400" />
-          <div>
-            <p className="text-[13px] font-medium text-amber-200">
-              Long-running task
-            </p>
-            <p className="text-[12px] text-amber-200/70">
-              This task has been running for {elapsedTime}. Complex tasks may
-              take longer — the agent is still working.
-            </p>
-          </div>
-        </div>
-      ) : null}
-
-      <PhaseTimeline task={task} events={events} />
-
-      {awaitingSandboxApproval ? (
-        <div className="mb-4 flex items-center justify-between gap-3 rounded-xl border border-indigo-500/30 bg-indigo-500/5 px-4 py-3">
-          <div>
-            <p className="text-[13px] font-medium text-indigo-100">
-              Draft is ready
-            </p>
-            <p className="text-[12px] text-indigo-100/70">
-              Review planned files below, then start sandbox execution.
-            </p>
-          </div>
-          <MotionButton
-            type="button"
-            onClick={() => void handleStartSandbox()}
-            disabled={startingSandbox}
-            className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-indigo-400/40 bg-indigo-500/20 px-3 py-1.5 text-[12px] text-indigo-100 transition-colors hover:bg-indigo-500/30 disabled:opacity-60"
-          >
-            {startingSandbox ? (
-              <Loader2 className="size-3.5 animate-spin" />
-            ) : (
-              <Server className="size-3.5" />
-            )}
-            Run in sandbox
-          </MotionButton>
-        </div>
-      ) : null}
-
-      <LiveWorkPanel task={task} events={events} />
-
-      {task.repository ? (
-        <GitHubProgressBanner
-          repository={task.repository}
-          events={events}
-          branch={task.branch}
-        />
-      ) : null}
-
-      <PreviewDeployBanner task={task} events={events} />
 
       <AgentTerminalPanel events={events} isActive={isActive} />
 
-      {showDiagnostics ? (
-        <DiagnosticsPanel
-          task={task}
-          taskDiagnostics={taskDiagnostics}
-          infraDiagnostics={infraDiagnostics}
-          loading={diagnosticsLoading}
-          error={diagnosticsError}
-          onRefresh={() => void loadDiagnostics(task.id)}
-        />
-      ) : null}
-
-      <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-[#2a2a2a] bg-[#111]">
+      <div className="mt-4 flex min-h-0 min-h-[min(42vh,480px)] flex-1 flex-col overflow-hidden rounded-xl border border-[#2a2a2a] bg-[#111]">
         <div className="border-b border-[#252525] px-4 py-2.5">
           <h2 className="text-[13px] font-medium text-gray-400">Activity</h2>
         </div>
