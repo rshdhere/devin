@@ -91,6 +91,108 @@ func CombinedOutput(result *Result) string {
 
 type OnOutputFunc func(line OutputLine)
 
+// StreamLineHandler returns stop=true to terminate the process early (e.g. agent finished).
+type StreamLineHandler func(line OutputLine) (stop bool, stopErr error)
+
+func RunStreamingUntil(
+	ctx context.Context,
+	cwd, command string,
+	env []string,
+	onLine StreamLineHandler,
+) (*Result, error) {
+	if cwd == "" {
+		cwd = "."
+	}
+	if err := os.MkdirAll(cwd, 0o755); err != nil {
+		return nil, err
+	}
+
+	cmd := exec.CommandContext(ctx, "/bin/sh", "-lc", command)
+	cmd.Dir = filepath.Clean(cwd)
+	cmd.Env = append(os.Environ(), env...)
+
+	stdoutPipe, err := cmd.StdoutPipe()
+	if err != nil {
+		return nil, fmt.Errorf("stdout pipe: %w", err)
+	}
+stderrPipe, err := cmd.StderrPipe()
+	if err != nil {
+		return nil, fmt.Errorf("stderr pipe: %w", err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	var wg sync.WaitGroup
+	stopRequested := false
+	var stopErr error
+
+	streamReader := func(pipe io.Reader, stream string, buf *bytes.Buffer) {
+		defer wg.Done()
+		scanner := bufio.NewScanner(pipe)
+		scanner.Buffer(make([]byte, 64*1024), 1024*1024)
+		for scanner.Scan() {
+			if stopRequested {
+				return
+			}
+			line := scanner.Text()
+			buf.WriteString(line)
+			buf.WriteString("\n")
+			if onLine != nil {
+				stop, err := onLine(OutputLine{
+					Stream: stream,
+					Line:   line,
+					Time:   time.Now(),
+				})
+				if err != nil {
+					stopErr = err
+					stopRequested = true
+					_ = cmd.Process.Kill()
+					return
+				}
+				if stop {
+					stopRequested = true
+					_ = cmd.Process.Kill()
+					return
+				}
+			}
+		}
+	}
+
+	wg.Add(2)
+	go streamReader(stdoutPipe, "stdout", &stdout)
+	go streamReader(stderrPipe, "stderr", &stderr)
+
+	if err := cmd.Start(); err != nil {
+		return nil, fmt.Errorf("start command: %w", err)
+	}
+
+	wg.Wait()
+
+	err = cmd.Wait()
+	exitCode := 0
+	if err != nil {
+		var exitErr *exec.ExitError
+		if ok := asExitError(err, &exitErr); ok {
+			exitCode = exitErr.ExitCode()
+		} else if ctx.Err() != nil {
+			return nil, ctx.Err()
+		} else if stopRequested {
+			// Process killed after successful early stop.
+		} else {
+			return nil, err
+		}
+	}
+
+	if stopErr != nil {
+		return nil, stopErr
+	}
+
+	return &Result{
+		Stdout:   strings.TrimSpace(stdout.String()),
+		Stderr:   strings.TrimSpace(stderr.String()),
+		ExitCode: exitCode,
+	}, nil
+}
+
 func RunStreaming(ctx context.Context, cwd, command string, env []string, onOutput OnOutputFunc) (*Result, error) {
 	if cwd == "" {
 		cwd = "."

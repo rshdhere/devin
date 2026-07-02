@@ -243,6 +243,11 @@ export class TaskService {
     let sandboxName: string | undefined;
     let retainSandboxForPreview = false;
     let guestHost: string | undefined;
+    let runtime: RuntimeClient | undefined;
+    let repoCwd = "repo";
+    let repository: string | undefined;
+    let cloneUrl: string | undefined;
+    let githubToken: string | undefined;
 
     try {
       if (!job.skipDraft) {
@@ -346,7 +351,7 @@ export class TaskService {
       const runtimeBaseUrl =
         sandbox.status?.runtimeURL?.replace(/\/$/, "") || this.runtimeUrl;
       guestHost = new URL(runtimeBaseUrl).hostname;
-      const runtime = new RuntimeClient({ baseUrl: runtimeBaseUrl });
+      runtime = new RuntimeClient({ baseUrl: runtimeBaseUrl });
       this.emit(
         "runtime.waiting",
         task.id,
@@ -360,11 +365,11 @@ export class TaskService {
         runtimeURL: runtimeBaseUrl,
       });
 
-      const repoCwd = "repo";
+      repoCwd = "repo";
       let agentPrompt = task.prompt;
-      const repository = job.repository ?? task.repository;
-      let cloneUrl = job.cloneUrl;
-      const githubToken = job.githubToken;
+      repository = job.repository ?? task.repository;
+      cloneUrl = job.cloneUrl;
+      githubToken = job.githubToken;
       let gitOwner: GitHubUserIdentity | undefined;
       let createdNewRepo = Boolean(job.greenfieldPushed);
       const repoReadyInSandbox = Boolean(repository && cloneUrl);
@@ -505,6 +510,10 @@ export class TaskService {
 
       const stopEvents = this.forwardRuntimeEvents(runtimeBaseUrl, task.id);
 
+      if (task.agent === "cursor") {
+        await this.ensureSandboxConnectivity(runtime, task.id);
+      }
+
       this.updateTask(task.id, "running", `${task.agent} agent executing task`);
       this.emit("agent.running", task.id, `${task.agent} agent started`, {
         prompt: task.prompt,
@@ -596,6 +605,19 @@ export class TaskService {
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : "Task failed";
+      if (repository && cloneUrl && job.permissions?.canPush && runtime) {
+        try {
+          await this.emergencyPushAgentWork(
+            runtime,
+            task,
+            job,
+            repoCwd,
+            githubToken,
+          );
+        } catch {
+          // Best-effort recovery push; original failure still wins.
+        }
+      }
       if (task.status === "drafting" || task.status === "draft_ready") {
         this.emit("draft.failed", task.id, message, {
           phase: "drafting",
@@ -902,6 +924,115 @@ export class TaskService {
       cloneUrl,
       githubToken,
     });
+
+    if (githubToken) {
+      const syncResult = await runtime.terminal({
+        taskId: task.id,
+        cwd: repoCwd,
+        env: gitEnv,
+        command:
+          "git fetch --depth 1 origin main && git reset --soft FETCH_HEAD",
+      });
+      if (syncResult.exitCode === 0) {
+        this.emit(
+          "agent.log",
+          task.id,
+          "Synced hydrated repo with GitHub main",
+          {
+            repository: task.repository,
+            synced: true,
+          },
+        );
+      }
+    }
+  }
+
+  private async ensureSandboxConnectivity(
+    runtime: RuntimeClient,
+    taskId: string,
+  ): Promise<void> {
+    await this.ensureSandboxDns(runtime, taskId);
+
+    const checks = [
+      "curl -sf --max-time 15 https://api2.cursor.sh/ >/dev/null",
+      "curl -sf --max-time 15 https://github.com/ >/dev/null",
+    ];
+
+    for (const command of checks) {
+      const result = await runtime.terminal({ taskId, command });
+      if (result.exitCode === 0) {
+        this.emit(
+          "agent.log",
+          taskId,
+          "Sandbox outbound connectivity verified",
+          {
+            probe: command.includes("cursor") ? "cursor-api" : "github",
+          },
+        );
+        return;
+      }
+    }
+
+    throw new Error(
+      "Sandbox cannot reach Cursor or GitHub over the network. Check microVM NAT, DNS, and outbound firewall rules.",
+    );
+  }
+
+  private async emergencyPushAgentWork(
+    runtime: RuntimeClient,
+    task: Task,
+    job: ScheduleJob,
+    repoCwd: string,
+    githubToken?: string,
+  ): Promise<void> {
+    const gitEnv = this.gitRuntimeEnv(githubToken);
+    const status = await runtime.terminal({
+      taskId: task.id,
+      command: "git status --porcelain",
+      cwd: repoCwd,
+      env: gitEnv,
+    });
+
+    if (!status.stdout.trim()) {
+      return;
+    }
+
+    await runtime.gitCommit({
+      taskId: task.id,
+      message: buildCommitMessage(
+        `devin: partial work — ${task.title ?? "task incomplete"}`,
+      ),
+      paths: ["."],
+      cwd: repoCwd,
+      env: gitEnv,
+    });
+
+    await this.ensureGitPushAuth(
+      runtime,
+      task.id,
+      repoCwd,
+      githubToken,
+      job.cloneUrl,
+    );
+
+    const pushResult = await runtime.gitPush({
+      taskId: task.id,
+      branch: "main",
+      cwd: repoCwd,
+      env: gitEnv,
+    });
+
+    if (pushResult.status === "completed") {
+      this.emit(
+        "git.push",
+        task.id,
+        "Pushed partial agent work after failure",
+        {
+          branch: "main",
+          recovery: true,
+        },
+      );
+    }
   }
 
   private forwardRuntimeEvents(
@@ -1393,6 +1524,8 @@ export class TaskService {
     }
     const agentTimeout = String(resolveAgentTimeoutMinutes());
     secrets.AGENT_RUN_TIMEOUT_MIN = agentTimeout;
+    const model = process.env.AGENT_MODEL?.trim() || "composer-2-fast";
+    secrets.AGENT_MODEL = model;
     if (githubToken) {
       secrets.GITHUB_TOKEN = githubToken;
     }

@@ -317,9 +317,16 @@ function DiagnosticsPanel({
           ) : null}
           {/timed out/i.test(task.message) ? (
             <p className="text-[12px] leading-relaxed text-amber-200/90">
-              The Cursor agent hit a timeout before finishing. Redeploy the
-              scheduler image so tasks can run for up to 30 minutes, then retry.
-              Live preview is only built after the agent completes successfully.
+              The Cursor agent hit a timeout before finishing. This often means
+              the sandbox cannot reach the Cursor API over the network. Redeploy
+              the scheduler and runtime images, then retry. Live preview is only
+              built after the agent completes successfully.
+            </p>
+          ) : null}
+          {/cannot reach Cursor or GitHub/i.test(task.message) ? (
+            <p className="text-[12px] leading-relaxed text-amber-200/90">
+              The microVM sandbox has no outbound internet. Check Firecracker
+              CNI NAT, DNS, and security group egress rules for HTTPS (443).
             </p>
           ) : null}
         </div>

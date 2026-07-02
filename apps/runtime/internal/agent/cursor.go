@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -11,6 +12,13 @@ import (
 
 type CursorRunner struct {
 	cfg Config
+}
+
+type cursorStreamEvent struct {
+	Type    string `json:"type"`
+	Subtype string `json:"subtype"`
+	IsError bool   `json:"is_error"`
+	Result  string `json:"result"`
 }
 
 func (r *CursorRunner) Name() string {
@@ -34,11 +42,17 @@ func (r *CursorRunner) Run(
 		"-p",
 		"--force",
 		"--trust",
-		"--output-format", "text",
+		"--output-format", "stream-json",
 	}
-	if r.cfg.DefaultModel != "" {
-		args = append(args, "--model", r.cfg.DefaultModel)
+	model := envValue(req, "AGENT_MODEL")
+	if model == "" {
+		model = r.cfg.DefaultModel
 	}
+	if model == "" {
+		model = "composer-2-fast"
+	}
+	args = append(args, "--model", model)
+
 	workDir := resolveWorkDir(r.cfg, req)
 	args = append(args, "--workspace", workDir)
 	args = append(args, req.Prompt)
@@ -47,42 +61,48 @@ func (r *CursorRunner) Run(
 	publish("agent.log", "running cursor agent", map[string]any{
 		"command":   command,
 		"workDir":   workDir,
+		"model":     model,
 	})
 
 	var lastPublish time.Time
-	onOutput := func(line executil.OutputLine) {
-		if time.Since(lastPublish) < 100*time.Millisecond && len(line.Line) < 200 {
-			return
-		}
-		lastPublish = time.Now()
-		publish("agent.output", line.Line, map[string]any{
-			"stream": line.Stream,
-		})
-	}
+	var resultText string
 
-	result, err := executil.RunStreaming(ctx, workDir, command, mergeEnv(req), onOutput)
+	_, err := executil.RunStreamingUntil(ctx, workDir, command, mergeEnv(req), func(line executil.OutputLine) (bool, error) {
+		if time.Since(lastPublish) >= 100*time.Millisecond || len(line.Line) >= 200 {
+			lastPublish = time.Now()
+			publish("agent.output", line.Line, map[string]any{
+				"stream": line.Stream,
+			})
+		}
+
+		var evt cursorStreamEvent
+		if json.Unmarshal([]byte(line.Line), &evt) != nil || evt.Type != "result" {
+			return false, nil
+		}
+
+		resultText = strings.TrimSpace(evt.Result)
+		if evt.IsError {
+			message := resultText
+			if message == "" {
+				message = "cursor agent returned an error result"
+			}
+			return true, fmt.Errorf("%s", message)
+		}
+
+		return true, nil
+	})
 	if err != nil {
 		return nil, err
 	}
 
-	output := executil.CombinedOutput(result)
-	if result.ExitCode != 0 {
-		return &RunResult{
-			Status:  "failed",
-			Message: fmt.Sprintf("cursor agent exited with code %d", result.ExitCode),
-			Output:  output,
-			Agent:   r.Name(),
-		}, nil
-	}
-
 	publish("agent.log", "cursor agent finished", map[string]any{
-		"exitCode": result.ExitCode,
+		"streamResult": true,
 	})
 
 	return &RunResult{
 		Status:  "completed",
 		Message: "cursor agent completed task",
-		Output:  output,
+		Output:  resultText,
 		Agent:   r.Name(),
 	}, nil
 }

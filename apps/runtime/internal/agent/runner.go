@@ -2,6 +2,8 @@ package agent
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"time"
 
 	"github.com/rshdhere/devin/apps/runtime/internal/events"
@@ -74,10 +76,17 @@ func (s *Service) Run(ctx context.Context, req RunRequest, bus *events.Bus) (*Ru
 
 	result, err := runner.Run(runCtx, req, publish)
 	if err != nil {
-		publish("agent.failed", err.Error(), nil)
+		message := err.Error()
+		if errors.Is(err, context.DeadlineExceeded) {
+			message = fmt.Sprintf(
+				"Agent run timed out after %s",
+				s.runTimeoutFor(req).Round(time.Second),
+			)
+		}
+		publish("agent.failed", message, nil)
 		return &RunResult{
 			Status:  "failed",
-			Message: err.Error(),
+			Message: message,
 			Agent:   runner.Name(),
 		}, nil
 	}
