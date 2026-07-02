@@ -186,9 +186,16 @@ export class RuntimeClient {
     return response.json() as Promise<RuntimeHealthResponse>;
   }
 
-  async ensureDns(): Promise<void> {
-    const response = await this.fetchRuntime("/dns/ensure", { method: "POST" });
-    await parseRuntimeResponse(response);
+  async ensureDns(): Promise<boolean> {
+    try {
+      const response = await this.fetchRuntime("/dns/ensure", {
+        method: "POST",
+      });
+      await parseRuntimeResponse(response);
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   async terminal(body: TerminalRequest): Promise<TerminalResponse> {

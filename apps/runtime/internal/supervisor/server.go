@@ -190,6 +190,7 @@ func (s *Server) handleTerminal(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	workspace.EnsureDNS()
 	cwd := s.resolveCWD(req.CWD)
 	s.appendLog("terminal: " + req.Command)
 

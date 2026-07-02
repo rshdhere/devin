@@ -1095,6 +1095,12 @@ export function SessionDetail({
           setStreamError(error.message);
         }
       },
+      {
+        reconnect:
+          task.status !== "failed" &&
+          task.status !== "completed" &&
+          task.status !== "cancelled",
+      },
     );
 
     if (

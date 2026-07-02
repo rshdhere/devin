@@ -368,6 +368,7 @@ export class TaskService {
 
       repoCwd = "repo";
       let agentPrompt = task.prompt;
+      let repoHydratedLocally = false;
       repository = job.repository ?? task.repository;
       cloneUrl = job.cloneUrl;
       githubToken = job.githubToken;
@@ -421,6 +422,7 @@ export class TaskService {
             cloneUrl,
             githubToken,
           );
+          repoHydratedLocally = true;
         } else {
           try {
             await this.cloneRepositoryInSandbox(
@@ -447,16 +449,19 @@ export class TaskService {
                 cloneUrl,
                 githubToken,
               );
+              repoHydratedLocally = true;
             } else {
               throw error;
             }
           }
         }
-        await this.configureSandboxGit(runtime, task.id, gitOwner, {
-          repoCwd,
-          cloneUrl,
-          githubToken,
-        });
+        if (!repoHydratedLocally) {
+          await this.configureSandboxGit(runtime, task.id, gitOwner, {
+            repoCwd,
+            cloneUrl,
+            githubToken,
+          });
+        }
         if (!job.greenfieldPushed && createdNewRepo) {
           const bot = resolveBotAuthor();
           try {
@@ -809,7 +814,16 @@ export class TaskService {
     runtime: RuntimeClient,
     taskId: string,
   ): Promise<void> {
-    await runtime.ensureDns();
+    const viaApi = await runtime.ensureDns();
+    if (viaApi) {
+      return;
+    }
+
+    await runtime.terminalAllowFailure({
+      taskId,
+      command:
+        "printf '%s\\n' 'nameserver 8.8.8.8' 'nameserver 1.1.1.1' 'nameserver 8.8.4.4' > /etc/resolv.conf",
+    });
   }
 
   private async cloneRepositoryInSandbox(
@@ -908,18 +922,18 @@ export class TaskService {
       command: `git init -b main && git remote add origin '${escapeShell(cloneUrl)}'`,
     });
 
+    await this.configureSandboxGit(runtime, task.id, gitOwner, {
+      repoCwd,
+      cloneUrl,
+      githubToken,
+    });
+
     await runtime.gitCommit({
       taskId: task.id,
       cwd: repoCwd,
       env: gitEnv,
       message: buildCommitMessage(`devin: scaffold ${task.title ?? "project"}`),
       paths: ["."],
-    });
-
-    await this.configureSandboxGit(runtime, task.id, gitOwner, {
-      repoCwd,
-      cloneUrl,
-      githubToken,
     });
 
     // Scaffold was already pushed from the control plane — no GitHub sync needed.
@@ -961,22 +975,30 @@ export class TaskService {
     runtime: RuntimeClient,
     taskId: string,
   ): Promise<void> {
-    await this.ensureSandboxDns(runtime, taskId);
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      await this.ensureSandboxDns(runtime, taskId);
+      if (attempt > 0) {
+        await sleep(2_000);
+      }
 
-    const cursorCheck = await runtime.terminalAllowFailure({
-      taskId,
-      command: "curl -sf --max-time 15 https://api2.cursor.sh/ >/dev/null",
-    });
+      const cursorCheck = await runtime.terminalAllowFailure({
+        taskId,
+        command: "curl -sf --max-time 15 https://api2.cursor.sh/ >/dev/null",
+      });
+      if (cursorCheck.exitCode === 0) {
+        break;
+      }
+      if (attempt === 2) {
+        throw new Error(
+          "Sandbox cannot reach the Cursor API. Check microVM NAT, DNS, and outbound HTTPS (443) to api2.cursor.sh.",
+        );
+      }
+    }
+
     const githubCheck = await runtime.terminalAllowFailure({
       taskId,
       command: "curl -sf --max-time 15 https://github.com/ >/dev/null",
     });
-
-    if (cursorCheck.exitCode !== 0) {
-      throw new Error(
-        "Sandbox cannot reach the Cursor API. Check microVM NAT, DNS, and outbound HTTPS (443) to api2.cursor.sh.",
-      );
-    }
 
     if (githubCheck.exitCode !== 0) {
       this.emit(

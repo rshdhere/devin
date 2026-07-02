@@ -216,11 +216,11 @@ export function subscribeToTaskEvents(
 ): () => void {
   const controller = new AbortController();
   let reconnectAttempts = 0;
-  const shouldReconnect = options?.reconnect ?? true;
+  let shouldReconnect = options?.reconnect ?? true;
   const seenEventIds = new Set<string>();
 
   const connect = async () => {
-    while (!controller.signal.aborted) {
+    while (!controller.signal.aborted && shouldReconnect) {
       try {
         const response = await fetch(
           `${tasksUrl}/${encodeURIComponent(taskId)}/events`,
@@ -267,6 +267,12 @@ export function subscribeToTaskEvents(
                 if (!seenEventIds.has(event.id)) {
                   seenEventIds.add(event.id);
                   onEvent(event);
+                  if (
+                    event.type === "task.completed" ||
+                    event.type === "task.failed"
+                  ) {
+                    shouldReconnect = false;
+                  }
                 }
               } catch {
                 // ignore malformed events
