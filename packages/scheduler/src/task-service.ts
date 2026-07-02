@@ -11,6 +11,7 @@ import {
 } from "./diagnostics.js";
 import {
   authenticatedCloneUrl,
+  createGitHubInitialCommit,
   createGitHubIssue,
   createGitHubPullRequest,
   createGitHubRepositoryUnique,
@@ -20,7 +21,8 @@ import {
 } from "./github.js";
 import { generateProjectMetadata } from "./project-metadata.js";
 import { bootstrapGreenfieldProject } from "./greenfield-bootstrap.js";
-import { generateDraftPlan } from "./draft-planner.js";
+import { generateDraftPlan, type DraftPlan } from "./draft-planner.js";
+import { scaffoldFilesFromDraft } from "./scaffold-from-draft.js";
 import type {
   AgentProvider,
   CreateTaskInput,
@@ -259,6 +261,7 @@ export class TaskService {
 
         const autoStartSandbox = job.autoStartSandbox !== false;
         if (!autoStartSandbox) {
+          await this.provisionGreenfieldRepository(task, job);
           this.updateTask(
             task.id,
             "draft_ready",
@@ -278,6 +281,8 @@ export class TaskService {
       } else {
         this.validateAgentSecrets(task);
       }
+
+      await this.provisionGreenfieldRepository(task, job);
 
       this.updateTask(task.id, "draft_ready", "Draft ready; starting sandbox");
       this.emit(
@@ -353,11 +358,11 @@ export class TaskService {
 
       const repoCwd = "repo";
       let agentPrompt = task.prompt;
-      let repository = job.repository ?? task.repository;
+      const repository = job.repository ?? task.repository;
       let cloneUrl = job.cloneUrl;
       const githubToken = job.githubToken;
       let gitOwner: GitHubUserIdentity | undefined;
-      let createdNewRepo = false;
+      let createdNewRepo = Boolean(job.greenfieldPushed);
 
       if (githubToken) {
         try {
@@ -368,34 +373,12 @@ export class TaskService {
       }
 
       if (!repository && (job.createRepository || job.autoCreateRepository)) {
-        if (!githubToken) {
-          throw new Error("GitHub token is required for repository creation");
-        }
-        if (!job.permissions?.canCreateRepo) {
-          throw new Error("repository creation is not permitted");
-        }
+        throw new Error(
+          "Repository was not provisioned before sandbox execution",
+        );
+      }
 
-        const metadata = generateProjectMetadata(task.prompt);
-        task.title = metadata.title;
-
-        const created = await createGitHubRepositoryUnique(githubToken, {
-          description: metadata.description,
-          preferredName: job.createRepository?.trim() || undefined,
-        });
-        repository = created.fullName;
-        task.repository = repository;
-        cloneUrl = authenticatedCloneUrl(githubToken, repository);
-        job.repository = repository;
-        job.cloneUrl = cloneUrl;
-
-        this.emit("git.repo", task.id, `Created repository ${repository}`, {
-          repository,
-          htmlUrl: created.htmlUrl,
-          owner: gitOwner?.login,
-          repoName: created.name,
-        });
-        createdNewRepo = true;
-      } else if (
+      if (
         repository &&
         githubToken &&
         !cloneUrl &&
@@ -409,29 +392,20 @@ export class TaskService {
       }
 
       if (cloneUrl && repository) {
-        this.emit("git.clone", task.id, `Preparing ${repository}`, {
+        this.emit("git.clone", task.id, `Cloning ${repository}`, {
           repository,
         });
-        if (createdNewRepo) {
-          await this.initializeEmptyRepository(
-            runtime,
-            task.id,
-            cloneUrl,
-            repoCwd,
-          );
-        } else {
-          await runtime.gitClone({
-            taskId: task.id,
-            url: cloneUrl,
-            path: repoCwd,
-          });
-        }
+        await runtime.gitClone({
+          taskId: task.id,
+          url: cloneUrl,
+          path: repoCwd,
+        });
         await this.configureSandboxGit(runtime, task.id, gitOwner, {
           repoCwd,
           cloneUrl,
           githubToken,
         });
-        if (createdNewRepo) {
+        if (createdNewRepo && !job.greenfieldPushed) {
           const bot = resolveBotAuthor();
           try {
             await bootstrapGreenfieldProject({
@@ -610,11 +584,104 @@ export class TaskService {
       },
     );
 
+    job.draftPlan = plan;
+
     this.emit("draft.completed", task.id, "Draft plan ready", {
       phase: "draft_ready",
       files: plan.files,
       summary: plan.summary,
       steps: plan.steps,
+    });
+  }
+
+  private async provisionGreenfieldRepository(
+    task: Task,
+    job: ScheduleJob,
+  ): Promise<void> {
+    if (job.repository && job.cloneUrl) {
+      return;
+    }
+
+    if (!job.createRepository && !job.autoCreateRepository) {
+      return;
+    }
+
+    const githubToken = job.githubToken;
+    if (!githubToken) {
+      throw new Error("GitHub token is required for repository creation");
+    }
+    if (!job.permissions?.canCreateRepo) {
+      throw new Error("repository creation is not permitted");
+    }
+
+    const metadata = generateProjectMetadata(task.prompt);
+    task.title = metadata.title;
+
+    const created = await createGitHubRepositoryUnique(githubToken, {
+      description: metadata.description,
+      preferredName: job.createRepository?.trim() || undefined,
+    });
+
+    const repository = created.fullName;
+    const cloneUrl = authenticatedCloneUrl(githubToken, repository);
+    job.repository = repository;
+    job.cloneUrl = cloneUrl;
+    task.repository = repository;
+
+    this.emit("git.repo", task.id, `Created repository ${repository}`, {
+      repository,
+      htmlUrl: created.htmlUrl,
+      repoName: created.name,
+    });
+
+    if (!job.permissions?.canPush) {
+      return;
+    }
+
+    const plan =
+      job.draftPlan ??
+      ({
+        summary: metadata.description,
+        steps: [],
+        files: [],
+      } satisfies DraftPlan);
+
+    const [owner, repo] = repository.split("/");
+    if (!owner || !repo) {
+      throw new Error(`invalid repository name: ${repository}`);
+    }
+
+    const scaffoldFiles = scaffoldFilesFromDraft(plan, {
+      title: task.title ?? metadata.title,
+      prompt: task.prompt,
+    });
+
+    const commitMessage = buildCommitMessage(
+      `devin: scaffold ${task.title ?? metadata.title}`,
+    );
+
+    this.emit("git.commit", task.id, "Pushing scaffold to GitHub", {
+      repository,
+      files: scaffoldFiles.map((file) => file.path),
+      controlPlane: true,
+    });
+
+    await createGitHubInitialCommit(
+      githubToken,
+      owner,
+      repo,
+      scaffoldFiles,
+      commitMessage,
+      created.defaultBranch,
+    );
+
+    job.greenfieldPushed = true;
+    this.pendingJobs.set(task.id, job);
+
+    this.emit("git.push", task.id, "Pushed scaffold to GitHub", {
+      repository,
+      branch: created.defaultBranch,
+      controlPlane: true,
     });
   }
 
@@ -892,8 +959,7 @@ export class TaskService {
 
     if (opts?.githubToken) {
       commands.push(
-        `printf '%s' "$GITHUB_TOKEN" | gh auth login --with-token 2>/dev/null || true`,
-        "gh auth setup-git 2>/dev/null || true",
+        "git config --global credential.helper '!f() { echo username=x-access-token; echo password=$GITHUB_TOKEN; }; f'",
       );
     }
 
@@ -921,8 +987,7 @@ export class TaskService {
       env: this.gitRuntimeEnv(githubToken),
       command: [
         `git remote set-url origin '${escapeShell(cloneUrl)}'`,
-        `printf '%s' "$GITHUB_TOKEN" | gh auth login --with-token 2>/dev/null || true`,
-        "gh auth setup-git 2>/dev/null || true",
+        "git config --global credential.helper '!f() { echo username=x-access-token; echo password=$GITHUB_TOKEN; }; f'",
       ].join(" && "),
     });
   }

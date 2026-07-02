@@ -18,7 +18,7 @@ export function createQueue<T>(): TaskQueue<T> {
       queueUrl,
       region: process.env.AWS_REGION,
       waitTimeSeconds: envInt("SQS_WAIT_TIME_SECONDS", 20),
-      visibilityTimeoutSeconds: envInt("SQS_VISIBILITY_TIMEOUT_SECONDS", 300),
+      visibilityTimeoutSeconds: envInt("SQS_VISIBILITY_TIMEOUT_SECONDS", 7200),
     });
   }
 

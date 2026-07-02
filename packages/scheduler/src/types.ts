@@ -1,3 +1,5 @@
+import type { DraftPlan } from "./draft-planner.js";
+
 export type AgentProvider = "cursor" | "claude" | "mock";
 
 export type TaskStatus =
@@ -68,5 +70,7 @@ export interface ScheduleJob {
   testCommand?: string;
   issueTitle?: string;
   issueBody?: string;
+  draftPlan?: DraftPlan;
+  greenfieldPushed?: boolean;
   enqueuedAt: string;
 }

@@ -291,3 +291,85 @@ export async function createGitHubPullRequest(
   }
   return response.json() as Promise<{ html_url: string; number: number }>;
 }
+
+export async function createGitHubInitialCommit(
+  token: string,
+  owner: string,
+  repo: string,
+  files: Array<{ path: string; content: string }>,
+  message: string,
+  branch = "main",
+): Promise<{ sha: string }> {
+  if (files.length === 0) {
+    throw new Error("initial commit requires at least one file");
+  }
+
+  const treeEntries = await Promise.all(
+    files.map(async (file) => {
+      const blob = await githubApiRequest<{ sha: string }>(
+        token,
+        `/repos/${owner}/${repo}/git/blobs`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            content: file.content,
+            encoding: "utf-8",
+          }),
+        },
+      );
+      return {
+        path: file.path,
+        mode: "100644",
+        type: "blob",
+        sha: blob.sha,
+      };
+    }),
+  );
+
+  const tree = await githubApiRequest<{ sha: string }>(
+    token,
+    `/repos/${owner}/${repo}/git/trees`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ tree: treeEntries }),
+    },
+  );
+
+  const commit = await githubApiRequest<{ sha: string }>(
+    token,
+    `/repos/${owner}/${repo}/git/commits`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        message,
+        tree: tree.sha,
+      }),
+    },
+  );
+
+  try {
+    await githubApiRequest(token, `/repos/${owner}/${repo}/git/refs`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        ref: `refs/heads/${branch}`,
+        sha: commit.sha,
+      }),
+    });
+  } catch {
+    await githubApiRequest(
+      token,
+      `/repos/${owner}/${repo}/git/refs/heads/${branch}`,
+      {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sha: commit.sha }),
+      },
+    );
+  }
+
+  return { sha: commit.sha };
+}
