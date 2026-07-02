@@ -370,7 +370,7 @@ export async function createGitHubRepository(
       name,
       description: opts?.description,
       private: opts?.private ?? false,
-      auto_init: false,
+      auto_init: true,
     }),
   });
 
@@ -565,6 +565,86 @@ export async function createGitHubPullRequest(
   return response.json() as Promise<{ html_url: string; number: number }>;
 }
 
+async function pushAllFilesViaContentsApi(
+  token: string,
+  owner: string,
+  repo: string,
+  files: Array<{ path: string; content: string }>,
+  message: string,
+): Promise<{ sha: string }> {
+  let branch: string | undefined;
+  let lastSha = "";
+
+  for (let index = 0; index < files.length; index += 1) {
+    const file = files[index]!;
+    const commitMessage =
+      index === files.length - 1 ? message : `Add ${file.path}`;
+    const result = await createFileViaContentsApi(
+      token,
+      owner,
+      repo,
+      file.path,
+      file.content,
+      commitMessage,
+      index === 0 ? undefined : branch,
+    );
+    lastSha = result.sha;
+    if (!branch) {
+      const meta = await githubApiRequest<{ default_branch?: string }>(
+        token,
+        `/repos/${owner}/${repo}`,
+      );
+      branch = meta.default_branch ?? "main";
+    }
+  }
+
+  if (!lastSha) {
+    throw new Error("GitHub contents API did not create any commits");
+  }
+
+  return { sha: lastSha };
+}
+
+async function bootstrapEmptyRepository(
+  token: string,
+  owner: string,
+  repo: string,
+  orderedFiles: Array<{ path: string; content: string }>,
+  message: string,
+  branch: string,
+): Promise<{ sha: string; branch: string }> {
+  const seedFile =
+    orderedFiles.find((file) => file.path === "README.md") ?? orderedFiles[0]!;
+  const remainingFiles = orderedFiles.filter(
+    (file) => file.path !== seedFile.path,
+  );
+
+  const initialized = await initializeEmptyRepositoryWithContentsApi(
+    token,
+    owner,
+    repo,
+    seedFile,
+    remainingFiles.length === 0 ? message : "chore: initialize repository",
+    branch,
+  );
+
+  if (remainingFiles.length === 0) {
+    return initialized;
+  }
+
+  const commit = await createCommitViaGitDatabase(
+    token,
+    owner,
+    repo,
+    remainingFiles,
+    message,
+    initialized.branch,
+    initialized.sha,
+  );
+
+  return { sha: commit.sha, branch: initialized.branch };
+}
+
 export async function createGitHubInitialCommit(
   token: string,
   owner: string,
@@ -585,37 +665,54 @@ export async function createGitHubInitialCommit(
     return left.path.localeCompare(right.path);
   });
 
-  let activeBranch = branch;
-  let parentSha = await tryGetBranchHeadSha(token, owner, repo, activeBranch);
+  const activeBranch = branch;
+  const parentSha = await tryGetBranchHeadSha(token, owner, repo, activeBranch);
 
   if (parentSha === null) {
-    const seedFile =
-      orderedFiles.find((file) => file.path === "README.md") ??
-      orderedFiles[0]!;
-    const initialized = await initializeEmptyRepositoryWithContentsApi(
+    try {
+      const bootstrapped = await bootstrapEmptyRepository(
+        token,
+        owner,
+        repo,
+        orderedFiles,
+        message,
+        activeBranch,
+      );
+      return { sha: bootstrapped.sha };
+    } catch (error) {
+      if (!isGitRepositoryEmptyError(error)) {
+        throw error;
+      }
+      return pushAllFilesViaContentsApi(
+        token,
+        owner,
+        repo,
+        orderedFiles,
+        message,
+      );
+    }
+  }
+
+  try {
+    return await createCommitViaGitDatabase(
       token,
       owner,
       repo,
-      seedFile,
-      "chore: initialize repository",
+      orderedFiles,
+      message,
       activeBranch,
+      parentSha,
     );
-    activeBranch = initialized.branch;
-
-    if (orderedFiles.length === 1) {
-      return { sha: initialized.sha };
+  } catch (error) {
+    if (!isGitRepositoryEmptyError(error)) {
+      throw error;
     }
-
-    parentSha = initialized.sha;
+    return pushAllFilesViaContentsApi(
+      token,
+      owner,
+      repo,
+      orderedFiles,
+      message,
+    );
   }
-
-  return createCommitViaGitDatabase(
-    token,
-    owner,
-    repo,
-    orderedFiles,
-    message,
-    activeBranch,
-    parentSha,
-  );
 }
