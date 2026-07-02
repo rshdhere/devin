@@ -227,7 +227,11 @@ func (s *Server) handleGitClone(w http.ResponseWriter, r *http.Request) {
 		target = "repo"
 	}
 	targetPath := filepath.Join(s.workspace, filepath.Clean("/"+target))
-	command := fmt.Sprintf("git clone --depth 1 %s %s", shellQuote(req.URL), shellQuote(targetPath))
+	command := fmt.Sprintf(
+		"timeout 45 git clone --depth 1 %s %s",
+		shellQuote(req.URL),
+		shellQuote(targetPath),
+	)
 	s.appendLog("git clone " + req.URL)
 
 	result, err := executil.Run(r.Context(), s.workspace, command, nil)

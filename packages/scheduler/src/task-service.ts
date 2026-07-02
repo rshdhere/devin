@@ -367,6 +367,7 @@ export class TaskService {
       const githubToken = job.githubToken;
       let gitOwner: GitHubUserIdentity | undefined;
       let createdNewRepo = Boolean(job.greenfieldPushed);
+      const repoReadyInSandbox = Boolean(repository && cloneUrl);
 
       if (githubToken) {
         try {
@@ -396,33 +397,53 @@ export class TaskService {
       }
 
       if (cloneUrl && repository) {
-        try {
-          await this.cloneRepositoryInSandbox(
-            runtime,
+        await this.ensureSandboxDns(runtime, task.id);
+
+        if (job.greenfieldPushed && job.draftPlan) {
+          this.emit(
+            "agent.log",
             task.id,
-            cloneUrl,
-            repoCwd,
-            repository,
+            "Using local scaffold hydration for greenfield repo (skipping git clone)",
+            { repository, fallback: "hydrate" },
           );
-        } catch (error) {
-          if (job.draftPlan && isNetworkCloneFailure(error)) {
-            this.emit(
-              "agent.log",
-              task.id,
-              "Git clone failed in sandbox; hydrating from draft scaffold",
-              { repository, fallback: "hydrate" },
-            );
-            await this.hydrateGreenfieldInSandbox(
+          await this.hydrateGreenfieldInSandbox(
+            runtime,
+            task,
+            job,
+            repoCwd,
+            gitOwner,
+            cloneUrl,
+            githubToken,
+          );
+        } else {
+          try {
+            await this.cloneRepositoryInSandbox(
               runtime,
-              task,
-              job,
-              repoCwd,
-              gitOwner,
+              task.id,
               cloneUrl,
-              githubToken,
+              repoCwd,
+              repository,
             );
-          } else {
-            throw error;
+          } catch (error) {
+            if (job.draftPlan && isNetworkCloneFailure(error)) {
+              this.emit(
+                "agent.log",
+                task.id,
+                "Git clone failed in sandbox; hydrating from draft scaffold",
+                { repository, fallback: "hydrate" },
+              );
+              await this.hydrateGreenfieldInSandbox(
+                runtime,
+                task,
+                job,
+                repoCwd,
+                gitOwner,
+                cloneUrl,
+                githubToken,
+              );
+            } else {
+              throw error;
+            }
           }
         }
         await this.configureSandboxGit(runtime, task.id, gitOwner, {
@@ -498,7 +519,7 @@ export class TaskService {
             taskId: task.id,
             prompt: agentPrompt,
             agent: task.agent,
-            workDir: repository && cloneUrl ? repoCwd : undefined,
+            workDir: repoReadyInSandbox ? repoCwd : undefined,
             env: this.runtimeSecrets(githubToken),
           },
           { maxWaitMs: resolveAgentMaxWaitMs() },
