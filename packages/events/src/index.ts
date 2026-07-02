@@ -1,6 +1,13 @@
 export type TaskEventType =
   | "task.created"
   | "task.scheduled"
+  | "task.phase_changed"
+  | "draft.started"
+  | "draft.updated"
+  | "draft.diff"
+  | "draft.completed"
+  | "draft.failed"
+  | "execution.started"
   | "sandbox.requested"
   | "sandbox.provisioning"
   | "sandbox.started"

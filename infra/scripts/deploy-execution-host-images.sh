@@ -85,6 +85,7 @@ ExecStart=/usr/bin/docker run --rm --name scheduler \\\\
   -e RUNTIME_READY_TIMEOUT_SECONDS=60 \\\\
   -e CURSOR_API_KEY=\\\${CURSOR_API_KEY:-} \\\\
   -e ANTHROPIC_API_KEY=\\\${ANTHROPIC_API_KEY:-} \\\\
+  -e OPENAI_API_KEY=\\\${OPENAI_API_KEY:-} \\\\
   -e GITHUB_BOT_TOKEN=\\\${GITHUB_BOT_TOKEN:-} \\\\
   -e GITHUB_BOT_NAME=\\\${GITHUB_BOT_NAME:-baby-devin-bot} \\\\
   -e GITHUB_BOT_EMAIL=\\\${GITHUB_BOT_EMAIL:-baby-devin-bot@users.noreply.github.com} \\\\

@@ -5,6 +5,8 @@ export type AgentProvider = "cursor" | "claude" | "mock";
 export type TaskStatus =
   | "queued"
   | "scheduling"
+  | "drafting"
+  | "draft_ready"
   | "sandbox_starting"
   | "runtime_ready"
   | "running"
@@ -31,6 +33,13 @@ export interface Task {
 export type TaskEventType =
   | "task.created"
   | "task.scheduled"
+  | "task.phase_changed"
+  | "draft.started"
+  | "draft.updated"
+  | "draft.diff"
+  | "draft.completed"
+  | "draft.failed"
+  | "execution.started"
   | "sandbox.requested"
   | "sandbox.provisioning"
   | "sandbox.started"
@@ -104,6 +113,7 @@ export interface InfraDiagnostics {
     defaultAgent: string;
     cursorApiKeyConfigured: boolean;
     anthropicApiKeyConfigured: boolean;
+    openaiApiKeyConfigured?: boolean;
   };
   sandboxes: {
     total: number;
@@ -141,6 +151,7 @@ export async function createTask(input: {
   repository?: string;
   createRepository?: string;
   autoCreateRepository?: boolean;
+  autoStartSandbox?: boolean;
   testCommand?: string;
   issueTitle?: string;
   issueBody?: string;
@@ -158,6 +169,17 @@ export async function fetchTask(id: string): Promise<Task> {
   const response = await fetch(`${tasksUrl}/${encodeURIComponent(id)}`, {
     credentials: "include",
   });
+  return parseResponse<Task>(response);
+}
+
+export async function executeTask(id: string): Promise<Task> {
+  const response = await fetch(
+    `${tasksUrl}/${encodeURIComponent(id)}/execute`,
+    {
+      method: "POST",
+      credentials: "include",
+    },
+  );
   return parseResponse<Task>(response);
 }
 
@@ -284,6 +306,10 @@ export function taskStatusLabel(status: TaskStatus): string {
       return "Queued";
     case "scheduling":
       return "Scheduling";
+    case "drafting":
+      return "Drafting plan";
+    case "draft_ready":
+      return "Draft ready";
     case "sandbox_starting":
       return "Starting sandbox";
     case "runtime_ready":
@@ -303,6 +329,20 @@ export function taskStatusLabel(status: TaskStatus): string {
 
 export function eventTypeLabel(type: TaskEventType): string {
   switch (type) {
+    case "task.phase_changed":
+      return "Phase";
+    case "draft.started":
+      return "Draft start";
+    case "draft.updated":
+      return "Draft update";
+    case "draft.diff":
+      return "Draft diff";
+    case "draft.completed":
+      return "Draft ready";
+    case "draft.failed":
+      return "Draft failed";
+    case "execution.started":
+      return "Execution";
     case "sandbox.requested":
       return "Sandbox request";
     case "sandbox.provisioning":
@@ -347,6 +387,8 @@ export function formatEventData(data?: Record<string, unknown>): string[] {
 
   const lines: string[] = [];
   const orderedKeys = [
+    "sequence",
+    "source",
     "phase",
     "message",
     "sandboxName",

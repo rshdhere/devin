@@ -26,6 +26,7 @@ import {
   fetchTask,
   fetchTaskDiagnostics,
   formatEventData,
+  executeTask,
   subscribeToTaskEvents,
   taskStatusLabel,
   type InfraDiagnostics,
@@ -78,6 +79,9 @@ function useElapsedTime(startTime: string, isActive: boolean): string {
 }
 
 function eventIcon(type: TaskEvent["type"]) {
+  if (type.startsWith("draft.") || type === "task.phase_changed") {
+    return Terminal;
+  }
   if (type.startsWith("sandbox.")) {
     if (type === "sandbox.failed") return XCircle;
     if (type === "sandbox.started") return CheckCircle2;
@@ -100,6 +104,19 @@ function eventIcon(type: TaskEvent["type"]) {
 
 function eventColor(type: TaskEvent["type"]) {
   if (
+    type === "draft.completed" ||
+    type === "execution.started" ||
+    type === "task.phase_changed"
+  ) {
+    return "text-indigo-300";
+  }
+  if (type === "draft.failed") {
+    return "text-red-400";
+  }
+  if (type.startsWith("draft.")) {
+    return "text-indigo-400";
+  }
+  if (
     type === "task.completed" ||
     type === "sandbox.started" ||
     type === "runtime.ready"
@@ -116,6 +133,59 @@ function eventColor(type: TaskEvent["type"]) {
   if (type.startsWith("git.")) return "text-[#5a9fd4]";
   if (type === "agent.output") return "text-green-400";
   return "text-gray-400";
+}
+
+function LiveWorkPanel({ task, events }: { task: Task; events: TaskEvent[] }) {
+  const draftEvents = events.filter((event) => event.type.startsWith("draft."));
+  const stepEvents = events.filter((event) => event.type === "draft.updated");
+  const fileEvents = events.filter((event) => event.type === "draft.diff");
+  const latestDraft = draftEvents[draftEvents.length - 1];
+  const draftSummary = events.find((event) => event.type === "draft.completed")
+    ?.data?.summary;
+
+  if (
+    draftEvents.length === 0 &&
+    task.status !== "drafting" &&
+    task.status !== "draft_ready"
+  ) {
+    return null;
+  }
+
+  return (
+    <div className="mb-4 rounded-xl border border-indigo-500/30 bg-indigo-500/5 px-4 py-3">
+      <div className="mb-2 flex items-center gap-2">
+        <Terminal className="size-4 text-indigo-300" />
+        <h2 className="text-[13px] font-medium text-indigo-100">Live Work</h2>
+      </div>
+      <p className="text-[12px] text-indigo-100/80">
+        {String(
+          draftSummary ?? latestDraft?.message ?? "Generating draft plan...",
+        )}
+      </p>
+      {stepEvents.length > 0 ? (
+        <div className="mt-2 space-y-1">
+          {stepEvents.slice(-4).map((event) => (
+            <p key={event.id} className="text-[11px] text-indigo-100/70">
+              • {event.message}
+            </p>
+          ))}
+        </div>
+      ) : null}
+      {fileEvents.length > 0 ? (
+        <div className="mt-2 space-y-1 rounded-lg border border-indigo-500/20 bg-[#101326] px-3 py-2">
+          {fileEvents.slice(-5).map((event) => (
+            <p
+              key={event.id}
+              className="font-mono text-[11px] text-indigo-100/80"
+            >
+              {String(event.data?.path ?? "file")} —{" "}
+              {String(event.data?.summary ?? event.message)}
+            </p>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
 }
 
 function DiagnosticsPanel({
@@ -528,6 +598,77 @@ function GitHubProgressBanner({
   );
 }
 
+function PhaseTimeline({ task, events }: { task: Task; events: TaskEvent[] }) {
+  const draftDone =
+    events.some((event) => event.type === "draft.completed") ||
+    !["queued", "scheduling", "drafting"].includes(task.status);
+  const sandboxDone =
+    events.some((event) => event.type === "sandbox.started") ||
+    ["runtime_ready", "running", "completed", "failed"].includes(task.status);
+  const executeDone =
+    task.status === "completed" ||
+    task.status === "failed" ||
+    events.some((event) => event.type === "task.completed");
+
+  const currentPhase = (() => {
+    if (["queued", "scheduling", "drafting"].includes(task.status)) {
+      return "draft";
+    }
+    if (
+      task.status === "draft_ready" ||
+      task.status === "sandbox_starting" ||
+      events.some(
+        (event) =>
+          event.type.startsWith("sandbox.") && event.type !== "sandbox.started",
+      )
+    ) {
+      return "sandbox";
+    }
+    if (task.status === "running" || task.status === "runtime_ready") {
+      return "execute";
+    }
+    if (executeDone) {
+      return "complete";
+    }
+    return draftDone ? "sandbox" : "draft";
+  })();
+
+  const phases = [
+    { id: "draft", label: "Draft plan", done: draftDone },
+    { id: "sandbox", label: "Sandbox", done: sandboxDone },
+    { id: "execute", label: "Execute", done: executeDone },
+    { id: "complete", label: "Done", done: executeDone },
+  ] as const;
+
+  return (
+    <div className="mb-4 rounded-xl border border-[#2a2a2a] bg-[#111] px-4 py-3">
+      <p className="mb-2 text-[11px] font-medium tracking-wide text-gray-500 uppercase">
+        Progress
+      </p>
+      <div className="grid grid-cols-4 gap-2">
+        {phases.map((phase) => {
+          const isActive = phase.id === currentPhase;
+          return (
+            <div
+              key={phase.id}
+              className={cn(
+                "rounded-lg border px-2 py-1.5 text-center text-[11px]",
+                phase.done
+                  ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-300"
+                  : isActive
+                    ? "border-indigo-500/40 bg-indigo-500/10 text-indigo-200"
+                    : "border-[#2a2a2a] bg-[#0d0d0d] text-gray-500",
+              )}
+            >
+              {phase.label}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function EventRow({ event }: { event: TaskEvent }) {
   const [expanded, setExpanded] = useState(false);
   const Icon = eventIcon(event.type);
@@ -629,6 +770,7 @@ export function SessionDetail({
     useState<InfraDiagnostics | null>(null);
   const [diagnosticsLoading, setDiagnosticsLoading] = useState(false);
   const [diagnosticsError, setDiagnosticsError] = useState<string | null>(null);
+  const [startingSandbox, setStartingSandbox] = useState(false);
   const feedRef = useRef<HTMLDivElement>(null);
 
   const isActive =
@@ -639,6 +781,26 @@ export function SessionDetail({
   const elapsedTime = useElapsedTime(task.createdAt, isActive);
   const isLongRunning =
     isActive && Date.now() - new Date(task.createdAt).getTime() > 5 * 60 * 1000;
+
+  const awaitingSandboxApproval =
+    task.status === "draft_ready" &&
+    (task.message?.toLowerCase().includes("approve") ||
+      events.some((event) => event.data?.awaitingApproval === true));
+
+  const handleStartSandbox = useCallback(async () => {
+    setStartingSandbox(true);
+    try {
+      const updated = await executeTask(task.id);
+      setTask(updated);
+      await refreshTasks();
+    } catch (error) {
+      setStreamError(
+        error instanceof Error ? error.message : "Failed to start sandbox",
+      );
+    } finally {
+      setStartingSandbox(false);
+    }
+  }, [refreshTasks, task.id]);
 
   const loadDiagnostics = useCallback(async (taskId: string) => {
     setDiagnosticsLoading(true);
@@ -832,6 +994,36 @@ export function SessionDetail({
           </div>
         </div>
       ) : null}
+
+      <PhaseTimeline task={task} events={events} />
+
+      {awaitingSandboxApproval ? (
+        <div className="mb-4 flex items-center justify-between gap-3 rounded-xl border border-indigo-500/30 bg-indigo-500/5 px-4 py-3">
+          <div>
+            <p className="text-[13px] font-medium text-indigo-100">
+              Draft is ready
+            </p>
+            <p className="text-[12px] text-indigo-100/70">
+              Review planned files below, then start sandbox execution.
+            </p>
+          </div>
+          <MotionButton
+            type="button"
+            onClick={() => void handleStartSandbox()}
+            disabled={startingSandbox}
+            className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-indigo-400/40 bg-indigo-500/20 px-3 py-1.5 text-[12px] text-indigo-100 transition-colors hover:bg-indigo-500/30 disabled:opacity-60"
+          >
+            {startingSandbox ? (
+              <Loader2 className="size-3.5 animate-spin" />
+            ) : (
+              <Server className="size-3.5" />
+            )}
+            Run in sandbox
+          </MotionButton>
+        </div>
+      ) : null}
+
+      <LiveWorkPanel task={task} events={events} />
 
       {task.repository ? (
         <GitHubProgressBanner

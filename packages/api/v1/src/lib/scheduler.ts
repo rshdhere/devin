@@ -51,4 +51,10 @@ export async function getTaskDiagnostics(id: string): Promise<Response> {
   return proxyScheduler(`/api/v1/tasks/${encodeURIComponent(id)}/diagnostics`);
 }
 
+export async function startTaskExecution(id: string): Promise<Response> {
+  return proxyScheduler(`/api/v1/tasks/${encodeURIComponent(id)}/execute`, {
+    method: "POST",
+  });
+}
+
 export { schedulerBaseUrl };

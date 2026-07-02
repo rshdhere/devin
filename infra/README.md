@@ -232,6 +232,7 @@ Store shared agent keys in **AWS SSM SecureString** parameters (not per-user). E
 | --- | --- |
 | `/devin-production/platform/cursor_api_key` | Cursor agent (`CURSOR_API_KEY`) |
 | `/devin-production/platform/anthropic_api_key` | Claude agent (`ANTHROPIC_API_KEY`) |
+| `/devin-production/platform/openai_api_key` | Draft planner (`OPENAI_API_KEY`) |
 | `/devin-production/platform/github_bot_token` | `baby-devin-bot` repo creation |
 
 ```sh

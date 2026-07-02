@@ -59,6 +59,7 @@ export function PromptComposer({ selectedRepository }: PromptComposerProps) {
     selectedRepository ? "existing" : "create",
   );
   const [newRepoName, setNewRepoName] = useState("");
+  const [autoStartSandbox, setAutoStartSandbox] = useState(true);
   const [showRepoOptions, setShowRepoOptions] = useState(false);
 
   useEffect(() => {
@@ -119,6 +120,7 @@ export function PromptComposer({ selectedRepository }: PromptComposerProps) {
           repoMode === "create" && finalRepoName ? finalRepoName : undefined,
         autoCreateRepository:
           repoMode === "create" && !finalRepoName ? true : undefined,
+        autoStartSandbox,
       });
       setPrompt("");
       setNewRepoName("");
@@ -364,6 +366,23 @@ export function PromptComposer({ selectedRepository }: PromptComposerProps) {
                         </p>
                       </div>
                     ) : null}
+
+                    <div className="border-t border-[#333] px-3 py-2">
+                      <label className="flex cursor-pointer items-center justify-between gap-2 text-[12px] text-gray-300">
+                        <span>Auto-start sandbox after draft</span>
+                        <input
+                          type="checkbox"
+                          checked={autoStartSandbox}
+                          onChange={(event) =>
+                            setAutoStartSandbox(event.target.checked)
+                          }
+                          className="size-3.5 accent-indigo-400"
+                        />
+                      </label>
+                      <p className="mt-1 text-[11px] text-gray-500">
+                        Off = review draft first, then run in sandbox manually
+                      </p>
+                    </div>
                   </motion.div>
                 ) : null}
               </AnimatePresence>

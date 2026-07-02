@@ -6,11 +6,11 @@
 #   ./set-platform-secret.sh github_bot_token
 #   CURSOR_API_KEY=sk-... ./set-platform-secret.sh cursor_api_key
 #
-# Prompts for the value when not passed via env (CURSOR_API_KEY, ANTHROPIC_API_KEY, GITHUB_BOT_TOKEN).
+# Prompts for the value when not passed via env (CURSOR_API_KEY, ANTHROPIC_API_KEY, OPENAI_API_KEY, GITHUB_BOT_TOKEN).
 set -euo pipefail
 
 if [[ $# -lt 1 ]]; then
-  echo "Usage: $0 <cursor_api_key|anthropic_api_key|github_bot_token> [value]" >&2
+  echo "Usage: $0 <cursor_api_key|anthropic_api_key|openai_api_key|github_bot_token> [value]" >&2
   exit 1
 fi
 
@@ -25,6 +25,9 @@ case "$KEY_NAME" in
     ;;
   anthropic_api_key)
     VALUE="${2:-${ANTHROPIC_API_KEY:-}}"
+    ;;
+  openai_api_key)
+    VALUE="${2:-${OPENAI_API_KEY:-}}"
     ;;
   github_bot_token)
     VALUE="${2:-${GITHUB_BOT_TOKEN:-}}"

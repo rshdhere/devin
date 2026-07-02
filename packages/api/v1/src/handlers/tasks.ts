@@ -10,6 +10,7 @@ import {
   getTask,
   getTaskDiagnostics,
   listTasks,
+  startTaskExecution,
   streamTaskEvents,
 } from "../lib/scheduler.js";
 import { requireAuth } from "../middleware/require-auth.js";
@@ -84,6 +85,7 @@ tasksRouter.post("/", async (req, res) => {
       repository,
       createRepository,
       autoCreateRepository,
+      autoStartSandbox: parsed.data.autoStartSandbox,
       testCommand: parsed.data.testCommand,
       issueTitle: parsed.data.issueTitle,
       issueBody: parsed.data.issueBody,
@@ -130,6 +132,15 @@ tasksRouter.get("/:id/diagnostics", async (req, res) => {
 tasksRouter.get("/:id", async (req, res) => {
   try {
     const response = await getTask(req.params.id);
+    res.status(response.status).json(await response.json());
+  } catch (error) {
+    respondSchedulerFailure(res, error);
+  }
+});
+
+tasksRouter.post("/:id/execute", async (req, res) => {
+  try {
+    const response = await startTaskExecution(req.params.id);
     res.status(response.status).json(await response.json());
   } catch (error) {
     respondSchedulerFailure(res, error);

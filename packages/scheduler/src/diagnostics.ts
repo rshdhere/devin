@@ -277,6 +277,7 @@ export async function collectInfraDiagnostics(options: {
             : "mock"),
       cursorApiKeyConfigured: Boolean(process.env.CURSOR_API_KEY?.trim()),
       anthropicApiKeyConfigured: Boolean(process.env.ANTHROPIC_API_KEY?.trim()),
+      openaiApiKeyConfigured: Boolean(process.env.OPENAI_API_KEY?.trim()),
     },
     sandboxes: {
       total: sandboxes.length,

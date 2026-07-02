@@ -22,6 +22,7 @@ interface SessionsContextValue {
     repository?: string;
     createRepository?: string;
     autoCreateRepository?: boolean;
+    autoStartSandbox?: boolean;
     testCommand?: string;
     issueTitle?: string;
     issueBody?: string;

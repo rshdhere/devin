@@ -3,6 +3,8 @@ export type AgentProvider = "cursor" | "claude" | "mock";
 export type TaskStatus =
   | "queued"
   | "scheduling"
+  | "drafting"
+  | "draft_ready"
   | "sandbox_starting"
   | "runtime_ready"
   | "running"
@@ -41,6 +43,7 @@ export interface CreateTaskInput {
   repository?: string;
   createRepository?: string;
   autoCreateRepository?: boolean;
+  autoStartSandbox?: boolean;
   cloneUrl?: string;
   githubToken?: string;
   permissions?: GitHubPermissions;
@@ -57,6 +60,8 @@ export interface ScheduleJob {
   repository?: string;
   createRepository?: string;
   autoCreateRepository?: boolean;
+  autoStartSandbox?: boolean;
+  skipDraft?: boolean;
   cloneUrl?: string;
   githubToken?: string;
   permissions?: GitHubPermissions;

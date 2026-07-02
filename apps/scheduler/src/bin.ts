@@ -74,6 +74,7 @@ const server = createServer(async (req, res) => {
         };
         createRepository?: string;
         autoCreateRepository?: boolean;
+        autoStartSandbox?: boolean;
         testCommand?: string;
         issueTitle?: string;
         issueBody?: string;
@@ -85,6 +86,7 @@ const server = createServer(async (req, res) => {
         repository: parsed.repository,
         createRepository: parsed.createRepository,
         autoCreateRepository: parsed.autoCreateRepository,
+        autoStartSandbox: parsed.autoStartSandbox,
         cloneUrl: parsed.cloneUrl,
         githubToken: parsed.githubToken,
         permissions: parsed.permissions,
@@ -178,6 +180,26 @@ const server = createServer(async (req, res) => {
       clearInterval(keepalive);
       unsubscribe();
     });
+    return;
+  }
+
+  const executeMatch = url.pathname.match(
+    /^\/api\/v1\/tasks\/([^/]+)\/execute$/,
+  );
+  if (req.method === "POST" && executeMatch) {
+    const taskId = executeMatch[1]!;
+    try {
+      const task = await tasks.startExecution(taskId);
+      res.writeHead(202, { "Content-Type": "application/json" });
+      res.end(JSON.stringify(task));
+    } catch (error) {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(
+        JSON.stringify({
+          error: error instanceof Error ? error.message : "execute failed",
+        }),
+      );
+    }
     return;
   }
 

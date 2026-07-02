@@ -33,6 +33,7 @@ ORCHESTRATOR_URL="\$(read_ssm "\$SSM_PREFIX/orchestrator_url")"
 TASK_QUEUE_URL="\$(read_ssm "\$SSM_PREFIX/task_queue_url")"
 CURSOR_API_KEY="\$(read_ssm "\$SSM_PREFIX/cursor_api_key")"
 ANTHROPIC_API_KEY="\$(read_ssm "\$SSM_PREFIX/anthropic_api_key")"
+OPENAI_API_KEY="\$(read_ssm "\$SSM_PREFIX/openai_api_key")"
 GITHUB_BOT_TOKEN="\$(read_ssm "\$SSM_PREFIX/github_bot_token")"
 SCHEDULER_NEEDS_RESTART=0
 
@@ -66,6 +67,7 @@ umask 077
   echo "DEFAULT_AGENT=cursor"
   printf 'CURSOR_API_KEY=%s\n' "\${CURSOR_API_KEY}"
   printf 'ANTHROPIC_API_KEY=%s\n' "\${ANTHROPIC_API_KEY}"
+  printf 'OPENAI_API_KEY=%s\n' "\${OPENAI_API_KEY}"
   printf 'GITHUB_BOT_TOKEN=%s\n' "\${GITHUB_BOT_TOKEN}"
   echo "GITHUB_BOT_NAME=baby-devin-bot"
   echo "GITHUB_BOT_EMAIL=baby-devin-bot@users.noreply.github.com"

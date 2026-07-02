@@ -20,6 +20,7 @@ import {
 } from "./github.js";
 import { generateProjectMetadata } from "./project-metadata.js";
 import { bootstrapGreenfieldProject } from "./greenfield-bootstrap.js";
+import { generateDraftPlan } from "./draft-planner.js";
 import type {
   AgentProvider,
   CreateTaskInput,
@@ -54,6 +55,8 @@ type SandboxRecord = {
 
 export class TaskService {
   private readonly tasks = new Map<string, Task>();
+  private readonly pendingJobs = new Map<string, ScheduleJob>();
+  private readonly eventSequences = new Map<string, number>();
   private readonly eventBus: EventBus;
   private readonly queue: TaskQueue<ScheduleJob>;
   private readonly orchestratorUrl: string;
@@ -116,30 +119,53 @@ export class TaskService {
       repository: task.repository,
     });
 
-    void this.queue
-      .enqueue({
-        taskId: task.id,
-        prompt: task.prompt,
-        agent: task.agent,
-        userId: input.userId,
-        repository: input.repository,
-        createRepository: input.createRepository,
-        autoCreateRepository: input.autoCreateRepository,
-        cloneUrl: input.cloneUrl,
-        githubToken: input.githubToken,
-        permissions: input.permissions,
-        testCommand: input.testCommand,
-        issueTitle: input.issueTitle,
-        issueBody: input.issueBody,
-        enqueuedAt: now,
-      })
-      .catch((error) => {
-        const message =
-          error instanceof Error ? error.message : "Failed to enqueue task";
-        this.updateTask(task.id, "failed", message);
-        this.emit("task.failed", task.id, message);
-      });
+    const job: ScheduleJob = {
+      taskId: task.id,
+      prompt: task.prompt,
+      agent: task.agent,
+      userId: input.userId,
+      repository: input.repository,
+      createRepository: input.createRepository,
+      autoCreateRepository: input.autoCreateRepository,
+      autoStartSandbox: input.autoStartSandbox ?? true,
+      cloneUrl: input.cloneUrl,
+      githubToken: input.githubToken,
+      permissions: input.permissions,
+      testCommand: input.testCommand,
+      issueTitle: input.issueTitle,
+      issueBody: input.issueBody,
+      enqueuedAt: now,
+    };
+    this.pendingJobs.set(task.id, job);
 
+    void this.queue.enqueue(job).catch((error) => {
+      const message =
+        error instanceof Error ? error.message : "Failed to enqueue task";
+      this.updateTask(task.id, "failed", message);
+      this.emit("task.failed", task.id, message);
+    });
+
+    return task;
+  }
+
+  async startExecution(taskId: string): Promise<Task> {
+    const task = this.tasks.get(taskId);
+    const job = this.pendingJobs.get(taskId);
+    if (!task || !job) {
+      throw new Error("task not found");
+    }
+    if (task.status !== "draft_ready") {
+      throw new Error("task is not waiting for sandbox execution");
+    }
+
+    const executionJob: ScheduleJob = {
+      ...job,
+      skipDraft: true,
+      autoStartSandbox: true,
+      enqueuedAt: new Date().toISOString(),
+    };
+    this.pendingJobs.set(taskId, executionJob);
+    await this.queue.enqueue(executionJob);
     return task;
   }
 
@@ -207,25 +233,64 @@ export class TaskService {
       return;
     }
 
+    if (task.status === "draft_ready" && !job.skipDraft) {
+      return;
+    }
+
     let sandboxName: string | undefined;
 
     try {
-      this.updateTask(task.id, "scheduling", "Scheduler picked up task");
-      this.emit("task.scheduled", task.id, "Task scheduled", {
-        agent: task.agent,
+      if (!job.skipDraft) {
+        this.updateTask(task.id, "scheduling", "Scheduler picked up task");
+        this.emit("task.scheduled", task.id, "Task scheduled", {
+          agent: task.agent,
+        });
+        this.emit("task.phase_changed", task.id, "Entered scheduling phase", {
+          phase: "scheduling",
+        });
+
+        this.validateAgentSecrets(task);
+
+        this.updateTask(task.id, "drafting", "Preparing draft plan");
+        this.emit("task.phase_changed", task.id, "Entered draft phase", {
+          phase: "drafting",
+        });
+        await this.prepareDraft(task, job);
+
+        const autoStartSandbox = job.autoStartSandbox !== false;
+        if (!autoStartSandbox) {
+          this.updateTask(
+            task.id,
+            "draft_ready",
+            "Draft ready — approve sandbox to continue",
+          );
+          this.emit(
+            "task.phase_changed",
+            task.id,
+            "Draft ready — waiting for sandbox approval",
+            {
+              phase: "draft_ready",
+              awaitingApproval: true,
+            },
+          );
+          return;
+        }
+      } else {
+        this.validateAgentSecrets(task);
+      }
+
+      this.updateTask(task.id, "draft_ready", "Draft ready; starting sandbox");
+      this.emit(
+        "task.phase_changed",
+        task.id,
+        "Draft ready; moving to sandbox execution",
+        {
+          phase: "draft_ready",
+        },
+      );
+      this.emit("execution.started", task.id, "Execution starting in sandbox", {
+        phase: "sandbox_starting",
       });
-
-      if (task.agent === "cursor" && !process.env.CURSOR_API_KEY?.trim()) {
-        throw new Error(
-          "CURSOR_API_KEY is not set on the scheduler. Add it to AWS SSM as a SecureString at /<env>/platform/cursor_api_key, then run devin-sync-platform-config on the execution host.",
-        );
-      }
-
-      if (task.agent === "claude" && !process.env.ANTHROPIC_API_KEY?.trim()) {
-        throw new Error(
-          "ANTHROPIC_API_KEY is not set on the scheduler. Add it to AWS SSM as a SecureString at /<env>/platform/anthropic_api_key, then run devin-sync-platform-config on the execution host.",
-        );
-      }
 
       sandboxName = `sbx-${task.id.slice(0, 8)}`;
       task.sandboxName = sandboxName;
@@ -479,6 +544,13 @@ export class TaskService {
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : "Task failed";
+      if (task.status === "drafting" || task.status === "draft_ready") {
+        this.emit("draft.failed", task.id, message, {
+          phase: "drafting",
+          source: "scheduler",
+          error: message,
+        });
+      }
       this.updateTask(task.id, "failed", message);
       this.emit("task.failed", task.id, message);
       throw error;
@@ -487,6 +559,63 @@ export class TaskService {
         await this.deleteSandbox(sandboxName);
       }
     }
+  }
+
+  private validateAgentSecrets(task: Task): void {
+    if (task.agent === "cursor" && !process.env.CURSOR_API_KEY?.trim()) {
+      throw new Error(
+        "CURSOR_API_KEY is not set on the scheduler. Add it to AWS SSM as a SecureString at /<env>/platform/cursor_api_key, then run devin-sync-platform-config on the execution host.",
+      );
+    }
+
+    if (task.agent === "claude" && !process.env.ANTHROPIC_API_KEY?.trim()) {
+      throw new Error(
+        "ANTHROPIC_API_KEY is not set on the scheduler. Add it to AWS SSM as a SecureString at /<env>/platform/anthropic_api_key, then run devin-sync-platform-config on the execution host.",
+      );
+    }
+  }
+
+  private async prepareDraft(task: Task, job: ScheduleJob): Promise<void> {
+    this.emit("draft.started", task.id, "Generating code plan", {
+      phase: "drafting",
+      steps: 0,
+    });
+
+    const plan = await generateDraftPlan(
+      {
+        prompt: task.prompt,
+        repository: job.repository ?? task.repository,
+        createRepository: job.createRepository,
+        hasTestCommand: Boolean(job.testCommand),
+        agent: task.agent,
+      },
+      {
+        onStep: async (step, index, total) => {
+          this.emit("draft.updated", task.id, step, {
+            phase: "drafting",
+            step: index + 1,
+            totalSteps: total,
+          });
+        },
+        onFile: async (file, index, total) => {
+          this.emit("draft.diff", task.id, `Planned change: ${file.path}`, {
+            phase: "drafting",
+            path: file.path,
+            changeType: file.changeType,
+            summary: file.summary,
+            fileIndex: index + 1,
+            totalFiles: total,
+          });
+        },
+      },
+    );
+
+    this.emit("draft.completed", task.id, "Draft plan ready", {
+      phase: "draft_ready",
+      files: plan.files,
+      summary: plan.summary,
+      steps: plan.steps,
+    });
   }
 
   private forwardRuntimeEvents(
@@ -1203,6 +1332,13 @@ export class TaskService {
     type:
       | "task.created"
       | "task.scheduled"
+      | "task.phase_changed"
+      | "draft.started"
+      | "draft.updated"
+      | "draft.diff"
+      | "draft.completed"
+      | "draft.failed"
+      | "execution.started"
       | "sandbox.requested"
       | "sandbox.provisioning"
       | "sandbox.started"
@@ -1223,13 +1359,18 @@ export class TaskService {
     message: string,
     data?: Record<string, unknown>,
   ): void {
+    const sequence = this.nextEventSequence(taskId);
     this.eventBus.publish({
       id: crypto.randomUUID(),
       taskId,
       type,
       message,
       timestamp: new Date().toISOString(),
-      data,
+      data: {
+        source: "scheduler",
+        sequence,
+        ...(data ?? {}),
+      },
     });
   }
 
@@ -1239,14 +1380,25 @@ export class TaskService {
     message: string,
     data?: Record<string, unknown>,
   ): void {
+    const sequence = this.nextEventSequence(taskId);
     this.eventBus.publish({
       id: crypto.randomUUID(),
       taskId,
       type,
       message,
       timestamp: new Date().toISOString(),
-      data,
+      data: {
+        source: "runtime",
+        sequence,
+        ...(data ?? {}),
+      },
     });
+  }
+
+  private nextEventSequence(taskId: string): number {
+    const next = (this.eventSequences.get(taskId) ?? 0) + 1;
+    this.eventSequences.set(taskId, next);
+    return next;
   }
 }
 
