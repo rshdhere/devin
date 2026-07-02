@@ -129,9 +129,6 @@ if [[ -x /usr/local/bin/devin-sync-platform-config.sh ]]; then
 fi
 
 if systemctl list-unit-files | grep -q devin-scheduler.service; then
-  mkdir -p /etc/devin
-  touch /etc/devin/scheduler-secrets.env
-  chmod 600 /etc/devin/scheduler-secrets.env
   log "Restarting devin-scheduler"
   if ! systemctl restart devin-scheduler.service; then
     journalctl -u devin-scheduler.service -n 30 --no-pager >&2 || true

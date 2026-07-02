@@ -177,6 +177,23 @@ app.listen(port, () => {
     });
   }
 
+  if (!files.some((file) => file.path === "README.md")) {
+    files.unshift({
+      path: "README.md",
+      content: `# ${opts.title}
+
+${opts.prompt}
+
+## Getting started
+
+\`\`\`bash
+npm install
+npm start
+\`\`\`
+`,
+    });
+  }
+
   const seen = new Set<string>();
   return files.filter((file) => {
     if (seen.has(file.path)) {

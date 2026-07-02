@@ -17,7 +17,7 @@ set -euo pipefail
 export AWS_REGION="${AWS_REGION}"
 export SSM_PREFIX="${SSM_PREFIX}"
 
-if [[ ! -x /usr/local/bin/devin-sync-platform-config.sh ]] || ! grep -q cursor_api_key /usr/local/bin/devin-sync-platform-config.sh 2>/dev/null; then
+if [[ ! -x /usr/local/bin/devin-sync-platform-config.sh ]] || ! grep -q scheduler-secrets.env /usr/local/bin/devin-sync-platform-config.sh 2>/dev/null; then
   cat >/usr/local/bin/devin-sync-platform-config.sh <<'SCRIPT'
 #!/bin/bash
 set -euo pipefail

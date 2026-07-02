@@ -205,6 +205,25 @@ async function getBranchHeadSha(
   return ref.object.sha;
 }
 
+async function tryGetBranchHeadSha(
+  token: string,
+  owner: string,
+  repo: string,
+  branch: string,
+): Promise<string | null> {
+  try {
+    return await getBranchHeadSha(token, owner, repo, branch);
+  } catch (error) {
+    if (isGitRepositoryEmptyError(error)) {
+      return null;
+    }
+    if (error instanceof GitHubApiError && error.status === 404) {
+      return null;
+    }
+    throw error;
+  }
+}
+
 async function createCommitViaGitDatabase(
   token: string,
   owner: string,
@@ -284,6 +303,9 @@ async function createCommitViaGitDatabase(
       }),
     });
   } catch (error) {
+    if (error instanceof GitHubApiError && isGitRepositoryEmptyError(error)) {
+      throw error;
+    }
     if (!(error instanceof GitHubApiError) || error.status !== 422) {
       throw error;
     }
@@ -309,23 +331,8 @@ async function initializeEmptyRepositoryWithContentsApi(
   message: string,
   branch: string,
 ): Promise<{ sha: string; branch: string }> {
-  try {
-    const created = await createFileViaContentsApi(
-      token,
-      owner,
-      repo,
-      file.path,
-      file.content,
-      message,
-      branch,
-    );
-    return { sha: created.sha, branch };
-  } catch (error) {
-    if (!(error instanceof GitHubApiError) || error.status !== 404) {
-      throw error;
-    }
-  }
-
+  // Empty repos must be bootstrapped without a branch parameter; specifying
+  // refs/heads/main before the first commit returns 409 "Git Repository is empty".
   const created = await createFileViaContentsApi(
     token,
     owner,
@@ -578,38 +585,29 @@ export async function createGitHubInitialCommit(
     return left.path.localeCompare(right.path);
   });
 
-  try {
-    return await createCommitViaGitDatabase(
+  let activeBranch = branch;
+  let parentSha = await tryGetBranchHeadSha(token, owner, repo, activeBranch);
+
+  if (parentSha === null) {
+    const seedFile =
+      orderedFiles.find((file) => file.path === "README.md") ??
+      orderedFiles[0]!;
+    const initialized = await initializeEmptyRepositoryWithContentsApi(
       token,
       owner,
       repo,
-      orderedFiles,
-      message,
-      branch,
+      seedFile,
+      "chore: initialize repository",
+      activeBranch,
     );
-  } catch (error) {
-    if (!isGitRepositoryEmptyError(error)) {
-      throw error;
+    activeBranch = initialized.branch;
+
+    if (orderedFiles.length === 1) {
+      return { sha: initialized.sha };
     }
+
+    parentSha = initialized.sha;
   }
-
-  const seedFile =
-    orderedFiles.find((file) => file.path === "README.md") ?? orderedFiles[0]!;
-  const initialized = await initializeEmptyRepositoryWithContentsApi(
-    token,
-    owner,
-    repo,
-    seedFile,
-    "chore: initialize repository",
-    branch,
-  );
-  const activeBranch = initialized.branch;
-
-  if (orderedFiles.length === 1) {
-    return { sha: initialized.sha };
-  }
-
-  const parentSha = await getBranchHeadSha(token, owner, repo, activeBranch);
 
   return createCommitViaGitDatabase(
     token,
