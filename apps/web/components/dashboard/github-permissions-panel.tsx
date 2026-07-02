@@ -22,6 +22,7 @@ import {
   type GitHubStatus,
 } from "@/lib/github-api";
 import { MotionButton } from "@/components/dashboard/motion-button";
+import { DEVIN_BOT, displayBotUsername } from "@/lib/devin-bot";
 import { cn } from "@/lib/utils";
 
 interface GitHubPermissionsPanelProps {
@@ -193,13 +194,28 @@ export function GitHubPermissionsPanel({
 
         <div className="mt-4 rounded-lg border border-[#252525] bg-[#111] px-3 py-2.5">
           <div className="flex items-center justify-between gap-3">
-            <div>
-              <p className="text-[13px] text-gray-200">
-                Platform bot: @{status?.bot.username ?? "baby-devin-bot"}
-              </p>
-              <p className="text-[11px] text-gray-600">
-                Creates new repos and handles greenfield tasks on your behalf
-              </p>
+            <div className="flex min-w-0 items-start gap-2.5">
+              <img
+                src={DEVIN_BOT.avatarUrl}
+                alt=""
+                className="mt-0.5 size-8 rounded-full border border-[#333]"
+              />
+              <div className="min-w-0">
+                <p className="text-[13px] text-gray-200">
+                  Platform bot:{" "}
+                  <a
+                    href={DEVIN_BOT.profileUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="font-medium text-[#5a9fd4] hover:underline"
+                  >
+                    @{displayBotUsername(status?.bot.username)}
+                  </a>
+                </p>
+                <p className="text-[11px] text-gray-600">
+                  Creates new repos and handles greenfield tasks on your behalf
+                </p>
+              </div>
             </div>
             <span
               className={cn(

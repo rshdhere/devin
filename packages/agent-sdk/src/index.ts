@@ -77,13 +77,31 @@ export interface RuntimeEvent {
 
 export interface RuntimeClientOptions {
   baseUrl: string;
+  fetchTimeoutMs?: number;
 }
 
+const DEFAULT_RUNTIME_FETCH_TIMEOUT_MS = 35 * 60 * 1000;
+
 export class RuntimeClient {
-  constructor(private readonly options: RuntimeClientOptions) {}
+  private readonly fetchTimeoutMs: number;
+
+  constructor(private readonly options: RuntimeClientOptions) {
+    this.fetchTimeoutMs =
+      options.fetchTimeoutMs ?? DEFAULT_RUNTIME_FETCH_TIMEOUT_MS;
+  }
 
   private base(path: string): string {
     return `${this.options.baseUrl.replace(/\/$/, "")}${path}`;
+  }
+
+  private async fetchRuntime(
+    path: string,
+    init?: RequestInit,
+  ): Promise<Response> {
+    return fetch(this.base(path), {
+      ...init,
+      signal: AbortSignal.timeout(this.fetchTimeoutMs),
+    });
   }
 
   private envHeaders(env?: Record<string, string>): Record<string, string> {
@@ -94,7 +112,7 @@ export class RuntimeClient {
   }
 
   async run(body: RunRequest): Promise<RunResponse> {
-    const response = await fetch(this.base("/run"), {
+    const response = await this.fetchRuntime("/run", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
@@ -109,8 +127,8 @@ export class RuntimeClient {
   }
 
   async runStatus(taskId: string): Promise<RunResponse> {
-    const response = await fetch(
-      `${this.base("/run/status")}?taskId=${encodeURIComponent(taskId)}`,
+    const response = await this.fetchRuntime(
+      `/run/status?taskId=${encodeURIComponent(taskId)}`,
     );
     if (!response.ok) {
       const errorBody = await response.text();
@@ -123,27 +141,33 @@ export class RuntimeClient {
 
   async runAndWait(
     body: RunRequest,
-    opts?: { pollIntervalMs?: number },
+    opts?: { pollIntervalMs?: number; maxWaitMs?: number },
   ): Promise<RunResponse> {
     const pollIntervalMs = opts?.pollIntervalMs ?? 3_000;
+    const maxWaitMs = opts?.maxWaitMs ?? 30 * 60 * 1000;
+    const deadline = Date.now() + maxWaitMs;
     const accepted = await this.run(body);
     if (accepted.status === "completed" || accepted.status === "failed") {
       return accepted;
     }
 
-    while (true) {
+    while (Date.now() < deadline) {
       await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
       const status = await this.runStatus(body.taskId);
       if (status.status === "completed" || status.status === "failed") {
         return status;
       }
     }
+
+    throw new Error(
+      `Agent run for task ${body.taskId} did not finish within ${Math.round(maxWaitMs / 1000)}s`,
+    );
   }
 
   async writeFile(
     body: FileWriteRequest,
   ): Promise<{ status: string; path: string }> {
-    const response = await fetch(this.base("/files/write"), {
+    const response = await this.fetchRuntime("/files/write", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
@@ -152,12 +176,12 @@ export class RuntimeClient {
   }
 
   async health(): Promise<RuntimeHealthResponse> {
-    const response = await fetch(this.base("/health"));
+    const response = await this.fetchRuntime("/health");
     return response.json() as Promise<RuntimeHealthResponse>;
   }
 
   async terminal(body: TerminalRequest): Promise<TerminalResponse> {
-    const response = await fetch(this.base("/terminal"), {
+    const response = await this.fetchRuntime("/terminal", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -171,7 +195,7 @@ export class RuntimeClient {
   async gitClone(
     body: GitCloneRequest,
   ): Promise<{ status: string; path: string }> {
-    const response = await fetch(this.base("/git/clone"), {
+    const response = await this.fetchRuntime("/git/clone", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
@@ -182,7 +206,7 @@ export class RuntimeClient {
   async gitCommit(
     body: GitCommitRequest,
   ): Promise<{ status: string; message: string; output?: string }> {
-    const response = await fetch(this.base("/git/commit"), {
+    const response = await this.fetchRuntime("/git/commit", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -196,7 +220,7 @@ export class RuntimeClient {
   async gitPush(
     body: GitPushRequest,
   ): Promise<{ status: string; branch?: string; output?: string }> {
-    const response = await fetch(this.base("/git/push"), {
+    const response = await this.fetchRuntime("/git/push", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",

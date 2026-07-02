@@ -19,6 +19,7 @@ import { DashboardLogo } from "@/components/dashboard/dashboard-logo";
 import { MotionButton } from "@/components/dashboard/motion-button";
 import { PromptMetadataBar } from "@/components/dashboard/prompt-metadata-bar";
 import { useSessions } from "@/components/dashboard/sessions-context";
+import { DEVIN_BOT } from "@/lib/devin-bot";
 import { cn } from "@/lib/utils";
 
 const MIN_TEXTAREA_HEIGHT = 72;
@@ -321,7 +322,15 @@ export function PromptComposer({ selectedRepository }: PromptComposerProps) {
                       <div>
                         <p className="font-medium">Create new repository</p>
                         <p className="text-[11px] text-gray-500">
-                          Co-authored by baby-devin-bot
+                          Co-authored by{" "}
+                          <a
+                            href={DEVIN_BOT.profileUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-[#5a9fd4] hover:underline"
+                          >
+                            @{DEVIN_BOT.username}
+                          </a>
                         </p>
                       </div>
                     </MotionButton>

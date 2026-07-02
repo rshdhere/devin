@@ -9,6 +9,15 @@ export type {
 } from "@devin/queue";
 export { TaskService } from "./task-service.js";
 export {
+  buildPreviewUrl,
+  previewBaseDomain,
+  previewDeployEnabled,
+} from "./preview-registry.js";
+export {
+  handlePreviewProxy,
+  shouldHandlePreviewHost,
+} from "./preview-proxy.js";
+export {
   collectInfraDiagnostics,
   fetchFirecrackerHostStatus,
   listSandboxes,

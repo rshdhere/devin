@@ -600,7 +600,7 @@ export async function createGitHubInitialCommit(
     owner,
     repo,
     seedFile,
-    message,
+    "chore: initialize repository",
     branch,
   );
   const activeBranch = initialized.branch;

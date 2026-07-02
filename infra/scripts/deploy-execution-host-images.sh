@@ -74,6 +74,7 @@ RestartSec=5
 Environment=ORCHESTRATOR_URL=http://pending-ssm-sync:9090
 ExecStart=/usr/bin/docker run --rm --name scheduler \\\\
   --network host \\\\
+  --env-file /etc/devin/scheduler-secrets.env \\\\
   -e SCHEDULER_PORT=9091 \\\\
   -e ORCHESTRATOR_URL=\\\${ORCHESTRATOR_URL} \\\\
   -e FIRECRACKER_HOST_URL=http://127.0.0.1:9092 \\\\
@@ -83,12 +84,8 @@ ExecStart=/usr/bin/docker run --rm --name scheduler \\\\
   -e DEFAULT_AGENT=cursor \\\\
   -e SANDBOX_READY_TIMEOUT_SECONDS=300 \\\\
   -e RUNTIME_READY_TIMEOUT_SECONDS=60 \\\\
-  -e CURSOR_API_KEY=\\\${CURSOR_API_KEY:-} \\\\
-  -e ANTHROPIC_API_KEY=\\\${ANTHROPIC_API_KEY:-} \\\\
-  -e OPENAI_API_KEY=\\\${OPENAI_API_KEY:-} \\\\
-  -e GITHUB_BOT_TOKEN=\\\${GITHUB_BOT_TOKEN:-} \\\\
-  -e GITHUB_BOT_NAME=\\\${GITHUB_BOT_NAME:-baby-devin-bot} \\\\
-  -e GITHUB_BOT_EMAIL=\\\${GITHUB_BOT_EMAIL:-baby-devin-bot@users.noreply.github.com} \\\\
+  -e AGENT_RUN_TIMEOUT_MIN=30 \\\\
+  -e PREVIEW_BASE_DOMAIN=3897534985y30589y3ruwehrkjsehfr8er34858w36.devin.baby \\\\
   \${REGISTRY}/devin-scheduler:\${IMAGE_TAG}
 ExecStop=/usr/bin/docker stop scheduler
 
@@ -132,6 +129,9 @@ if [[ -x /usr/local/bin/devin-sync-platform-config.sh ]]; then
 fi
 
 if systemctl list-unit-files | grep -q devin-scheduler.service; then
+  mkdir -p /etc/devin
+  touch /etc/devin/scheduler-secrets.env
+  chmod 600 /etc/devin/scheduler-secrets.env
   log "Restarting devin-scheduler"
   if ! systemctl restart devin-scheduler.service; then
     journalctl -u devin-scheduler.service -n 30 --no-pager >&2 || true

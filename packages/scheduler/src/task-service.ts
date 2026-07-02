@@ -23,6 +23,7 @@ import { generateProjectMetadata } from "./project-metadata.js";
 import { bootstrapGreenfieldProject } from "./greenfield-bootstrap.js";
 import { generateDraftPlan, type DraftPlan } from "./draft-planner.js";
 import { scaffoldFilesFromDraft } from "./scaffold-from-draft.js";
+import { deployProductionPreview } from "./preview-deploy.js";
 import type {
   AgentProvider,
   CreateTaskInput,
@@ -240,6 +241,8 @@ export class TaskService {
     }
 
     let sandboxName: string | undefined;
+    let retainSandboxForPreview = false;
+    let guestHost: string | undefined;
 
     try {
       if (!job.skipDraft) {
@@ -342,6 +345,7 @@ export class TaskService {
 
       const runtimeBaseUrl =
         sandbox.status?.runtimeURL?.replace(/\/$/, "") || this.runtimeUrl;
+      guestHost = new URL(runtimeBaseUrl).hostname;
       const runtime = new RuntimeClient({ baseUrl: runtimeBaseUrl });
       this.emit(
         "runtime.waiting",
@@ -394,16 +398,43 @@ export class TaskService {
       if (cloneUrl && repository) {
         await this.ensureSandboxDns(runtime, task.id);
 
-        if (job.greenfieldPushed && job.draftPlan) {
-          await this.hydrateGreenfieldInSandbox(
-            runtime,
-            task,
-            job,
+        if (job.greenfieldPushed) {
+          this.emit("git.clone", task.id, `Cloning ${repository} from GitHub`, {
+            repository,
+            fromRemote: true,
+          });
+          try {
+            await runtime.gitClone({
+              taskId: task.id,
+              url: cloneUrl,
+              path: repoCwd,
+            });
+          } catch (error) {
+            if (job.draftPlan && isNetworkCloneFailure(error)) {
+              this.emit(
+                "agent.log",
+                task.id,
+                "Git clone failed in sandbox; hydrating from draft scaffold",
+                { repository, fallback: "hydrate" },
+              );
+              await this.hydrateGreenfieldInSandbox(
+                runtime,
+                task,
+                job,
+                repoCwd,
+                gitOwner,
+                cloneUrl,
+                githubToken,
+              );
+            } else {
+              throw error;
+            }
+          }
+          await this.configureSandboxGit(runtime, task.id, gitOwner, {
             repoCwd,
-            gitOwner,
             cloneUrl,
             githubToken,
-          );
+          });
         } else {
           this.emit("git.clone", task.id, `Cloning ${repository}`, {
             repository,
@@ -512,13 +543,16 @@ export class TaskService {
 
       let runResult;
       try {
-        runResult = await runtime.runAndWait({
-          taskId: task.id,
-          prompt: agentPrompt,
-          agent: task.agent,
-          workDir: repository && cloneUrl ? repoCwd : undefined,
-          env: this.runtimeSecrets(githubToken),
-        });
+        runResult = await runtime.runAndWait(
+          {
+            taskId: task.id,
+            prompt: agentPrompt,
+            agent: task.agent,
+            workDir: repository && cloneUrl ? repoCwd : undefined,
+            env: this.runtimeSecrets(githubToken),
+          },
+          { maxWaitMs: resolveAgentMaxWaitMs() },
+        );
       } finally {
         stopAutoCommit();
         stopEvents();
@@ -539,6 +573,24 @@ export class TaskService {
           });
         }
 
+        if (guestHost) {
+          const preview = await deployProductionPreview({
+            runtime,
+            taskId: task.id,
+            repoCwd,
+            guestHost,
+            emit: (type, message, data) =>
+              this.emit(type, task.id, message, data),
+          });
+          if (preview) {
+            retainSandboxForPreview = true;
+            this.patchTask(task.id, {
+              previewUrl: preview.previewUrl,
+              deployStatus: "live",
+            });
+          }
+        }
+
         if (
           job.issueTitle &&
           job.permissions?.canCreateIssue &&
@@ -549,16 +601,17 @@ export class TaskService {
         }
       }
 
-      this.updateTask(
-        task.id,
-        "completed",
-        runResult.message || "Task completed",
-      );
-      this.emit("task.completed", task.id, "Task completed", {
+      const completionMessage = task.previewUrl
+        ? "Work completed — pushed to GitHub and preview deployed"
+        : runResult.message || "Task completed";
+      this.updateTask(task.id, "completed", completionMessage);
+      this.emit("task.completed", task.id, completionMessage, {
         output: runResult.output,
         agent: runResult.agent ?? task.agent,
         prUrl: task.prUrl,
         branch: task.branch,
+        previewUrl: task.previewUrl,
+        pushedToGitHub: Boolean(repository && cloneUrl),
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : "Task failed";
@@ -573,7 +626,7 @@ export class TaskService {
       this.emit("task.failed", task.id, message);
       throw error;
     } finally {
-      if (sandboxName) {
+      if (sandboxName && !retainSandboxForPreview) {
         await this.deleteSandbox(sandboxName);
       }
     }
@@ -785,6 +838,11 @@ export class TaskService {
     });
 
     const gitEnv = this.gitRuntimeEnv(githubToken);
+
+    await runtime.terminal({
+      taskId: task.id,
+      command: `rm -rf '${escapeShell(repoCwd)}' && mkdir -p '${escapeShell(repoCwd)}'`,
+    });
 
     for (const file of scaffoldFiles) {
       const fullPath = `${repoCwd}/${file.path}`;
@@ -1533,6 +1591,20 @@ export class TaskService {
     task.updatedAt = new Date().toISOString();
   }
 
+  private patchTask(
+    taskId: string,
+    patch: Partial<
+      Pick<Task, "previewUrl" | "deployStatus" | "branch" | "prUrl">
+    >,
+  ): void {
+    const task = this.tasks.get(taskId);
+    if (!task) {
+      return;
+    }
+    Object.assign(task, patch);
+    task.updatedAt = new Date().toISOString();
+  }
+
   private emit(
     type:
       | "task.created"
@@ -1558,6 +1630,9 @@ export class TaskService {
       | "git.repo"
       | "git.issue"
       | "tests.running"
+      | "deploy.building"
+      | "deploy.ready"
+      | "deploy.failed"
       | "task.completed"
       | "task.failed",
     taskId: string,
@@ -1633,12 +1708,22 @@ function resolveBotToken(): string | undefined {
 }
 
 function resolveBotAuthor(): { name: string; email: string } {
+  const defaultName = "baby-devin-bot";
+  const defaultEmail = "baby-devin-bot@users.noreply.github.com";
+  const rawName = process.env.GITHUB_BOT_NAME?.trim() || defaultName;
+  const rawEmail = process.env.GITHUB_BOT_EMAIL?.trim() || defaultEmail;
+
   return {
-    name: process.env.GITHUB_BOT_NAME?.trim() || "baby-devin-bot",
-    email:
-      process.env.GITHUB_BOT_EMAIL?.trim() ||
-      "baby-devin-bot@users.noreply.github.com",
+    name: sanitizeBotEnvValue(rawName, defaultName),
+    email: sanitizeBotEnvValue(rawEmail, defaultEmail),
   };
+}
+
+function sanitizeBotEnvValue(value: string, fallback: string): string {
+  if (!value || value.includes("${") || value.includes(":-")) {
+    return fallback;
+  }
+  return value;
 }
 
 function coAuthorTrailer(): string {
@@ -1665,6 +1750,9 @@ function buildAgentPrompt(
     `Repository ${repository} is cloned at /workspace/${repoCwd}. Work in that directory.`,
     ownerLine,
     "",
+    "The repository already contains a Devin scaffold. Complete the user's request on top of it.",
+    "Implement the full requested functionality, run npm install when needed, verify the app starts, then commit and push.",
+    "",
     "Sandbox tooling:",
     "- GITHUB_TOKEN is available for gh and git",
     "- Run tests before finishing when applicable",
@@ -1688,6 +1776,10 @@ function isNetworkCloneFailure(error: unknown): boolean {
 
 function escapeShell(value: string): string {
   return value.replace(/'/g, `'\"'\"'`);
+}
+
+function resolveAgentMaxWaitMs(): number {
+  return resolveTimeoutMs("AGENT_RUN_TIMEOUT_MIN", 30);
 }
 
 function resolveTimeoutMs(envKey: string, defaultSeconds: number): number {

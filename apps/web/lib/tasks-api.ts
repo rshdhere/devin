@@ -23,6 +23,8 @@ export interface Task {
   repository?: string;
   branch?: string;
   prUrl?: string;
+  previewUrl?: string;
+  deployStatus?: "building" | "live" | "failed" | "skipped";
   title?: string;
   message?: string;
   sandboxName?: string;
@@ -57,6 +59,9 @@ export type TaskEventType =
   | "git.repo"
   | "git.issue"
   | "tests.running"
+  | "deploy.building"
+  | "deploy.ready"
+  | "deploy.failed"
   | "task.completed"
   | "task.failed";
 
@@ -375,6 +380,12 @@ export function eventTypeLabel(type: TaskEventType): string {
       return "Pull request";
     case "git.issue":
       return "Issue created";
+    case "deploy.building":
+      return "Production build";
+    case "deploy.ready":
+      return "Preview live";
+    case "deploy.failed":
+      return "Deploy failed";
     default:
       return type.replace(/\./g, " ");
   }
@@ -394,6 +405,11 @@ export function formatEventData(data?: Record<string, unknown>): string[] {
     "sandboxName",
     "runtime",
     "runtimeURL",
+    "previewUrl",
+    "slug",
+    "upstreamHost",
+    "upstreamPort",
+    "pushedToGitHub",
     "vmId",
     "host",
     "orchestratorUrl",

@@ -31,6 +31,8 @@ export interface Task {
   repository?: string;
   branch?: string;
   prUrl?: string;
+  previewUrl?: string;
+  deployStatus?: "building" | "live" | "failed" | "skipped";
   sandboxName?: string;
   message?: string;
   title?: string;

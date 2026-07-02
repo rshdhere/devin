@@ -1,5 +1,10 @@
 import { createServer } from "node:http";
-import { formatSSE, TaskService } from "@devin/scheduler";
+import {
+  formatSSE,
+  handlePreviewProxy,
+  shouldHandlePreviewHost,
+  TaskService,
+} from "@devin/scheduler";
 
 const port = Number(process.env.SCHEDULER_PORT ?? 9091);
 const orchestratorUrl = process.env.ORCHESTRATOR_URL ?? "http://localhost:9090";
@@ -25,6 +30,11 @@ const tasks = new TaskService({
 tasks.startWorker();
 
 const server = createServer(async (req, res) => {
+  if (shouldHandlePreviewHost(req.headers.host)) {
+    handlePreviewProxy(req, res);
+    return;
+  }
+
   const url = new URL(req.url ?? "/", `http://${req.headers.host}`);
 
   if (req.method === "GET" && url.pathname === "/health") {

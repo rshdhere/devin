@@ -13,12 +13,13 @@ import {
   GitBranch,
   GitCommit,
   GitPullRequest,
+  Globe,
   Loader2,
   Server,
   Terminal,
   XCircle,
 } from "lucide-react";
-import { MotionButton } from "@/components/dashboard/motion-button";
+import { DEVIN_BOT } from "@/lib/devin-bot";
 import { useSessions } from "@/components/dashboard/sessions-context";
 import {
   eventTypeLabel,
@@ -530,6 +531,32 @@ function AgentTerminalPanel({
   );
 }
 
+function BotCoAuthorNote({ compact = false }: { compact?: boolean }) {
+  return (
+    <p
+      className={cn(
+        "mt-1 flex flex-wrap items-center gap-1.5 text-emerald-400/80",
+        compact ? "text-[11px]" : "text-[12px]",
+      )}
+    >
+      <img
+        src={DEVIN_BOT.avatarUrl}
+        alt=""
+        className="size-4 rounded-full border border-[#333]"
+      />
+      <span>Co-authored by</span>
+      <a
+        href={DEVIN_BOT.profileUrl}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="font-medium text-[#5a9fd4] hover:underline"
+      >
+        @{DEVIN_BOT.username}
+      </a>
+    </p>
+  );
+}
+
 function GitHubProgressBanner({
   repository,
   events,
@@ -571,6 +598,8 @@ function GitHubProgressBanner({
             <p className="mt-1 text-[12px] text-red-400">
               Bootstrap failed — check activity log for details
             </p>
+          ) : latestPush ? (
+            <BotCoAuthorNote compact />
           ) : null}
         </div>
         <div className="flex shrink-0 flex-wrap items-center gap-2">
@@ -592,6 +621,88 @@ function GitHubProgressBanner({
             View commits
             <GitCommit className="size-3" />
           </a>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function PreviewDeployBanner({
+  task,
+  events,
+}: {
+  task: Task;
+  events: TaskEvent[];
+}) {
+  const building = events.some((event) => event.type === "deploy.building");
+  const deployFailed = events.some((event) => event.type === "deploy.failed");
+  const deployReady = events.find((event) => event.type === "deploy.ready");
+  const taskCompleted = events.some((event) => event.type === "task.completed");
+  const latestPush = events.filter((event) => event.type === "git.push").at(-1);
+  const previewUrl =
+    task.previewUrl ||
+    (deployReady?.data?.previewUrl as string | undefined) ||
+    undefined;
+
+  if (!latestPush && !building && !previewUrl && !taskCompleted) {
+    return null;
+  }
+
+  const isBuilding = building && !previewUrl && !deployFailed;
+  const isLive = Boolean(previewUrl);
+
+  return (
+    <div
+      className={cn(
+        "mb-4 rounded-xl border px-4 py-3",
+        isLive
+          ? "border-emerald-500/30 bg-emerald-500/5"
+          : deployFailed
+            ? "border-amber-500/30 bg-amber-500/5"
+            : "border-[#2a2a2a] bg-[#111]",
+      )}
+    >
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="min-w-0">
+          <p className="text-[13px] font-medium text-gray-200">
+            {isLive
+              ? "Work completed — preview deployed"
+              : isBuilding
+                ? "Building production preview…"
+                : taskCompleted
+                  ? "Work completed and pushed to GitHub"
+                  : "Preparing deployment"}
+          </p>
+          <p className="mt-0.5 text-[12px] text-gray-500">
+            {isLive
+              ? "Production build finished. Your app is live on a preview subdomain."
+              : isBuilding
+                ? "Running npm install, production build, and starting the app in the sandbox."
+                : deployFailed
+                  ? "Preview deploy failed — code was still pushed to GitHub."
+                  : latestPush
+                    ? "Pushed to GitHub — starting production build and deploy."
+                    : "Waiting for GitHub push before deploy."}
+          </p>
+        </div>
+        <div className="flex shrink-0 flex-wrap items-center gap-2">
+          {isBuilding ? (
+            <span className="inline-flex items-center gap-1.5 rounded-lg border border-[#333] bg-[#1a1a1a] px-3 py-1.5 text-[12px] text-gray-300">
+              <Loader2 className="size-3.5 animate-spin" />
+              Building…
+            </span>
+          ) : null}
+          {isLive && previewUrl ? (
+            <a
+              href={previewUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-500/40 bg-emerald-500/15 px-3 py-1.5 text-[12px] text-emerald-300 transition-colors hover:bg-emerald-500/25"
+            >
+              Open preview
+              <Globe className="size-3.5" />
+            </a>
+          ) : null}
         </div>
       </div>
     </div>
@@ -735,15 +846,9 @@ function EventRow({ event }: { event: TaskEvent }) {
               </button>
             ) : null}
           </div>
-          {isRepoCreated ? (
-            <p className="mt-1 text-[11px] text-emerald-400/80">
-              Commits from this task will be co-authored by @baby-devin-bot
-            </p>
-          ) : null}
-          {event.type === "git.commit" ? (
-            <p className="mt-1 text-[11px] text-emerald-400/80">
-              Co-authored by @baby-devin-bot
-            </p>
+          {isRepoCreated ? <BotCoAuthorNote /> : null}
+          {event.type === "git.commit" || event.type === "git.push" ? (
+            <BotCoAuthorNote />
           ) : null}
           {expanded && hasDetails ? (
             <pre className="mt-2 overflow-x-auto rounded-md bg-[#0d0d0d] px-2.5 py-2 font-mono text-[11px] leading-relaxed text-gray-400">
@@ -861,6 +966,14 @@ export function SessionDetail({
             if (!cancelled) {
               setTask(updated);
               void refreshTasks();
+            }
+          });
+        }
+
+        if (event.type === "deploy.ready") {
+          void fetchTask(taskId).then((updated) => {
+            if (!cancelled) {
+              setTask(updated);
             }
           });
         }
@@ -1032,6 +1145,8 @@ export function SessionDetail({
           branch={task.branch}
         />
       ) : null}
+
+      <PreviewDeployBanner task={task} events={events} />
 
       <AgentTerminalPanel events={events} isActive={isActive} />
 

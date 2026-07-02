@@ -28,6 +28,9 @@ export type TaskEventType =
   | "git.repo"
   | "git.issue"
   | "tests.running"
+  | "deploy.building"
+  | "deploy.ready"
+  | "deploy.failed"
   | "task.completed"
   | "task.failed";
 
