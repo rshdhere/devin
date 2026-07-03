@@ -329,6 +329,17 @@ function DiagnosticsPanel({
               CNI NAT, DNS, and security group egress rules for HTTPS (443).
             </p>
           ) : null}
+          {/cannot reach the Cursor API/i.test(task.message) ? (
+            <p className="text-[12px] leading-relaxed text-amber-200/90">
+              The sandbox could not reach api2.cursor.sh. On the execution host
+              run{" "}
+              <span className="font-mono text-amber-100">
+                sudo ./infra/scripts/fix-sandbox-dns.sh
+              </span>{" "}
+              (enables ip_forward + CNI DNS), restart firecracker-host and
+              scheduler, then rebuild the agent snapshot.
+            </p>
+          ) : null}
         </div>
       ) : null}
 

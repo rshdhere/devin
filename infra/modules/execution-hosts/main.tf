@@ -78,6 +78,14 @@ resource "aws_security_group" "execution_host" {
   }
 
   egress {
+    description = "DNS resolution (TCP fallback)"
+    from_port   = 53
+    to_port     = 53
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  egress {
     description = "HTTPS for GitHub, agent APIs, Docker Hub"
     from_port   = 443
     to_port     = 443

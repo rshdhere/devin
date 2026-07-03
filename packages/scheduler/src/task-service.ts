@@ -981,32 +981,61 @@ export class TaskService {
         await sleep(2_000);
       }
 
-      const cursorCheck = await runtime.terminalAllowFailure({
+      const dnsCheck = await this.probeSandboxDns(
+        runtime,
         taskId,
-        command: "curl -sf --max-time 15 https://api2.cursor.sh/ >/dev/null",
-      });
-      if (cursorCheck.exitCode === 0) {
+        "api2.cursor.sh",
+      );
+      const cursorCheck = await this.probeSandboxHttps(
+        runtime,
+        taskId,
+        "https://api2.cursor.sh/",
+      );
+
+      if (dnsCheck.ok && cursorCheck.ok) {
         break;
       }
+
+      this.emit(
+        "agent.log",
+        taskId,
+        `Sandbox egress probe attempt ${attempt + 1}/3`,
+        {
+          dns: dnsCheck,
+          cursor: cursorCheck,
+          attempt: attempt + 1,
+        },
+      );
+
       if (attempt === 2) {
-        throw new Error(
-          "Sandbox cannot reach the Cursor API. Check microVM NAT, DNS, and outbound HTTPS (443) to api2.cursor.sh.",
+        this.emit(
+          "agent.log",
+          taskId,
+          "Cursor API probe failed — starting agent anyway (check microVM NAT and outbound HTTPS)",
+          {
+            cursorReachable: false,
+            dns: dnsCheck,
+            cursor: cursorCheck,
+          },
         );
+        return;
       }
     }
 
-    const githubCheck = await runtime.terminalAllowFailure({
+    const githubCheck = await this.probeSandboxHttps(
+      runtime,
       taskId,
-      command: "curl -sf --max-time 15 https://github.com/ >/dev/null",
-    });
+      "https://github.com/",
+    );
 
-    if (githubCheck.exitCode !== 0) {
+    if (!githubCheck.ok) {
       this.emit(
         "agent.log",
         taskId,
         "GitHub unreachable from sandbox; agent will work locally and push at end may fail",
         {
           githubReachable: false,
+          github: githubCheck,
         },
       );
       return;
@@ -1016,6 +1045,45 @@ export class TaskService {
       cursorReachable: true,
       githubReachable: true,
     });
+  }
+
+  private async probeSandboxDns(
+    runtime: RuntimeClient,
+    taskId: string,
+    host: string,
+  ): Promise<{ ok: boolean; detail: string }> {
+    const result = await runtime.terminalAllowFailure({
+      taskId,
+      command: `getent ahostsv4 '${escapeShell(host)}' 2>/dev/null | awk 'NR==1{print $1; exit}' || getent ahosts '${escapeShell(host)}' 2>/dev/null | awk '/STREAM/{print $1; exit}'`,
+    });
+    const address = result.stdout.trim();
+    if (result.exitCode === 0 && address) {
+      return { ok: true, detail: address };
+    }
+    return {
+      ok: false,
+      detail: (result.stderr || result.stdout || "DNS lookup failed").trim(),
+    };
+  }
+
+  private async probeSandboxHttps(
+    runtime: RuntimeClient,
+    taskId: string,
+    url: string,
+  ): Promise<{ ok: boolean; detail: string }> {
+    const result = await runtime.terminalAllowFailure({
+      taskId,
+      command: `code=$(curl -4sS --connect-timeout 10 --max-time 15 -o /dev/null -w '%{http_code}' '${escapeShell(url)}' 2>&1) || true; echo "$code"`,
+    });
+    const combined = result.stdout.trim();
+    const httpCode = combined.split(/\s+/).pop() ?? "";
+    if (/^[0-9]{3}$/.test(httpCode) && httpCode !== "000") {
+      return { ok: true, detail: `HTTP ${httpCode}` };
+    }
+    return {
+      ok: false,
+      detail: combined || `exit ${result.exitCode}`,
+    };
   }
 
   private async emergencyPushAgentWork(

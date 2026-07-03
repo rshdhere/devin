@@ -69,6 +69,13 @@ cat >/etc/cni/conf.d/fcnet.conflist <<'CNI'
 }
 CNI
 
+cat >/etc/sysctl.d/99-devin-microvm.conf <<'SYSCTL'
+net.ipv4.ip_forward=1
+net.ipv4.conf.all.rp_filter=0
+net.ipv4.conf.default.rp_filter=0
+SYSCTL
+sysctl --system >/dev/null 2>&1 || sysctl -p /etc/sysctl.d/99-devin-microvm.conf
+
 cat >/etc/systemd/system/devin-firecracker-host.service <<'UNIT'
 [Unit]
 Description=devin.baby firecracker-host

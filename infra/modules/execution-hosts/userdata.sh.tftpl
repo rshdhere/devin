@@ -65,6 +65,14 @@ cat >/etc/cni/conf.d/fcnet.conflist <<'CNI'
 }
 CNI
 
+# microVM egress is NAT'd through the host; ip_forward must be enabled.
+cat >/etc/sysctl.d/99-devin-microvm.conf <<'SYSCTL'
+net.ipv4.ip_forward=1
+net.ipv4.conf.all.rp_filter=0
+net.ipv4.conf.default.rp_filter=0
+SYSCTL
+sysctl --system >/dev/null 2>&1 || sysctl -p /etc/sysctl.d/99-devin-microvm.conf
+
 # Verify KVM (required for Firecracker)
 if [[ -d /dev/kvm && ! -c /dev/kvm ]]; then
   echo "WARNING: /dev/kvm is a directory — remove before starting firecracker-host" >&2

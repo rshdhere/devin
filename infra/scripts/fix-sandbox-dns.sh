@@ -41,6 +41,13 @@ else
 CNI
 fi
 
+cat >/etc/sysctl.d/99-devin-microvm.conf <<'SYSCTL'
+net.ipv4.ip_forward=1
+net.ipv4.conf.all.rp_filter=0
+net.ipv4.conf.default.rp_filter=0
+SYSCTL
+sysctl --system >/dev/null 2>&1 || sysctl -p /etc/sysctl.d/99-devin-microvm.conf
+
 echo "CNI DNS configured:"
 echo "  /etc/cni/resolv.conf"
 echo "  /etc/cni/conf.d/fcnet.conflist"
