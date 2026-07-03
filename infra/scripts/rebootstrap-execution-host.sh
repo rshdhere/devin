@@ -130,6 +130,7 @@ ExecStart=/usr/bin/docker run --rm --name scheduler \\
   -e SCHEDULER_PORT=9091 \\
   -e ORCHESTRATOR_URL=\${ORCHESTRATOR_URL} \\
   -e FIRECRACKER_HOST_URL=http://127.0.0.1:9092 \\
+  -e SCHEDULER_HOST_NAME=${HOST_NAME} \\
   -e QUEUE_DRIVER=\${QUEUE_DRIVER} \\
   -e SQS_QUEUE_URL=\${SQS_QUEUE_URL} \\
   -e AWS_REGION=${AWS_REGION} \\
@@ -186,7 +187,7 @@ fi
 mkdir -p /etc/systemd/system/devin-scheduler.service.d /etc/devin
 umask 077
 {
-  echo "DEFAULT_AGENT=cursor"
+  echo "DEFAULT_AGENT=mock"
   printf 'CURSOR_API_KEY=%s\n' "\${CURSOR_API_KEY}"
   printf 'ANTHROPIC_API_KEY=%s\n' "\${ANTHROPIC_API_KEY}"
   printf 'OPENAI_API_KEY=%s\n' "\${OPENAI_API_KEY}"

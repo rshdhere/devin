@@ -23,13 +23,16 @@ func (r *MockRunner) Run(
 	req RunRequest,
 	publish func(eventType, message string, data map[string]any),
 ) (*RunResult, error) {
+	workDir := resolveWorkDir(r.cfg, req)
+
 	publish("agent.log", "mock agent planning work", map[string]any{
-		"prompt": req.Prompt,
+		"prompt":  req.Prompt,
+		"workDir": workDir,
 	})
 
-	readmePath := filepath.Join(r.cfg.Workspace, "AGENT_TASK.md")
+	readmePath := filepath.Join(workDir, "AGENT_TASK.md")
 	content := fmt.Sprintf("# Task %s\n\n## Prompt\n\n%s\n\n## Plan\n\n1. Inspect workspace\n2. Apply changes\n3. Summarize result\n", req.TaskID, req.Prompt)
-	if err := os.MkdirAll(r.cfg.Workspace, 0o755); err != nil {
+	if err := os.MkdirAll(workDir, 0o755); err != nil {
 		return nil, err
 	}
 	if err := os.WriteFile(readmePath, []byte(content), 0o644); err != nil {
@@ -37,7 +40,7 @@ func (r *MockRunner) Run(
 	}
 	publish("agent.tool", "wrote AGENT_TASK.md", map[string]any{"path": "AGENT_TASK.md"})
 
-	gitInit, err := executil.Run(ctx, r.cfg.Workspace, "git init -q", nil)
+	gitInit, err := executil.Run(ctx, workDir, "git init -q", nil)
 	if err != nil {
 		return nil, err
 	}
@@ -50,7 +53,7 @@ func (r *MockRunner) Run(
 		}, nil
 	}
 
-	commitResult, err := executil.Run(ctx, r.cfg.Workspace, "git add AGENT_TASK.md && git commit -m 'mock agent: capture task plan'", []string{
+	commitResult, err := executil.Run(ctx, workDir, "git add AGENT_TASK.md && git commit -m 'mock agent: capture task plan'", []string{
 		"GIT_AUTHOR_NAME=devin-agent",
 		"GIT_AUTHOR_EMAIL=agent@devin.baby",
 		"GIT_COMMITTER_NAME=devin-agent",

@@ -183,6 +183,9 @@ export class RuntimeClient {
 
   async health(): Promise<RuntimeHealthResponse> {
     const response = await this.fetchRuntime("/health");
+    if (!response.ok) {
+      throw new Error(`Runtime health check failed (HTTP ${response.status})`);
+    }
     return response.json() as Promise<RuntimeHealthResponse>;
   }
 

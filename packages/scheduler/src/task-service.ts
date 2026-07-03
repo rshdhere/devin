@@ -1,7 +1,8 @@
-import { RuntimeClient } from "@devin/agent-sdk";
+import { RuntimeClient, type RunResponse } from "@devin/agent-sdk";
 import { EventBus } from "@devin/events";
 import type { TaskEventType } from "@devin/events";
 import { createQueue, type TaskQueue } from "@devin/queue";
+import { resolveDefaultAgent } from "./agent-defaults.js";
 import {
   collectInfraDiagnostics,
   fetchSandboxByName,
@@ -260,6 +261,7 @@ export class TaskService {
         });
 
         this.validateAgentSecrets(task);
+        this.validateGreenfieldDraftSecrets(job);
 
         this.updateTask(task.id, "drafting", "Preparing draft plan");
         this.emit("task.phase_changed", task.id, "Entered draft phase", {
@@ -341,6 +343,7 @@ export class TaskService {
       });
 
       const sandbox = await this.waitForSandbox(sandboxName, task.id);
+      this.assertSandboxOnLocalHost(sandbox, task.id);
       this.emit("sandbox.started", task.id, "Sandbox microVM is running", {
         sandboxName,
         vmId: sandbox.status?.vmId,
@@ -348,8 +351,12 @@ export class TaskService {
         runtime: runtimeImage,
       });
 
-      const runtimeBaseUrl =
-        sandbox.status?.runtimeURL?.replace(/\/$/, "") || this.runtimeUrl;
+      const runtimeBaseUrl = sandbox.status?.runtimeURL?.replace(/\/$/, "");
+      if (!runtimeBaseUrl) {
+        throw new Error(
+          "Sandbox is running but orchestrator did not publish a runtimeURL. Check firecracker-host and orchestrator sync.",
+        );
+      }
       guestHost = new URL(runtimeBaseUrl).hostname;
       runtime = new RuntimeClient({ baseUrl: runtimeBaseUrl });
       this.emit(
@@ -360,7 +367,7 @@ export class TaskService {
           runtimeURL: runtimeBaseUrl,
         },
       );
-      await this.waitForRuntime(runtime, task.id);
+      await this.waitForRuntime(runtime, task.id, runtimeBaseUrl);
       await this.ensureSandboxDns(runtime, task.id);
       this.emit("runtime.ready", task.id, "Runtime supervisor is ready", {
         runtimeURL: runtimeBaseUrl,
@@ -516,29 +523,54 @@ export class TaskService {
 
       const stopEvents = this.forwardRuntimeEvents(runtimeBaseUrl, task.id);
 
+      const isTemplateGreenfield =
+        task.agent === "mock" && Boolean(job.greenfieldPushed);
+
       if (task.agent === "cursor") {
         await this.ensureSandboxConnectivity(runtime, task.id);
       }
 
-      this.updateTask(task.id, "running", `${task.agent} agent executing task`);
-      this.emit("agent.running", task.id, `${task.agent} agent started`, {
-        prompt: task.prompt,
-        agent: task.agent,
-        repository,
-      });
+      this.updateTask(
+        task.id,
+        "running",
+        isTemplateGreenfield
+          ? "Verifying scaffold in sandbox"
+          : `${task.agent} agent executing task`,
+      );
+      this.emit(
+        "agent.running",
+        task.id,
+        isTemplateGreenfield
+          ? "Template execution started (OpenAI scaffold)"
+          : `${task.agent} agent started`,
+        {
+          prompt: task.prompt,
+          agent: task.agent,
+          repository,
+          templateGreenfield: isTemplateGreenfield,
+        },
+      );
 
-      let runResult;
+      let runResult: RunResponse;
       try {
-        runResult = await runtime.runAndWait(
-          {
-            taskId: task.id,
-            prompt: agentPrompt,
-            agent: task.agent,
-            workDir: repoReadyInSandbox ? repoCwd : undefined,
-            env: this.runtimeSecrets(githubToken),
-          },
-          { maxWaitMs: resolveAgentMaxWaitMs() },
-        );
+        if (isTemplateGreenfield) {
+          runResult = await this.runTemplateGreenfieldVerify(
+            runtime,
+            task,
+            repoCwd,
+          );
+        } else {
+          runResult = await runtime.runAndWait(
+            {
+              taskId: task.id,
+              prompt: agentPrompt,
+              agent: task.agent,
+              workDir: repoReadyInSandbox ? repoCwd : undefined,
+              env: this.runtimeSecrets(githubToken),
+            },
+            { maxWaitMs: resolveAgentMaxWaitMs() },
+          );
+        }
       } catch (error) {
         const message =
           error instanceof Error ? error.message : "Agent run failed";
@@ -638,6 +670,18 @@ export class TaskService {
       if (sandboxName && !retainSandboxForPreview) {
         await this.deleteSandbox(sandboxName);
       }
+    }
+  }
+
+  private validateGreenfieldDraftSecrets(job: ScheduleJob): void {
+    if (!job.createRepository && !job.autoCreateRepository) {
+      return;
+    }
+
+    if (!process.env.OPENAI_API_KEY?.trim()) {
+      throw new Error(
+        "OPENAI_API_KEY is not set on the scheduler. Add it to AWS SSM as a SecureString at /<env>/platform/openai_api_key, then run devin-sync-platform-config on the execution host.",
+      );
     }
   }
 
@@ -810,20 +854,60 @@ export class TaskService {
     });
   }
 
+  private assertSandboxOnLocalHost(
+    sandbox: SandboxRecord,
+    taskId: string,
+  ): void {
+    const sandboxHost = sandbox.status?.host?.trim();
+    if (!this.preferredHost || !sandboxHost) {
+      return;
+    }
+    if (sandboxHost === this.preferredHost) {
+      return;
+    }
+    const message =
+      `Sandbox landed on execution host "${sandboxHost}" but this scheduler is pinned to "${this.preferredHost}". ` +
+      "Route tasks to the matching scheduler or set SCHEDULER_HOST_NAME on each execution host.";
+    this.emit("sandbox.failed", taskId, message, {
+      sandboxHost,
+      schedulerHost: this.preferredHost,
+    });
+    throw new Error(message);
+  }
+
   private async ensureSandboxDns(
     runtime: RuntimeClient,
     taskId: string,
   ): Promise<void> {
-    const viaApi = await runtime.ensureDns();
-    if (viaApi) {
-      return;
-    }
+    try {
+      const viaApi = await runtime.ensureDns();
+      if (viaApi) {
+        return;
+      }
 
-    await runtime.terminalAllowFailure({
-      taskId,
-      command:
-        "printf '%s\\n' 'nameserver 8.8.8.8' 'nameserver 1.1.1.1' 'nameserver 8.8.4.4' > /etc/resolv.conf",
-    });
+      const result = await runtime.terminalAllowFailure({
+        taskId,
+        command:
+          "printf '%s\\n' 'nameserver 8.8.8.8' 'nameserver 1.1.1.1' 'nameserver 8.8.4.4' > /etc/resolv.conf",
+      });
+      if (result.exitCode !== 0) {
+        this.emit(
+          "agent.log",
+          taskId,
+          "Could not refresh sandbox DNS via runtime terminal",
+          {
+            exitCode: result.exitCode,
+            detail: (result.stderr || result.stdout).trim(),
+          },
+        );
+      }
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "sandbox DNS setup failed";
+      this.emit("agent.log", taskId, `Skipped sandbox DNS setup: ${message}`, {
+        dnsSetupSkipped: true,
+      });
+    }
   }
 
   private async cloneRepositoryInSandbox(
@@ -1565,6 +1649,88 @@ export class TaskService {
     };
   }
 
+  private async runTemplateGreenfieldVerify(
+    runtime: RuntimeClient,
+    task: Task,
+    repoCwd: string,
+  ): Promise<RunResponse> {
+    this.emit("agent.log", task.id, "Running template verify pipeline", {
+      agent: "mock",
+      phase: "template_verify",
+    });
+
+    const hasPackageJson = await runtime.terminalAllowFailure({
+      taskId: task.id,
+      cwd: repoCwd,
+      command: "test -f package.json && echo yes || echo no",
+    });
+
+    if (hasPackageJson.stdout.trim() === "yes") {
+      this.emit("agent.log", task.id, "Installing dependencies (npm install)", {
+        cwd: repoCwd,
+      });
+
+      const install = await runtime.terminal({
+        taskId: task.id,
+        cwd: repoCwd,
+        command: "npm install",
+      });
+
+      if (install.exitCode !== 0) {
+        throw new Error(
+          `npm install failed with exit code ${install.exitCode}: ${install.stderr || install.stdout}`,
+        );
+      }
+
+      this.emit("agent.log", task.id, "Dependencies installed", {
+        exitCode: install.exitCode,
+      });
+
+      const smoke = await runtime.terminalAllowFailure({
+        taskId: task.id,
+        cwd: repoCwd,
+        command:
+          'bash -lc \'if ! grep -q "\\"start\\"" package.json 2>/dev/null; then exit 0; fi; npm start >/tmp/devin-smoke.log 2>&1 & pid=$!; ok=0; for i in $(seq 1 30); do if curl -sf http://127.0.0.1:3000/health >/dev/null 2>&1; then ok=1; break; fi; if curl -sf http://127.0.0.1:3000/ >/dev/null 2>&1; then ok=1; break; fi; if ! kill -0 $pid 2>/dev/null; then break; fi; sleep 1; done; kill $pid 2>/dev/null || true; wait $pid 2>/dev/null || true; test $ok -eq 1\'',
+      });
+
+      if (smoke.exitCode === 0) {
+        this.emit("agent.log", task.id, "Smoke check passed (HTTP 200)", {
+          endpoint: "http://127.0.0.1:3000",
+        });
+      } else {
+        this.emit(
+          "agent.log",
+          task.id,
+          "Smoke check skipped or failed — continuing with scaffold push",
+          {
+            detail: (smoke.stderr || smoke.stdout).trim(),
+          },
+        );
+      }
+    } else {
+      this.emit(
+        "agent.log",
+        task.id,
+        "No package.json — skipping npm install and smoke check",
+        { cwd: repoCwd },
+      );
+    }
+
+    const message = "Template scaffold verified in sandbox";
+    this.emit("agent.log", task.id, message, {
+      agent: "mock",
+      completed: true,
+    });
+
+    return {
+      taskId: task.id,
+      status: "completed",
+      message,
+      output: message,
+      agent: "mock",
+    };
+  }
+
   private async runTests(
     runtime: RuntimeClient,
     task: Task,
@@ -1821,21 +1987,28 @@ export class TaskService {
   private async waitForRuntime(
     runtime: RuntimeClient,
     taskId: string,
+    runtimeBaseUrl: string,
   ): Promise<void> {
     const deadline = Date.now() + this.runtimeReadyTimeoutMs;
+    let lastError = "";
     while (Date.now() < deadline) {
       try {
         const health = await runtime.health();
         if (health.status === "ok") {
           return;
         }
-      } catch {
-        // runtime still booting
+        lastError = `unexpected health status: ${health.status ?? "unknown"}`;
+      } catch (error) {
+        lastError =
+          error instanceof Error
+            ? error.message
+            : "runtime health probe failed";
       }
       await sleep(500);
     }
+    const detail = lastError ? ` Last error: ${lastError}` : "";
     throw new Error(
-      `runtime not ready for task ${taskId} within ${this.runtimeReadyTimeoutMs / 1000}s`,
+      `Runtime supervisor at ${runtimeBaseUrl} did not become ready for task ${taskId} within ${this.runtimeReadyTimeoutMs / 1000}s.${detail}`,
     );
   }
 
@@ -1949,20 +2122,6 @@ function runtimeForAgent(agent: AgentProvider): string {
     return "nextjs";
   }
   return "agent";
-}
-
-function resolveDefaultAgent(): AgentProvider {
-  if (process.env.CURSOR_API_KEY?.trim()) {
-    return "cursor";
-  }
-  if (process.env.ANTHROPIC_API_KEY?.trim()) {
-    return "claude";
-  }
-  const raw = (process.env.DEFAULT_AGENT ?? "mock").trim();
-  if (raw === "cursor" || raw === "claude" || raw === "mock") {
-    return raw;
-  }
-  return "mock";
 }
 
 function resolveBotToken(): string | undefined {

@@ -79,6 +79,8 @@ spec:
 
 The orchestrator selects a `FirecrackerHost`, and `firecracker-host` restores the matching snapshot. The runtime supervisor listens on port **8081** inside the microVM.
 
+Greenfield template tasks use the **`nextjs`** snapshot only (no `agent` snapshot rebuild required). Rebuild `nextjs` after changing `runtime/nextjs/` or shared supervisor code under `apps/runtime/`.
+
 ## Task workspace
 
 Agent and git operations use **`/workspace`**, backed by a **tmpfs** mount created at supervisor startup. Firecracker restores the root drive read-only, so the writable tmpfs layer must be present in the golden snapshot memory image.

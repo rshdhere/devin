@@ -29,9 +29,10 @@ export function AgentCapabilitiesPanel({
   onClose,
 }: AgentCapabilitiesPanelProps) {
   const [isLoading, setIsLoading] = useState(true);
+  const [openaiConfigured, setOpenaiConfigured] = useState(false);
   const [cursorConfigured, setCursorConfigured] = useState(false);
   const [anthropicConfigured, setAnthropicConfigured] = useState(false);
-  const [defaultAgent, setDefaultAgent] = useState("cursor");
+  const [defaultAgent, setDefaultAgent] = useState("mock");
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -40,13 +41,16 @@ export function AgentCapabilitiesPanel({
     fetchInfraDiagnostics()
       .then((diagnostics) => {
         if (!cancelled) {
+          setOpenaiConfigured(
+            diagnostics.agent?.openaiApiKeyConfigured ?? false,
+          );
           setCursorConfigured(
             diagnostics.agent?.cursorApiKeyConfigured ?? false,
           );
           setAnthropicConfigured(
             diagnostics.agent?.anthropicApiKeyConfigured ?? false,
           );
-          setDefaultAgent(diagnostics.agent?.defaultAgent ?? "cursor");
+          setDefaultAgent(diagnostics.agent?.defaultAgent ?? "mock");
         }
       })
       .catch(() => {
@@ -96,7 +100,8 @@ export function AgentCapabilitiesPanel({
                 Agent capabilities
               </h3>
               <p className="mt-1 text-[13px] text-gray-500">
-                Platform-wide keys power Cursor and Claude agents for all users.
+                OpenAI plans greenfield scaffolds; Cursor and Claude are
+                optional for in-sandbox agents.
               </p>
             </div>
           </div>
@@ -121,9 +126,31 @@ export function AgentCapabilitiesPanel({
             <div className="rounded-lg border border-[#2a2a2a] bg-[#141414] px-3 py-2.5">
               <div className="flex items-center justify-between gap-3">
                 <div>
+                  <p className="text-[13px] text-gray-200">OpenAI API key</p>
+                  <p className="text-[11px] text-gray-600">
+                    Required for greenfield draft planning (default:{" "}
+                    {defaultAgent})
+                  </p>
+                </div>
+                <span
+                  className={cn(
+                    "rounded-full px-2.5 py-1 text-[11px] font-medium",
+                    openaiConfigured
+                      ? "bg-emerald-500/10 text-emerald-400"
+                      : "bg-red-500/10 text-red-400",
+                  )}
+                >
+                  {openaiConfigured ? "Configured" : "Missing"}
+                </span>
+              </div>
+            </div>
+
+            <div className="rounded-lg border border-[#2a2a2a] bg-[#141414] px-3 py-2.5">
+              <div className="flex items-center justify-between gap-3">
+                <div>
                   <p className="text-[13px] text-gray-200">Cursor API key</p>
                   <p className="text-[11px] text-gray-600">
-                    Required for the Cursor agent (default: {defaultAgent})
+                    Required only when explicitly using the Cursor agent
                   </p>
                 </div>
                 <span
@@ -131,10 +158,10 @@ export function AgentCapabilitiesPanel({
                     "rounded-full px-2.5 py-1 text-[11px] font-medium",
                     cursorConfigured
                       ? "bg-emerald-500/10 text-emerald-400"
-                      : "bg-red-500/10 text-red-400",
+                      : "bg-amber-500/10 text-amber-400",
                   )}
                 >
-                  {cursorConfigured ? "Configured" : "Missing"}
+                  {cursorConfigured ? "Configured" : "Optional"}
                 </span>
               </div>
             </div>
@@ -164,18 +191,18 @@ export function AgentCapabilitiesPanel({
 
         <div className="mt-5 rounded-lg border border-[#2a2a2a] bg-[#111] p-3">
           <p className="text-[12px] font-medium text-gray-300">
-            Where to set the platform Cursor key (admin)
+            Where to set the platform OpenAI key (admin)
           </p>
           <ol className="mt-2 list-decimal space-y-1.5 pl-4 text-[12px] leading-relaxed text-gray-500">
             <li>
-              Create a user API key at{" "}
+              Create an API key at{" "}
               <a
-                href="https://cursor.com/dashboard/integrations"
+                href="https://platform.openai.com/api-keys"
                 target="_blank"
                 rel="noopener noreferrer"
                 className="inline-flex items-center gap-1 text-[#5a9fd4] hover:text-[#6aa8ef]"
               >
-                cursor.com/dashboard/integrations
+                platform.openai.com/api-keys
                 <ExternalLink className="size-3" />
               </a>
             </li>
@@ -183,7 +210,7 @@ export function AgentCapabilitiesPanel({
               Store it in AWS SSM as a{" "}
               <span className="text-gray-400">SecureString</span> at{" "}
               <code className="rounded bg-[#1a1a1a] px-1 py-0.5 text-[11px] text-gray-300">
-                /devin-production/platform/cursor_api_key
+                /devin-production/platform/openai_api_key
               </code>
             </li>
             <li>
@@ -194,8 +221,9 @@ export function AgentCapabilitiesPanel({
               </code>
             </li>
             <li>
-              Retry your session — the scheduler injects the key into each
-              sandbox run.
+              Greenfield tasks use the Template agent with the{" "}
+              <span className="text-gray-400">nextjs</span> runtime snapshot —
+              no Cursor key required.
             </li>
           </ol>
         </div>

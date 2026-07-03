@@ -1,9 +1,12 @@
-function readErrorBody(body: unknown): string {
+function readErrorBody(body: unknown, status?: number): string {
   if (body && typeof body === "object" && "error" in body) {
     const error = (body as { error?: unknown }).error;
     if (typeof error === "string" && error.trim()) {
       return error;
     }
+  }
+  if (status) {
+    return `Runtime request failed (HTTP ${status})`;
   }
   return "Runtime request failed";
 }
@@ -18,13 +21,13 @@ export async function parseRuntimeResponse<T>(response: Response): Promise<T> {
   };
 
   if (!response.ok) {
-    throw new Error(readErrorBody(body));
+    throw new Error(readErrorBody(body, response.status));
   }
 
   if (body && typeof body === "object") {
     const status = body.status;
     if (status === "failed" || status === "error") {
-      throw new Error(readErrorBody(body));
+      throw new Error(readErrorBody(body, response.status));
     }
     if (typeof body.exitCode === "number" && body.exitCode !== 0) {
       throw new Error(body.stderr || body.stdout || "Command failed");
@@ -43,13 +46,13 @@ export async function parseRuntimeResponseAllowFailure<T>(
   };
 
   if (!response.ok) {
-    throw new Error(readErrorBody(body));
+    throw new Error(readErrorBody(body, response.status));
   }
 
   if (body && typeof body === "object") {
     const status = body.status;
     if (status === "failed" || status === "error") {
-      throw new Error(readErrorBody(body));
+      throw new Error(readErrorBody(body, response.status));
     }
   }
 

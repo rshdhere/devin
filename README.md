@@ -50,23 +50,24 @@ Tasks choose an **agent provider** that runs inside the sandbox microVM:
 
 | Agent | CLI | Auth env | Runtime image |
 | --- | --- | --- | --- |
-| `mock` | built-in planner | none | `nextjs` (local dev default) |
+| `mock` (Template) | control-plane scaffold + sandbox verify | `OPENAI_API_KEY` (draft planning) | `nextjs` (greenfield default) |
 | `cursor` | `agent -p --force --trust` | `CURSOR_API_KEY` | `agent` |
 | `claude` | `claude -p --bare` | `ANTHROPIC_API_KEY` | `agent` |
 
-The scheduler never shells into the host. It only talks HTTP to the runtime supervisor, which invokes the agent CLI inside the Firecracker VM:
+Greenfield tasks default to the **Template** agent: OpenAI generates a draft plan on the scheduler, [`scaffold-from-draft`](packages/scheduler/src/scaffold-from-draft.ts) materializes the repo, and the `nextjs` microVM runs `npm install` plus a smoke check before push. No Cursor CLI or `api2.cursor.sh` egress is required.
+
+The scheduler never shells into the host. It only talks HTTP to the runtime supervisor, which invokes the agent CLI inside the Firecracker VM (Cursor/Claude only when explicitly selected):
 
 ```text
 POST /tasks
-  → Sandbox CRD (runtime=agent)
+  → Sandbox CRD (runtime=nextjs for template, runtime=agent for cursor/claude)
   → Firecracker microVM
-  → POST /run { taskId, prompt, agent }
-  → cursor-cli | claude-code
-  → GET /events?taskId=...  (agent.log, agent.tool, git.*)
+  → POST /run { taskId, prompt, agent }  (skipped for template greenfield)
+  → GET /events?taskId=...  (agent.log, git.*)
   → SSE /tasks/{id}/events
 ```
 
-Create a task with Cursor or Claude Code:
+Create a task with Cursor or Claude Code (optional):
 
 ```sh
 curl -X POST http://localhost:8080/api/v1/tasks \
@@ -74,7 +75,7 @@ curl -X POST http://localhost:8080/api/v1/tasks \
   -d '{"prompt":"Add JWT auth to the Next.js app","agent":"cursor"}'
 ```
 
-For local development without API keys, omit `agent` or set `"agent":"mock"`. The mock agent writes `AGENT_TASK.md`, initializes git, and commits a plan so the full workflow can be tested end-to-end.
+For greenfield work without Cursor, omit `agent` or set `"agent":"mock"`. With `OPENAI_API_KEY` configured, the scheduler plans the scaffold, hydrates it in the sandbox, verifies dependencies, and pushes to GitHub.
 
 ### Repository layout
 

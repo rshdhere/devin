@@ -64,7 +64,7 @@ fi
 mkdir -p /etc/systemd/system/devin-scheduler.service.d /etc/devin
 umask 077
 {
-  echo "DEFAULT_AGENT=cursor"
+  echo "DEFAULT_AGENT=mock"
   printf 'CURSOR_API_KEY=%s\n' "\${CURSOR_API_KEY}"
   printf 'ANTHROPIC_API_KEY=%s\n' "\${ANTHROPIC_API_KEY}"
   printf 'OPENAI_API_KEY=%s\n' "\${OPENAI_API_KEY}"

@@ -170,6 +170,17 @@ app.listen(port, () => {
     }
   }
 
+  const generatedPaths = new Set(files.map((file) => file.path));
+  for (const planned of plan.files) {
+    if (!generatedPaths.has(planned.path)) {
+      files.push({
+        path: planned.path,
+        content: stubContentForPath(planned.path, planned.summary),
+      });
+      generatedPaths.add(planned.path);
+    }
+  }
+
   if (files.length === 0) {
     files.push({
       path: "README.md",
@@ -202,4 +213,28 @@ npm start
     seen.add(file.path);
     return true;
   });
+}
+
+function stubContentForPath(path: string, summary: string): string {
+  const lower = path.toLowerCase();
+  const safeSummary = summary.trim() || "implement planned change";
+
+  if (
+    lower.endsWith(".ts") ||
+    lower.endsWith(".tsx") ||
+    lower.endsWith(".js") ||
+    lower.endsWith(".jsx")
+  ) {
+    return `// TODO: ${safeSummary}\n`;
+  }
+  if (lower.endsWith(".py")) {
+    return `# TODO: ${safeSummary}\n`;
+  }
+  if (lower.endsWith(".md")) {
+    return `# ${safeSummary}\n`;
+  }
+  if (lower.endsWith(".json")) {
+    return `${JSON.stringify({ note: safeSummary }, null, 2)}\n`;
+  }
+  return `# TODO: ${safeSummary}\n`;
 }

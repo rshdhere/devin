@@ -299,6 +299,22 @@ function DiagnosticsPanel({
           <p className="rounded-lg bg-[#120d0d] px-3 py-2 font-mono text-[12px] leading-relaxed text-red-300">
             {task.message}
           </p>
+          {task.message.includes("OPENAI_API_KEY") ? (
+            <p className="text-[12px] leading-relaxed text-amber-200/90">
+              The platform OpenAI key is missing on the scheduler. An admin
+              should store it in AWS SSM at{" "}
+              <span className="font-mono text-amber-100">
+                /devin-production/platform/openai_api_key
+              </span>{" "}
+              (SecureString), then run{" "}
+              <span className="font-mono text-amber-100">
+                devin-sync-platform-config
+              </span>{" "}
+              on the execution host. Open{" "}
+              <span className="text-white">Advanced capabilities</span> on the
+              dashboard for the full checklist.
+            </p>
+          ) : null}
           {task.message.includes("CURSOR_API_KEY") ? (
             <p className="text-[12px] leading-relaxed text-amber-200/90">
               The platform Cursor key is missing on the scheduler. An admin
@@ -327,6 +343,14 @@ function DiagnosticsPanel({
             <p className="text-[12px] leading-relaxed text-amber-200/90">
               The microVM sandbox has no outbound internet. Check Firecracker
               CNI NAT, DNS, and security group egress rules for HTTPS (443).
+            </p>
+          ) : null}
+          {/Runtime request failed/i.test(task.message) ? (
+            <p className="text-[12px] leading-relaxed text-amber-200/90">
+              The scheduler could not talk to the runtime supervisor inside the
+              microVM. Rebuild the agent snapshot, restart firecracker-host and
+              scheduler, and confirm SCHEDULER_HOST_NAME matches the
+              FirecrackerHost CR on this execution host.
             </p>
           ) : null}
           {/cannot reach the Cursor API/i.test(task.message) ? (

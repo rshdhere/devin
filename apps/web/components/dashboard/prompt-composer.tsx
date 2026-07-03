@@ -34,7 +34,7 @@ const textareaSpring = {
 };
 
 const agentOptions = [
-  { id: "mock" as const, label: "Mock (dev)" },
+  { id: "mock" as const, label: "Template (OpenAI plan)" },
   { id: "cursor" as const, label: "Cursor" },
   { id: "claude" as const, label: "Claude" },
 ];
@@ -52,7 +52,7 @@ export function PromptComposer({ selectedRepository }: PromptComposerProps) {
   const [prompt, setPrompt] = useState("");
   const [textareaHeight, setTextareaHeight] = useState(MIN_TEXTAREA_HEIGHT);
   const [agent, setAgent] =
-    useState<(typeof agentOptions)[number]["id"]>("cursor");
+    useState<(typeof agentOptions)[number]["id"]>("mock");
   const [showAgentMenu, setShowAgentMenu] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);

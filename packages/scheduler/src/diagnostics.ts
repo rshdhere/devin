@@ -1,3 +1,5 @@
+import { resolveDefaultAgent } from "./agent-defaults.js";
+
 export interface ServiceProbe {
   url: string;
   reachable: boolean;
@@ -268,13 +270,7 @@ export async function collectInfraDiagnostics(options: {
     orchestrator: orchestratorProbe,
     firecrackerHost,
     agent: {
-      defaultAgent:
-        process.env.DEFAULT_AGENT?.trim() ||
-        (process.env.CURSOR_API_KEY?.trim()
-          ? "cursor"
-          : process.env.ANTHROPIC_API_KEY?.trim()
-            ? "claude"
-            : "mock"),
+      defaultAgent: resolveDefaultAgent(),
       cursorApiKeyConfigured: Boolean(process.env.CURSOR_API_KEY?.trim()),
       anthropicApiKeyConfigured: Boolean(process.env.ANTHROPIC_API_KEY?.trim()),
       openaiApiKeyConfigured: Boolean(process.env.OPENAI_API_KEY?.trim()),
