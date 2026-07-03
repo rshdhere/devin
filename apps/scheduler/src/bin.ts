@@ -1,6 +1,5 @@
 import { createServer } from "node:http";
 import {
-  fetchFirecrackerHostStatus,
   formatSSE,
   handlePreviewProxy,
   shouldHandlePreviewHost,
@@ -24,17 +23,19 @@ async function resolvePreferredHost(): Promise<string | undefined> {
   if (explicit) {
     return explicit;
   }
-  if (!firecrackerHostUrl) {
-    return undefined;
-  }
-  const status = await fetchFirecrackerHostStatus(firecrackerHostUrl);
-  return status?.host?.trim() || undefined;
+  // Do not infer preferredHost from firecracker-host status — the daemon host
+  // name often differs from the FirecrackerHost CR name and breaks scheduling.
+  return undefined;
 }
 
 async function main(): Promise<void> {
   const preferredHost = await resolvePreferredHost();
   if (preferredHost) {
     console.log(`scheduler pinned to execution host ${preferredHost}`);
+  } else if (firecrackerHostUrl) {
+    console.warn(
+      "SCHEDULER_HOST_NAME is not set — sandboxes may not land on this execution host. Set it to your FirecrackerHost metadata.name.",
+    );
   }
 
   const tasks = new TaskService({
@@ -178,6 +179,22 @@ async function main(): Promise<void> {
       return;
     }
 
+    const historyMatch = url.pathname.match(
+      /^\/api\/v1\/tasks\/([^/]+)\/events\/history$/,
+    );
+    if (req.method === "GET" && historyMatch) {
+      const taskId = historyMatch[1]!;
+      const task = tasks.getTask(taskId);
+      if (!task) {
+        res.writeHead(404, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "task not found" }));
+        return;
+      }
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify(tasks.getEventHistory(taskId)));
+      return;
+    }
+
     const eventsMatch = url.pathname.match(
       /^\/api\/v1\/tasks\/([^/]+)\/events$/,
     );
@@ -212,6 +229,24 @@ async function main(): Promise<void> {
         clearInterval(keepalive);
         unsubscribe();
       });
+      return;
+    }
+
+    const retryMatch = url.pathname.match(/^\/api\/v1\/tasks\/([^/]+)\/retry$/);
+    if (req.method === "POST" && retryMatch) {
+      const taskId = retryMatch[1]!;
+      try {
+        const task = await tasks.retryTask(taskId);
+        res.writeHead(202, { "Content-Type": "application/json" });
+        res.end(JSON.stringify(task));
+      } catch (error) {
+        res.writeHead(400, { "Content-Type": "application/json" });
+        res.end(
+          JSON.stringify({
+            error: error instanceof Error ? error.message : "retry failed",
+          }),
+        );
+      }
       return;
     }
 

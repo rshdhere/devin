@@ -191,6 +191,22 @@ export async function executeTask(id: string): Promise<Task> {
   return parseResponse<Task>(response);
 }
 
+export async function retryTask(id: string): Promise<Task> {
+  const response = await fetch(`${tasksUrl}/${encodeURIComponent(id)}/retry`, {
+    method: "POST",
+    credentials: "include",
+  });
+  return parseResponse<Task>(response);
+}
+
+export async function fetchTaskEventHistory(id: string): Promise<TaskEvent[]> {
+  const response = await fetch(
+    `${tasksUrl}/${encodeURIComponent(id)}/events/history`,
+    { credentials: "include" },
+  );
+  return parseResponse<TaskEvent[]>(response);
+}
+
 export async function fetchInfraDiagnostics(): Promise<InfraDiagnostics> {
   const response = await fetch(`${tasksUrl}/diagnostics/infra`, {
     credentials: "include",

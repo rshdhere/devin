@@ -6,10 +6,12 @@ import { Router } from "express";
 import { authenticatedCloneUrl, getGitHubAccessToken } from "../lib/github.js";
 import {
   createTask,
+  fetchTaskEventHistory,
   getInfraDiagnostics,
   getTask,
   getTaskDiagnostics,
   listTasks,
+  retryTask,
   startTaskExecution,
   streamTaskEvents,
 } from "../lib/scheduler.js";
@@ -141,6 +143,24 @@ tasksRouter.get("/:id", async (req, res) => {
 tasksRouter.post("/:id/execute", async (req, res) => {
   try {
     const response = await startTaskExecution(req.params.id);
+    res.status(response.status).json(await response.json());
+  } catch (error) {
+    respondSchedulerFailure(res, error);
+  }
+});
+
+tasksRouter.post("/:id/retry", async (req, res) => {
+  try {
+    const response = await retryTask(req.params.id);
+    res.status(response.status).json(await response.json());
+  } catch (error) {
+    respondSchedulerFailure(res, error);
+  }
+});
+
+tasksRouter.get("/:id/events/history", async (req, res) => {
+  try {
+    const response = await fetchTaskEventHistory(req.params.id);
     res.status(response.status).json(await response.json());
   } catch (error) {
     respondSchedulerFailure(res, error);

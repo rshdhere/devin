@@ -57,4 +57,16 @@ export async function startTaskExecution(id: string): Promise<Response> {
   });
 }
 
+export async function retryTask(id: string): Promise<Response> {
+  return proxyScheduler(`/api/v1/tasks/${encodeURIComponent(id)}/retry`, {
+    method: "POST",
+  });
+}
+
+export async function fetchTaskEventHistory(id: string): Promise<Response> {
+  return proxyScheduler(
+    `/api/v1/tasks/${encodeURIComponent(id)}/events/history`,
+  );
+}
+
 export { schedulerBaseUrl };

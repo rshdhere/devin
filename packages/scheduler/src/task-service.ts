@@ -71,6 +71,7 @@ export class TaskService {
   private readonly sandboxReadyTimeoutMs: number;
   private readonly runtimeReadyTimeoutMs: number;
   private workerStarted = false;
+  private readonly processingTasks = new Set<string>();
 
   constructor(options: TaskServiceOptions) {
     this.orchestratorUrl = options.orchestratorUrl.replace(/\/$/, "");
@@ -93,6 +94,36 @@ export class TaskService {
 
   getEventBus(): EventBus {
     return this.eventBus;
+  }
+
+  getEventHistory(taskId: string) {
+    return this.eventBus.historyFor(taskId);
+  }
+
+  async retryTask(taskId: string): Promise<Task> {
+    const task = this.tasks.get(taskId);
+    const job = this.pendingJobs.get(taskId);
+    if (!task || !job) {
+      throw new Error("task not found");
+    }
+    if (task.status !== "failed") {
+      throw new Error("only failed tasks can be retried");
+    }
+
+    const retryJob: ScheduleJob = {
+      ...job,
+      skipDraft: Boolean(job.draftPlan || job.greenfieldPushed),
+      autoStartSandbox: true,
+      enqueuedAt: new Date().toISOString(),
+    };
+    this.pendingJobs.set(taskId, retryJob);
+    this.updateTask(taskId, "queued", "Retrying task");
+    this.emit("task.scheduled", taskId, "Task retry queued", {
+      retry: true,
+      skipDraft: retryJob.skipDraft,
+    });
+    await this.queue.enqueue(retryJob);
+    return task;
   }
 
   createTask(input: CreateTaskInput): Task {
@@ -229,7 +260,11 @@ export class TaskService {
       return;
     }
 
-    if (task.status === "completed") {
+    if (
+      task.status === "completed" ||
+      task.status === "failed" ||
+      task.status === "cancelled"
+    ) {
       return;
     }
 
@@ -237,9 +272,22 @@ export class TaskService {
       return;
     }
 
+    if (this.processingTasks.has(job.taskId)) {
+      return;
+    }
+
     if (task.status === "draft_ready" && !job.skipDraft) {
       return;
     }
+
+    if (
+      !job.skipDraft &&
+      (task.status === "sandbox_starting" || task.status === "runtime_ready")
+    ) {
+      return;
+    }
+
+    this.processingTasks.add(job.taskId);
 
     let sandboxName: string | undefined;
     let retainSandboxForPreview = false;
@@ -306,6 +354,16 @@ export class TaskService {
       this.emit("execution.started", task.id, "Execution starting in sandbox", {
         phase: "sandbox_starting",
       });
+
+      if (
+        this.firecrackerHostUrl &&
+        !this.preferredHost &&
+        process.env.QUEUE_DRIVER === "sqs"
+      ) {
+        throw new Error(
+          "SCHEDULER_HOST_NAME is not set on this scheduler. Set it to your FirecrackerHost metadata.name (for example devin-production-fc-01) so sandboxes start on the same host as this scheduler.",
+        );
+      }
 
       sandboxName = `sbx-${task.id.slice(0, 8)}`;
       task.sandboxName = sandboxName;
@@ -667,6 +725,7 @@ export class TaskService {
       this.emit("task.failed", task.id, message);
       throw error;
     } finally {
+      this.processingTasks.delete(job.taskId);
       if (sandboxName && !retainSandboxForPreview) {
         await this.deleteSandbox(sandboxName);
       }
@@ -1907,6 +1966,7 @@ export class TaskService {
     let lastPhase = "unknown";
     let lastMessage = "";
     let lastProgressAt = 0;
+    let pendingSince: number | null = null;
 
     while (Date.now() < deadline) {
       const sandbox = await this.fetchSandbox(sandboxName);
@@ -1917,6 +1977,30 @@ export class TaskService {
         const messageChanged = message !== lastMessage;
         lastPhase = phase;
         lastMessage = message;
+
+        if (phase === "Pending" || phase === "Provisioning") {
+          pendingSince ??= Date.now();
+          const pendingMs = Date.now() - pendingSince;
+          if (
+            phase === "Pending" &&
+            pendingMs > 90_000 &&
+            !message &&
+            !sandbox.status?.vmId
+          ) {
+            const stuckMessage =
+              `sandbox ${sandboxName} is stuck in Pending — the orchestrator sandbox controller may not be running, ` +
+              "or spec.preferredHost does not match any FirecrackerHost CR. " +
+              "Verify FirecrackerHost CRs in devin-firecracker and SCHEDULER_HOST_NAME on the execution host.";
+            this.emit("sandbox.failed", taskId, stuckMessage, {
+              sandboxName,
+              phase,
+              pendingMs,
+            });
+            throw new Error(stuckMessage);
+          }
+        } else {
+          pendingSince = null;
+        }
 
         if (
           (phaseChanged || messageChanged) &&

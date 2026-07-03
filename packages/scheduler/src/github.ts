@@ -70,6 +70,7 @@ async function githubApiRequest<T>(
       "X-GitHub-Api-Version": "2022-11-28",
       ...(init?.headers ?? {}),
     },
+    signal: init?.signal ?? AbortSignal.timeout(60_000),
   });
 
   if (!response.ok) {

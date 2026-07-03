@@ -33,8 +33,10 @@ import {
   fetchInfraDiagnostics,
   fetchTask,
   fetchTaskDiagnostics,
+  fetchTaskEventHistory,
   formatEventData,
   executeTask,
+  retryTask,
   subscribeToTaskEvents,
   taskStatusLabel,
   type InfraDiagnostics,
@@ -333,10 +335,10 @@ function DiagnosticsPanel({
           ) : null}
           {/timed out/i.test(task.message) ? (
             <p className="text-[12px] leading-relaxed text-amber-200/90">
-              The Cursor agent hit a timeout before finishing. This often means
-              the sandbox cannot reach the Cursor API over the network. Redeploy
-              the scheduler and runtime images, then retry. Live preview is only
-              built after the agent completes successfully.
+              The task hit a timeout before finishing. For greenfield runs,
+              confirm SCHEDULER_HOST_NAME matches your FirecrackerHost CR name,
+              the orchestrator sandbox controller is running, and the nextjs
+              snapshot is built on the execution host.
             </p>
           ) : null}
           {/cannot reach Cursor or GitHub/i.test(task.message) ? (
@@ -857,15 +859,16 @@ function PreviewDeployBanner({
 }
 
 function PhaseTimeline({ task, events }: { task: Task; events: TaskEvent[] }) {
+  const draftCompleted = events.some(
+    (event) => event.type === "draft.completed",
+  );
   const draftDone =
-    events.some((event) => event.type === "draft.completed") ||
-    !["queued", "scheduling", "drafting"].includes(task.status);
-  const sandboxDone =
-    events.some((event) => event.type === "sandbox.started") ||
-    ["runtime_ready", "running", "completed", "failed"].includes(task.status);
+    draftCompleted ||
+    events.some((event) => event.type === "execution.started") ||
+    events.some((event) => event.type.startsWith("sandbox."));
+  const sandboxDone = events.some((event) => event.type === "sandbox.started");
   const executeDone =
     task.status === "completed" ||
-    task.status === "failed" ||
     events.some((event) => event.type === "task.completed");
 
   const currentPhase = (() => {
@@ -1023,6 +1026,7 @@ export function SessionDetail({
   const [diagnosticsLoading, setDiagnosticsLoading] = useState(false);
   const [diagnosticsError, setDiagnosticsError] = useState<string | null>(null);
   const [startingSandbox, setStartingSandbox] = useState(false);
+  const [retryingTask, setRetryingTask] = useState(false);
   const feedRef = useRef<HTMLDivElement>(null);
 
   const isActive =
@@ -1038,6 +1042,23 @@ export function SessionDetail({
     task.status === "draft_ready" &&
     (task.message?.toLowerCase().includes("approve") ||
       events.some((event) => event.data?.awaitingApproval === true));
+
+  const handleRetryTask = useCallback(async () => {
+    setRetryingTask(true);
+    setStreamError(null);
+    try {
+      const updated = await retryTask(task.id);
+      setTask(updated);
+      setEvents([]);
+      await refreshTasks();
+    } catch (error) {
+      setStreamError(
+        error instanceof Error ? error.message : "Failed to retry task",
+      );
+    } finally {
+      setRetryingTask(false);
+    }
+  }, [refreshTasks, task.id]);
 
   const handleStartSandbox = useCallback(async () => {
     setStartingSandbox(true);
@@ -1078,11 +1099,22 @@ export function SessionDetail({
   }, [initialTask]);
 
   useEffect(() => {
-    setEvents([]);
     setStreamError(null);
 
     const taskId = task.id;
     let cancelled = false;
+
+    void fetchTaskEventHistory(taskId)
+      .then((history) => {
+        if (!cancelled && history.length > 0) {
+          setEvents(
+            [...history].sort((a, b) => a.timestamp.localeCompare(b.timestamp)),
+          );
+        }
+      })
+      .catch(() => {
+        // SSE replay remains the fallback.
+      });
 
     const unsubscribe = subscribeToTaskEvents(
       taskId,
@@ -1150,7 +1182,7 @@ export function SessionDetail({
       cancelled = true;
       unsubscribe();
     };
-  }, [task.id, task.status, refreshTasks, loadDiagnostics]);
+  }, [task.id, refreshTasks, loadDiagnostics]);
 
   useEffect(() => {
     feedRef.current?.scrollTo({
@@ -1255,6 +1287,33 @@ export function SessionDetail({
 
         <PhaseTimeline task={task} events={events} />
 
+        {task.status === "failed" ? (
+          <div className="flex items-center justify-between gap-3 rounded-xl border border-red-500/30 bg-red-500/5 px-4 py-3">
+            <div>
+              <p className="text-[13px] font-medium text-red-100">
+                Task failed
+              </p>
+              <p className="text-[12px] text-red-100/70">
+                {task.message ??
+                  "Check activity and sandbox diagnostics below, then retry."}
+              </p>
+            </div>
+            <MotionButton
+              type="button"
+              onClick={() => void handleRetryTask()}
+              disabled={retryingTask}
+              className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-red-400/40 bg-red-500/20 px-3 py-1.5 text-[12px] text-red-100 transition-colors hover:bg-red-500/30 disabled:opacity-60"
+            >
+              {retryingTask ? (
+                <Loader2 className="size-3.5 animate-spin" />
+              ) : (
+                <Server className="size-3.5" />
+              )}
+              Retry
+            </MotionButton>
+          </div>
+        ) : null}
+
         {awaitingSandboxApproval ? (
           <div className="flex items-center justify-between gap-3 rounded-xl border border-indigo-500/30 bg-indigo-500/5 px-4 py-3">
             <div>
@@ -1318,9 +1377,17 @@ export function SessionDetail({
           className="min-h-0 flex-1 space-y-1 overflow-y-auto px-3 py-3"
         >
           {events.length === 0 ? (
-            <div className="flex items-center gap-2 px-2 py-4 text-[13px] text-gray-600">
-              <Loader2 className="size-4 animate-spin" />
-              Waiting for sandbox and agent activity…
+            <div className="space-y-2 px-2 py-4">
+              {task.status === "failed" && task.message ? (
+                <p className="text-[13px] leading-relaxed text-red-300">
+                  {task.message}
+                </p>
+              ) : (
+                <div className="flex items-center gap-2 text-[13px] text-gray-600">
+                  <Loader2 className="size-4 animate-spin" />
+                  Waiting for sandbox and agent activity…
+                </div>
+              )}
             </div>
           ) : (
             events

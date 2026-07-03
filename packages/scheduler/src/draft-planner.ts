@@ -115,6 +115,7 @@ async function generateDraftPlanWithOpenAI(
         { role: "user", content: buildPlannerUserPrompt(ctx) },
       ],
     }),
+    signal: AbortSignal.timeout(90_000),
   });
 
   if (!response.ok) {
