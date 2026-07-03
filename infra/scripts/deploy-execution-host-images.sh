@@ -60,7 +60,22 @@ SSM_PREFIX="${SSM_PREFIX}"
 
 log() { printf '%s\n' "\$*"; }
 
+read_execution_host_name() {
+  if [[ -f /etc/devin/host-name ]]; then
+    tr -d '[:space:]' </etc/devin/host-name
+    return
+  fi
+  if [[ -f /etc/systemd/system/devin-firecracker-host.service ]]; then
+    grep -oE 'FIRECRACKER_HOST_NAME=[^ \\\\]+' /etc/systemd/system/devin-firecracker-host.service 2>/dev/null \\
+      | head -1 | cut -d= -f2
+    return
+  fi
+  echo "devin-production-fc-01"
+}
+
 write_scheduler_unit() {
+  local host_name
+  host_name="\$(read_execution_host_name)"
   local unit="/etc/systemd/system/devin-scheduler.service"
   cat >"\$unit" <<UNIT
 [Unit]
@@ -78,6 +93,8 @@ ExecStart=/usr/bin/docker run --rm --name scheduler \\\\
   -e SCHEDULER_PORT=9091 \\\\
   -e ORCHESTRATOR_URL=\\\${ORCHESTRATOR_URL} \\\\
   -e FIRECRACKER_HOST_URL=http://127.0.0.1:9092 \\\\
+  -e SCHEDULER_HOST_NAME=${host_name} \\\\
+  -e FIRECRACKER_HOST_NAME=${host_name} \\\\
   -e QUEUE_DRIVER=\\\${QUEUE_DRIVER} \\\\
   -e SQS_QUEUE_URL=\\\${SQS_QUEUE_URL} \\\\
   -e AWS_REGION=\${AWS_REGION} \\\\

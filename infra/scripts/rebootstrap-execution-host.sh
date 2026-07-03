@@ -19,6 +19,14 @@ CONTAINER_REGISTRY="${DEVIN_CONTAINER_REGISTRY:-docker.io/rshdhere}"
 IMAGE_TAG="${DEVIN_IMAGE_TAG:-latest}"
 SSM_PREFIX="${DEVIN_SSM_PREFIX:-/devin-production/platform}"
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SYNC_SCRIPT="${SCRIPT_DIR}/devin-sync-platform-config.sh"
+if [[ ! -f "$SYNC_SCRIPT" ]]; then
+  echo "Missing ${SYNC_SCRIPT}" >&2
+  exit 1
+fi
+SYNC_B64="$(base64 -w0 "$SYNC_SCRIPT")"
+
 COMMAND=$(cat <<EOS
 #!/bin/bash
 set -euo pipefail
@@ -131,6 +139,7 @@ ExecStart=/usr/bin/docker run --rm --name scheduler \\
   -e ORCHESTRATOR_URL=\${ORCHESTRATOR_URL} \\
   -e FIRECRACKER_HOST_URL=http://127.0.0.1:9092 \\
   -e SCHEDULER_HOST_NAME=${HOST_NAME} \\
+  -e FIRECRACKER_HOST_NAME=${HOST_NAME} \\
   -e QUEUE_DRIVER=\${QUEUE_DRIVER} \\
   -e SQS_QUEUE_URL=\${SQS_QUEUE_URL} \\
   -e AWS_REGION=${AWS_REGION} \\
@@ -144,77 +153,11 @@ ExecStop=/usr/bin/docker stop scheduler
 WantedBy=multi-user.target
 UNIT
 
-cat >/usr/local/bin/devin-sync-platform-config.sh <<'SYNC'
-#!/bin/bash
-set -euo pipefail
-AWS_REGION="${AWS_REGION}"
-SSM_PREFIX="${SSM_PREFIX}"
+mkdir -p /etc/devin
+echo "${HOST_NAME}" >/etc/devin/host-name
+chmod 644 /etc/devin/host-name
 
-read_ssm() {
-  aws ssm get-parameter --region "\$AWS_REGION" --name "\$1" --with-decryption --query Parameter.Value --output text 2>/dev/null || true
-}
-
-ORCHESTRATOR_URL="\$(read_ssm "\$SSM_PREFIX/orchestrator_url")"
-TASK_QUEUE_URL="\$(read_ssm "\$SSM_PREFIX/task_queue_url")"
-CURSOR_API_KEY="\$(read_ssm "\$SSM_PREFIX/cursor_api_key")"
-ANTHROPIC_API_KEY="\$(read_ssm "\$SSM_PREFIX/anthropic_api_key")"
-OPENAI_API_KEY="\$(read_ssm "\$SSM_PREFIX/openai_api_key")"
-GITHUB_BOT_TOKEN="\$(read_ssm "\$SSM_PREFIX/github_bot_token")"
-SCHEDULER_NEEDS_RESTART=0
-
-if [[ -n "\$ORCHESTRATOR_URL" && "\$ORCHESTRATOR_URL" != http://REPLACE_AFTER_ORCHESTRATOR_NLB:* ]]; then
-  mkdir -p /etc/systemd/system/devin-scheduler.service.d
-  cat >/etc/systemd/system/devin-scheduler.service.d/orchestrator.conf <<EOF
-[Service]
-Environment=ORCHESTRATOR_URL=\$ORCHESTRATOR_URL
-EOF
-  SCHEDULER_NEEDS_RESTART=1
-fi
-
-if [[ -n "\$TASK_QUEUE_URL" ]]; then
-  mkdir -p /etc/systemd/system/devin-scheduler.service.d
-  cat >/etc/systemd/system/devin-scheduler.service.d/queue.conf <<EOF
-[Service]
-Environment=QUEUE_DRIVER=sqs
-Environment=SQS_QUEUE_URL=\$TASK_QUEUE_URL
-Environment=AWS_REGION=\$AWS_REGION
-EOF
-  SCHEDULER_NEEDS_RESTART=1
-else
-  rm -f /etc/systemd/system/devin-scheduler.service.d/queue.conf
-fi
-
-mkdir -p /etc/systemd/system/devin-scheduler.service.d /etc/devin
-umask 077
-{
-  echo "DEFAULT_AGENT=mock"
-  printf 'CURSOR_API_KEY=%s\n' "\${CURSOR_API_KEY}"
-  printf 'ANTHROPIC_API_KEY=%s\n' "\${ANTHROPIC_API_KEY}"
-  printf 'OPENAI_API_KEY=%s\n' "\${OPENAI_API_KEY}"
-  printf 'GITHUB_BOT_TOKEN=%s\n' "\${GITHUB_BOT_TOKEN}"
-  echo "GITHUB_BOT_NAME=baby-devin-bot"
-  echo "GITHUB_BOT_EMAIL=baby-devin-bot@users.noreply.github.com"
-} >/etc/devin/scheduler-secrets.env
-chmod 600 /etc/devin/scheduler-secrets.env
-cat >/etc/systemd/system/devin-scheduler.service.d/secrets.conf <<EOF
-[Service]
-EnvironmentFile=/etc/devin/scheduler-secrets.env
-EOF
-SCHEDULER_NEEDS_RESTART=1
-
-if [[ "\$SCHEDULER_NEEDS_RESTART" -eq 1 ]]; then
-  systemctl daemon-reload
-fi
-
-if [[ -d /var/lib/devin/snapshots/nextjs ]] || [[ -d /var/lib/devin/snapshots/agent ]]; then
-  systemctl enable --now devin-firecracker-host.service || true
-fi
-
-systemctl enable --now devin-scheduler.service || true
-if [[ "\$SCHEDULER_NEEDS_RESTART" -eq 1 ]]; then
-  systemctl restart devin-scheduler.service || true
-fi
-SYNC
+echo '${SYNC_B64}' | base64 -d >/usr/local/bin/devin-sync-platform-config.sh
 chmod +x /usr/local/bin/devin-sync-platform-config.sh
 
 systemctl daemon-reload

@@ -3,6 +3,7 @@ import { EventBus } from "@devin/events";
 import type { TaskEventType } from "@devin/events";
 import { createQueue, type TaskQueue } from "@devin/queue";
 import { resolveDefaultAgent } from "./agent-defaults.js";
+import { resolvePreferredHost } from "./preferred-host.js";
 import {
   collectInfraDiagnostics,
   fetchSandboxByName,
@@ -80,7 +81,8 @@ export class TaskService {
       options.firecrackerHostUrl?.trim() ||
       process.env.FIRECRACKER_HOST_URL?.trim() ||
       undefined;
-    this.preferredHost = options.preferredHost?.trim() || undefined;
+    this.preferredHost =
+      options.preferredHost?.trim() || resolvePreferredHost() || undefined;
     this.defaultAgent = options.defaultAgent ?? resolveDefaultAgent();
     this.sandboxReadyTimeoutMs =
       options.sandboxReadyTimeoutMs ??
@@ -354,16 +356,6 @@ export class TaskService {
       this.emit("execution.started", task.id, "Execution starting in sandbox", {
         phase: "sandbox_starting",
       });
-
-      if (
-        this.firecrackerHostUrl &&
-        !this.preferredHost &&
-        process.env.QUEUE_DRIVER === "sqs"
-      ) {
-        throw new Error(
-          "SCHEDULER_HOST_NAME is not set on this scheduler. Set it to your FirecrackerHost metadata.name (for example devin-production-fc-01) so sandboxes start on the same host as this scheduler.",
-        );
-      }
 
       sandboxName = `sbx-${task.id.slice(0, 8)}`;
       task.sandboxName = sandboxName;

@@ -7,6 +7,10 @@ set -euo pipefail
 
 export DEBIAN_FRONTEND=noninteractive
 
+mkdir -p /etc/devin
+echo "${host_name}" >/etc/devin/host-name
+chmod 644 /etc/devin/host-name
+
 apt-get update -y
 apt-get install -y curl ca-certificates gnupg jq unzip
 
@@ -152,90 +156,8 @@ ExecStop=/usr/bin/docker stop scheduler
 WantedBy=multi-user.target
 UNIT
 
-cat >/usr/local/bin/devin-sync-platform-config.sh <<SYNC
-#!/bin/bash
-set -euo pipefail
-
-AWS_REGION="${aws_region}"
-SSM_PREFIX="${ssm_parameter_prefix}"
-
-read_ssm() {
-  local name="\$1"
-  aws ssm get-parameter \\
-    --region "\$AWS_REGION" \\
-    --name "\$name" \\
-    --with-decryption \\
-    --query Parameter.Value \\
-    --output text 2>/dev/null || true
-}
-
-ORCHESTRATOR_URL="\$(read_ssm "\$SSM_PREFIX/orchestrator_url")"
-TASK_QUEUE_URL="\$(read_ssm "\$SSM_PREFIX/task_queue_url")"
-CURSOR_API_KEY="\$(read_ssm "\$SSM_PREFIX/cursor_api_key")"
-ANTHROPIC_API_KEY="\$(read_ssm "\$SSM_PREFIX/anthropic_api_key")"
-OPENAI_API_KEY="\$(read_ssm "\$SSM_PREFIX/openai_api_key")"
-GITHUB_BOT_TOKEN="\$(read_ssm "\$SSM_PREFIX/github_bot_token")"
-SCHEDULER_NEEDS_RESTART=0
-
-if [[ -z "\$ORCHESTRATOR_URL" || "\$ORCHESTRATOR_URL" == http://REPLACE_AFTER_ORCHESTRATOR_NLB:* ]]; then
-  echo "Orchestrator URL not ready in SSM yet (\$SSM_PREFIX/orchestrator_url)" >&2
-else
-  mkdir -p /etc/systemd/system/devin-scheduler.service.d
-  cat >/etc/systemd/system/devin-scheduler.service.d/orchestrator.conf <<EOF
-[Service]
-Environment=ORCHESTRATOR_URL=\$ORCHESTRATOR_URL
-EOF
-  SCHEDULER_NEEDS_RESTART=1
-fi
-
-if [[ -n "\$TASK_QUEUE_URL" ]]; then
-  mkdir -p /etc/systemd/system/devin-scheduler.service.d
-  cat >/etc/systemd/system/devin-scheduler.service.d/queue.conf <<EOF
-[Service]
-Environment=QUEUE_DRIVER=sqs
-Environment=SQS_QUEUE_URL=\$TASK_QUEUE_URL
-Environment=AWS_REGION=\$AWS_REGION
-EOF
-  SCHEDULER_NEEDS_RESTART=1
-else
-  rm -f /etc/systemd/system/devin-scheduler.service.d/queue.conf
-fi
-
-mkdir -p /etc/systemd/system/devin-scheduler.service.d /etc/devin
-umask 077
-{
-  echo "DEFAULT_AGENT=mock"
-  printf 'CURSOR_API_KEY=%s\n' "\${CURSOR_API_KEY}"
-  printf 'ANTHROPIC_API_KEY=%s\n' "\${ANTHROPIC_API_KEY}"
-  printf 'OPENAI_API_KEY=%s\n' "\${OPENAI_API_KEY}"
-  printf 'GITHUB_BOT_TOKEN=%s\n' "\${GITHUB_BOT_TOKEN}"
-  echo "GITHUB_BOT_NAME=baby-devin-bot"
-  echo "GITHUB_BOT_EMAIL=baby-devin-bot@users.noreply.github.com"
-  echo "AGENT_RUN_TIMEOUT_MIN=30"
-} >/etc/devin/scheduler-secrets.env
-chmod 600 /etc/devin/scheduler-secrets.env
-cat >/etc/systemd/system/devin-scheduler.service.d/secrets.conf <<EOF
-[Service]
-EnvironmentFile=/etc/devin/scheduler-secrets.env
-EOF
-SCHEDULER_NEEDS_RESTART=1
-
-if [[ "\$SCHEDULER_NEEDS_RESTART" -eq 1 ]]; then
-  systemctl daemon-reload
-fi
-
-if [[ -d /var/lib/devin/snapshots/nextjs ]] || [[ -f /var/lib/devin/snapshots/nextjs/meta.json ]] || [[ -d /var/lib/devin/snapshots/agent ]]; then
-  if [[ -c /dev/kvm ]]; then
-    systemctl enable --now devin-firecracker-host.service || true
-  else
-    echo "Skipping firecracker-host until /dev/kvm is a character device" >&2
-  fi
-fi
-
-systemctl enable --now devin-scheduler.service || true
-if [[ "\$SCHEDULER_NEEDS_RESTART" -eq 1 ]]; then
-  systemctl restart devin-scheduler.service || true
-fi
+cat >/usr/local/bin/devin-sync-platform-config.sh <<'SYNC'
+${sync_platform_config_script}
 SYNC
 chmod +x /usr/local/bin/devin-sync-platform-config.sh
 

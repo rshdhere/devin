@@ -2,6 +2,7 @@ import { createServer } from "node:http";
 import {
   formatSSE,
   handlePreviewProxy,
+  resolvePreferredHost,
   shouldHandlePreviewHost,
   TaskService,
 } from "@devin/scheduler";
@@ -18,23 +19,17 @@ const defaultAgent = process.env.DEFAULT_AGENT as
   | "mock"
   | undefined;
 
-async function resolvePreferredHost(): Promise<string | undefined> {
-  const explicit = process.env.SCHEDULER_HOST_NAME?.trim();
-  if (explicit) {
-    return explicit;
-  }
-  // Do not infer preferredHost from firecracker-host status — the daemon host
-  // name often differs from the FirecrackerHost CR name and breaks scheduling.
-  return undefined;
+async function resolvePreferredHostForStartup(): Promise<string | undefined> {
+  return resolvePreferredHost();
 }
 
 async function main(): Promise<void> {
-  const preferredHost = await resolvePreferredHost();
+  const preferredHost = await resolvePreferredHostForStartup();
   if (preferredHost) {
     console.log(`scheduler pinned to execution host ${preferredHost}`);
   } else if (firecrackerHostUrl) {
     console.warn(
-      "SCHEDULER_HOST_NAME is not set — sandboxes may not land on this execution host. Set it to your FirecrackerHost metadata.name.",
+      "Neither SCHEDULER_HOST_NAME nor FIRECRACKER_HOST_NAME is set — sandboxes may not land on this execution host.",
     );
   }
 

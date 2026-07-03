@@ -7,6 +7,7 @@ export type {
   QueueJob,
   TaskQueue,
 } from "@devin/queue";
+export { resolvePreferredHost } from "./preferred-host.js";
 export { TaskService } from "./task-service.js";
 export {
   buildPreviewUrl,

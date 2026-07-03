@@ -1,4 +1,6 @@
 import { resolveDefaultAgent } from "./agent-defaults.js";
+import { resolvePreferredHost } from "./preferred-host.js";
+import { resolvePreferredHost } from "./preferred-host.js";
 
 export interface ServiceProbe {
   url: string;
@@ -271,6 +273,7 @@ export async function collectInfraDiagnostics(options: {
     firecrackerHost,
     agent: {
       defaultAgent: resolveDefaultAgent(),
+      preferredHost: resolvePreferredHost(),
       cursorApiKeyConfigured: Boolean(process.env.CURSOR_API_KEY?.trim()),
       anthropicApiKeyConfigured: Boolean(process.env.ANTHROPIC_API_KEY?.trim()),
       openaiApiKeyConfigured: Boolean(process.env.OPENAI_API_KEY?.trim()),
