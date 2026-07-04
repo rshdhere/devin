@@ -30,6 +30,8 @@ func (s *InternalServer) Handler() http.Handler {
 	mux.HandleFunc("POST /internal/v1/sandboxes", s.handleCreateSandbox)
 	mux.HandleFunc("GET /internal/v1/sandboxes/{name}", s.handleGetSandbox)
 	mux.HandleFunc("DELETE /internal/v1/sandboxes/{name}", s.handleDeleteSandbox)
+	mux.HandleFunc("POST /internal/v1/sandboxes/{name}/suspend", s.handleSuspendSandbox)
+	mux.HandleFunc("POST /internal/v1/sandboxes/{name}/wake", s.handleWakeSandbox)
 	return mux
 }
 
@@ -141,6 +143,67 @@ func (s *InternalServer) handleDeleteSandbox(w http.ResponseWriter, r *http.Requ
 			Message: "sandbox deleted",
 		},
 	})
+}
+
+func (s *InternalServer) handleSuspendSandbox(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	sandbox, err := s.store.Get(r.Context(), name)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "sandbox not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	if sandbox.Status.Phase == devinv1.SandboxPhaseSuspended {
+		writeJSON(w, http.StatusOK, sandbox)
+		return
+	}
+
+	sandbox.Status.Phase = devinv1.SandboxPhaseSuspended
+	sandbox.Status.Message = "sandbox suspended (idle sleep)"
+	if err := s.store.UpdateStatus(r.Context(), sandbox); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, sandbox)
+}
+
+func (s *InternalServer) handleWakeSandbox(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	sandbox, err := s.store.Get(r.Context(), name)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "sandbox not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	if sandbox.Status.Phase == devinv1.SandboxPhaseRunning {
+		writeJSON(w, http.StatusOK, sandbox)
+		return
+	}
+
+	sandbox.Status.Phase = devinv1.SandboxPhaseWaking
+	sandbox.Status.Message = "waking sandbox from idle sleep"
+	if err := s.store.UpdateStatus(r.Context(), sandbox); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	sandbox.Status.Phase = devinv1.SandboxPhaseRunning
+	sandbox.Status.Message = "sandbox running"
+	if err := s.store.UpdateStatus(r.Context(), sandbox); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, sandbox)
 }
 
 func writeJSON(w http.ResponseWriter, status int, payload any) {

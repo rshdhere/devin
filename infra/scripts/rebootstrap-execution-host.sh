@@ -143,7 +143,7 @@ ExecStart=/usr/bin/docker run --rm --name scheduler \\
   -e QUEUE_DRIVER=\${QUEUE_DRIVER} \\
   -e SQS_QUEUE_URL=\${SQS_QUEUE_URL} \\
   -e AWS_REGION=${AWS_REGION} \\
-  -e DEFAULT_AGENT=mock \\
+  -e DEFAULT_AGENT=cursor \\
   -e SANDBOX_READY_TIMEOUT_SECONDS=300 \\
   -e RUNTIME_READY_TIMEOUT_SECONDS=60 \\
   ${CONTAINER_REGISTRY}/devin-scheduler:${IMAGE_TAG}

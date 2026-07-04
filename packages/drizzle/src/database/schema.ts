@@ -1,5 +1,13 @@
 import { relations } from "drizzle-orm";
-import { pgTable, text, timestamp, boolean, index } from "drizzle-orm/pg-core";
+import {
+  pgTable,
+  text,
+  timestamp,
+  boolean,
+  index,
+  integer,
+  jsonb,
+} from "drizzle-orm/pg-core";
 
 export const user = pgTable("user", {
   id: text("id").primaryKey(),
@@ -91,6 +99,9 @@ export const userDashboardSettings = pgTable("user_dashboard_settings", {
     .default(true)
     .notNull(),
   githubCanPush: boolean("github_can_push").default(true).notNull(),
+  requireReviewBeforePush: boolean("require_review_before_push")
+    .default(false)
+    .notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at")
     .defaultNow()
@@ -128,14 +139,117 @@ export const userDashboardSettingsRelations = relations(
   }),
 );
 
+export const agentTasks = pgTable(
+  "agent_tasks",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id"),
+    prompt: text("prompt").notNull(),
+    agent: text("agent").notNull(),
+    status: text("status").notNull(),
+    title: text("title"),
+    message: text("message"),
+    repository: text("repository"),
+    branch: text("branch"),
+    prUrl: text("pr_url"),
+    previewUrl: text("preview_url"),
+    deployStatus: text("deploy_status"),
+    sessionActive: boolean("session_active").default(false).notNull(),
+    sessionSleeping: boolean("session_sleeping").default(false).notNull(),
+    sandboxName: text("sandbox_name"),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  },
+  (table) => [
+    index("agent_tasks_user_id_idx").on(table.userId),
+    index("agent_tasks_status_idx").on(table.status),
+    index("agent_tasks_updated_at_idx").on(table.updatedAt),
+  ],
+);
+
+export const agentTaskEvents = pgTable(
+  "agent_task_events",
+  {
+    id: text("id").primaryKey(),
+    taskId: text("task_id")
+      .notNull()
+      .references(() => agentTasks.id, { onDelete: "cascade" }),
+    type: text("type").notNull(),
+    message: text("message").notNull(),
+    data: jsonb("data"),
+    sequence: integer("sequence").notNull(),
+    timestamp: timestamp("timestamp").defaultNow().notNull(),
+  },
+  (table) => [
+    index("agent_task_events_task_id_idx").on(table.taskId),
+    index("agent_task_events_task_sequence_idx").on(
+      table.taskId,
+      table.sequence,
+    ),
+  ],
+);
+
+export const agentSessions = pgTable(
+  "agent_sessions",
+  {
+    taskId: text("task_id")
+      .primaryKey()
+      .references(() => agentTasks.id, { onDelete: "cascade" }),
+    sandboxName: text("sandbox_name").notNull(),
+    runtimeBaseUrl: text("runtime_base_url").notNull(),
+    repoCwd: text("repo_cwd").notNull(),
+    state: text("state").notNull().default("active"),
+    jobJson: text("job_json").notNull(),
+    githubToken: text("github_token"),
+    createdNewRepo: boolean("created_new_repo").default(false).notNull(),
+    guestHost: text("guest_host"),
+    lastActiveAt: timestamp("last_active_at").defaultNow().notNull(),
+    sleepingAt: timestamp("sleeping_at"),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  },
+  (table) => [
+    index("agent_sessions_state_idx").on(table.state),
+    index("agent_sessions_last_active_idx").on(table.lastActiveAt),
+  ],
+);
+
+export const agentTasksRelations = relations(agentTasks, ({ many, one }) => ({
+  events: many(agentTaskEvents),
+  session: one(agentSessions),
+}));
+
+export const agentTaskEventsRelations = relations(
+  agentTaskEvents,
+  ({ one }) => ({
+    task: one(agentTasks, {
+      fields: [agentTaskEvents.taskId],
+      references: [agentTasks.id],
+    }),
+  }),
+);
+
+export const agentSessionsRelations = relations(agentSessions, ({ one }) => ({
+  task: one(agentTasks, {
+    fields: [agentSessions.taskId],
+    references: [agentTasks.id],
+  }),
+}));
+
 export const schema = {
   user,
   session,
   account,
   verification,
   userDashboardSettings,
+  agentTasks,
+  agentTaskEvents,
+  agentSessions,
   userRelations,
   sessionRelations,
   accountRelations,
   userDashboardSettingsRelations,
+  agentTasksRelations,
+  agentTaskEventsRelations,
+  agentSessionsRelations,
 };

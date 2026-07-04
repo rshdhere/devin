@@ -16,6 +16,18 @@
         "typescript": "5.9.2",
       },
     },
+    "apps/brain": {
+      "name": "@devin/brain",
+      "dependencies": {
+        "@devin/scheduler": "workspace:*",
+      },
+      "devDependencies": {
+        "@types/node": "^22.15.3",
+      },
+      "peerDependencies": {
+        "typescript": "^5",
+      },
+    },
     "apps/firecracker-host": {
       "name": "@devin/firecracker-host",
     },
@@ -157,6 +169,7 @@
       "name": "@devin/scheduler",
       "dependencies": {
         "@devin/agent-sdk": "workspace:*",
+        "@devin/drizzle": "workspace:*",
         "@devin/events": "workspace:*",
         "@devin/queue": "workspace:*",
       },
@@ -336,6 +349,8 @@
     "@devin/api-v1": ["@devin/api-v1@workspace:packages/api/v1"],
 
     "@devin/api-v2": ["@devin/api-v2@workspace:packages/api/v2"],
+
+    "@devin/brain": ["@devin/brain@workspace:apps/brain"],
 
     "@devin/config": ["@devin/config@workspace:packages/config"],
 

@@ -4,10 +4,12 @@
   "type": "module",
   "private": true,
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./start-server": "./src/start-server.ts"
   },
   "dependencies": {
     "@devin/agent-sdk": "workspace:*",
+    "@devin/drizzle": "workspace:*",
     "@devin/events": "workspace:*",
     "@devin/queue": "workspace:*"
   },

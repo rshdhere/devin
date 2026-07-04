@@ -14,6 +14,14 @@ import {
   retryTask,
   startTaskExecution,
   streamTaskEvents,
+  commitTaskWork,
+  raiseTaskPullRequest,
+  continueTask,
+  terminateSession,
+  wakeSession,
+  runTaskTerminal,
+  listTaskFiles,
+  readTaskFile,
 } from "../lib/scheduler.js";
 import { requireAuth } from "../middleware/require-auth.js";
 
@@ -101,6 +109,7 @@ tasksRouter.post("/", async (req, res) => {
             canPush: settings.githubCanPush,
           }
         : undefined,
+      requireReviewBeforePush: settings?.requireReviewBeforePush ?? false,
       cloneUrl:
         repository && githubToken
           ? authenticatedCloneUrl(githubToken, repository)
@@ -153,6 +162,104 @@ tasksRouter.post("/:id/retry", async (req, res) => {
   try {
     const response = await retryTask(req.params.id);
     res.status(response.status).json(await response.json());
+  } catch (error) {
+    respondSchedulerFailure(res, error);
+  }
+});
+
+tasksRouter.post("/:id/commit", async (req, res) => {
+  try {
+    const response = await commitTaskWork(req.params.id);
+    res.status(response.status).json(await response.json());
+  } catch (error) {
+    respondSchedulerFailure(res, error);
+  }
+});
+
+tasksRouter.post("/:id/pr", async (req, res) => {
+  try {
+    const response = await raiseTaskPullRequest(req.params.id);
+    res.status(response.status).json(await response.json());
+  } catch (error) {
+    respondSchedulerFailure(res, error);
+  }
+});
+
+tasksRouter.post("/:id/continue", async (req, res) => {
+  const prompt =
+    typeof req.body?.prompt === "string" ? req.body.prompt.trim() : "";
+  if (!prompt) {
+    res.status(400).json({ error: "prompt is required" });
+    return;
+  }
+  try {
+    const response = await continueTask(req.params.id, prompt);
+    res.status(response.status).json(await response.json());
+  } catch (error) {
+    respondSchedulerFailure(res, error);
+  }
+});
+
+tasksRouter.post("/:id/terminate", async (req, res) => {
+  try {
+    const response = await terminateSession(req.params.id);
+    res.status(response.status).json(await response.json());
+  } catch (error) {
+    respondSchedulerFailure(res, error);
+  }
+});
+
+tasksRouter.post("/:id/wake", async (req, res) => {
+  try {
+    const response = await wakeSession(req.params.id);
+    res.status(response.status).json(await response.json());
+  } catch (error) {
+    respondSchedulerFailure(res, error);
+  }
+});
+
+tasksRouter.post("/:id/terminal", async (req, res) => {
+  try {
+    const response = await runTaskTerminal(req.params.id, req.body);
+    const contentType = response.headers.get("content-type") ?? "";
+    if (contentType.includes("text/event-stream")) {
+      res.setHeader("Content-Type", "text/event-stream");
+      res.setHeader("Cache-Control", "no-cache");
+      res.setHeader("Connection", "keep-alive");
+      if (!response.body) {
+        res.status(502).end();
+        return;
+      }
+      const reader = response.body.getReader();
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        res.write(Buffer.from(value));
+      }
+      res.end();
+      return;
+    }
+    res.status(response.status).send(await response.text());
+  } catch (error) {
+    respondSchedulerFailure(res, error);
+  }
+});
+
+tasksRouter.get("/:id/files/read", async (req, res) => {
+  try {
+    const path = typeof req.query.path === "string" ? req.query.path : "";
+    const response = await readTaskFile(req.params.id, path);
+    res.status(response.status).send(await response.text());
+  } catch (error) {
+    respondSchedulerFailure(res, error);
+  }
+});
+
+tasksRouter.get("/:id/files", async (req, res) => {
+  try {
+    const path = typeof req.query.path === "string" ? req.query.path : ".";
+    const response = await listTaskFiles(req.params.id, path);
+    res.status(response.status).send(await response.text());
   } catch (error) {
     respondSchedulerFailure(res, error);
   }

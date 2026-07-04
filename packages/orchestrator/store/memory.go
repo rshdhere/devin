@@ -87,6 +87,18 @@ func (s *MemoryStore) Delete(_ context.Context, name string) error {
 	return nil
 }
 
+func (s *MemoryStore) UpdateStatus(_ context.Context, sandbox *devinv1.Sandbox) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	item, ok := s.items[sandbox.Name]
+	if !ok {
+		return ErrNotFound
+	}
+	item.Status = sandbox.Status
+	return nil
+}
+
 func (s *MemoryStore) simulateProvision(ctx context.Context, name string, spec devinv1.SandboxSpec) {
 	s.setStatus(name, devinv1.SandboxStatus{
 		Phase:   devinv1.SandboxPhaseProvisioning,

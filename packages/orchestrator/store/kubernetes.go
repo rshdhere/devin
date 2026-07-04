@@ -72,3 +72,12 @@ func (s *KubernetesStore) Delete(ctx context.Context, name string) error {
 	}
 	return err
 }
+
+func (s *KubernetesStore) UpdateStatus(ctx context.Context, sandbox *devinv1.Sandbox) error {
+	sandbox.Namespace = s.namespace
+	err := s.client.Status().Update(ctx, sandbox)
+	if apierrors.IsNotFound(err) {
+		return ErrNotFound
+	}
+	return err
+}

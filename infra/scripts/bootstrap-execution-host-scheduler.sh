@@ -41,7 +41,7 @@ ExecStart=/usr/bin/docker run --rm --name scheduler \\
   -e SCHEDULER_HOST_NAME=${HOST_NAME} \\
   -e FIRECRACKER_HOST_NAME=${HOST_NAME} \\
   -e FIRECRACKER_HOST_URL=http://127.0.0.1:9092 \\
-  -e DEFAULT_AGENT=mock \\
+  -e DEFAULT_AGENT=cursor \\
   -e SANDBOX_READY_TIMEOUT_SECONDS=300 \\
   -e RUNTIME_READY_TIMEOUT_SECONDS=60 \\
   ${REGISTRY}/devin-scheduler:${TAG}

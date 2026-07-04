@@ -49,6 +49,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /git/commit", s.handleGitCommit)
 	mux.HandleFunc("POST /git/push", s.handleGitPush)
 	mux.HandleFunc("POST /files/write", s.handleFilesWrite)
+	mux.HandleFunc("GET /files/list", s.handleFilesList)
+	mux.HandleFunc("GET /files/read", s.handleFilesRead)
+	mux.HandleFunc("POST /terminal/stream", s.handleTerminalStream)
 	mux.HandleFunc("POST /browser/open", s.handleBrowserOpen)
 	mux.HandleFunc("GET /events", s.handleEvents)
 	return mux
@@ -403,8 +406,115 @@ func (s *Server) handleBrowserOpen(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{
 		"status":  "accepted",
 		"url":     req.URL,
-		"message": "browser automation is not configured in this runtime image",
+		"message": "open this URL in the embedded browser panel or a new tab",
 	})
+}
+
+func (s *Server) handleFilesList(w http.ResponseWriter, r *http.Request) {
+	rel := strings.TrimSpace(r.URL.Query().Get("path"))
+	if rel == "" {
+		rel = "."
+	}
+	target := s.resolveCWD(rel)
+	entries, err := os.ReadDir(target)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	items := make([]map[string]any, 0, len(entries))
+	for _, entry := range entries {
+		info, infoErr := entry.Info()
+		size := int64(0)
+		if infoErr == nil && info != nil {
+			size = info.Size()
+		}
+		items = append(items, map[string]any{
+			"name":  entry.Name(),
+			"path":  filepath.Join(rel, entry.Name()),
+			"isDir": entry.IsDir(),
+			"size":  size,
+		})
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"path":  rel,
+		"items": items,
+	})
+}
+
+func (s *Server) handleFilesRead(w http.ResponseWriter, r *http.Request) {
+	rel := strings.TrimSpace(r.URL.Query().Get("path"))
+	if rel == "" {
+		writeError(w, http.StatusBadRequest, "path is required")
+		return
+	}
+	target := filepath.Join(s.workspace, filepath.Clean("/"+rel))
+	data, err := os.ReadFile(target)
+	if err != nil {
+		writeError(w, http.StatusNotFound, err.Error())
+		return
+	}
+	if len(data) > 512*1024 {
+		writeError(w, http.StatusRequestEntityTooLarge, "file exceeds 512KiB preview limit")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"path":    rel,
+		"content": string(data),
+	})
+}
+
+func (s *Server) handleTerminalStream(w http.ResponseWriter, r *http.Request) {
+	var req terminalRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	if strings.TrimSpace(req.Command) == "" {
+		writeError(w, http.StatusBadRequest, "command is required")
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.WriteHeader(http.StatusOK)
+
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		writeError(w, http.StatusInternalServerError, "streaming not supported")
+		return
+	}
+
+	workspace.EnsureDNS()
+	cwd := s.resolveCWD(req.CWD)
+	s.appendLog("terminal stream: " + req.Command)
+
+	result, err := executil.RunStreaming(r.Context(), cwd, req.Command, parseRequestEnv(r), func(line executil.OutputLine) {
+		payload, _ := json.Marshal(map[string]any{
+			"stream": line.Stream,
+			"line":   line.Line,
+			"time":   line.Time.UTC().Format(time.RFC3339Nano),
+		})
+		_, _ = fmt.Fprintf(w, "event: terminal.output\ndata: %s\n\n", payload)
+		flusher.Flush()
+	})
+	if err != nil {
+		payload, _ := json.Marshal(map[string]any{"error": err.Error()})
+		_, _ = fmt.Fprintf(w, "event: terminal.error\ndata: %s\n\n", payload)
+		flusher.Flush()
+		return
+	}
+
+	donePayload, _ := json.Marshal(map[string]any{
+		"exitCode": result.ExitCode,
+		"stdout":   result.Stdout,
+		"stderr":   result.Stderr,
+	})
+	_, _ = fmt.Fprintf(w, "event: terminal.done\ndata: %s\n\n", donePayload)
+	flusher.Flush()
 }
 
 func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {

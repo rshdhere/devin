@@ -7,8 +7,13 @@ export type {
   QueueJob,
   TaskQueue,
 } from "@devin/queue";
+export { resolveDefaultAgent, usesRuntimeAgent } from "./agent-defaults.js";
 export { resolvePreferredHost } from "./preferred-host.js";
 export { TaskService } from "./task-service.js";
+export { TaskStore } from "./task-store.js";
+export type { PersistedSession, AgentSessionState } from "./task-store.js";
+export { startSchedulerServer } from "./start-server.js";
+export type { StartSchedulerServerOptions } from "./start-server.js";
 export {
   buildPreviewUrl,
   previewBaseDomain,
@@ -32,6 +37,7 @@ export type {
 export type {
   CreateTaskInput,
   ScheduleJob,
+  ServiceMode,
   Task,
   TaskStatus,
 } from "./types.js";

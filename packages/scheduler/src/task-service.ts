@@ -1,8 +1,8 @@
 import { RuntimeClient, type RunResponse } from "@devin/agent-sdk";
 import { EventBus } from "@devin/events";
-import type { TaskEventType } from "@devin/events";
+import type { TaskEvent, TaskEventType } from "@devin/events";
 import { createQueue, type TaskQueue } from "@devin/queue";
-import { resolveDefaultAgent } from "./agent-defaults.js";
+import { resolveDefaultAgent, usesRuntimeAgent } from "./agent-defaults.js";
 import { resolvePreferredHost } from "./preferred-host.js";
 import {
   collectInfraDiagnostics,
@@ -30,9 +30,11 @@ import type {
   AgentProvider,
   CreateTaskInput,
   ScheduleJob,
+  ServiceMode,
   Task,
   TaskStatus,
 } from "./types.js";
+import { TaskStore, type PersistedSession } from "./task-store.js";
 
 export interface TaskServiceOptions {
   orchestratorUrl: string;
@@ -46,6 +48,12 @@ export interface TaskServiceOptions {
   sandboxReadyTimeoutMs?: number;
   /** Max time to wait for runtime /health (default 60s). */
   runtimeReadyTimeoutMs?: number;
+  /** Postgres URL for durable tasks/sessions (falls back to DATABASE_URL). */
+  databaseUrl?: string;
+  /** standalone = all-in-one; brain = cloud control plane; worker = execution host only. */
+  mode?: ServiceMode;
+  /** Worker scheduler URL when mode=brain (job execution delegation). */
+  executionWorkerUrl?: string;
 }
 
 type SandboxRecord = {
@@ -58,9 +66,23 @@ type SandboxRecord = {
   };
 };
 
+type ReviewSession = {
+  runtime: RuntimeClient;
+  sandboxName: string;
+  runtimeBaseUrl: string;
+  repoCwd: string;
+  job: ScheduleJob;
+  githubToken?: string;
+  createdNewRepo: boolean;
+  guestHost?: string;
+};
+
 export class TaskService {
   private readonly tasks = new Map<string, Task>();
   private readonly pendingJobs = new Map<string, ScheduleJob>();
+  /** Devbox sessions kept alive for follow-up prompts or manual review. */
+  private readonly activeSessions = new Map<string, ReviewSession>();
+  private readonly reviewSessions = new Map<string, ReviewSession>();
   private readonly eventSequences = new Map<string, number>();
   private readonly eventBus: EventBus;
   private readonly queue: TaskQueue<ScheduleJob>;
@@ -71,8 +93,14 @@ export class TaskService {
   private readonly defaultAgent: AgentProvider;
   private readonly sandboxReadyTimeoutMs: number;
   private readonly runtimeReadyTimeoutMs: number;
+  private readonly taskStore: TaskStore;
+  private readonly mode: ServiceMode;
+  private readonly executionWorkerUrl?: string;
+  private readonly idleTimeoutMs: number;
+  private idleWatchdog?: ReturnType<typeof setInterval>;
   private workerStarted = false;
   private readonly processingTasks = new Set<string>();
+  private restored = false;
 
   constructor(options: TaskServiceOptions) {
     this.orchestratorUrl = options.orchestratorUrl.replace(/\/$/, "");
@@ -92,6 +120,30 @@ export class TaskService {
       resolveTimeoutMs("RUNTIME_READY_TIMEOUT_SECONDS", 60);
     this.eventBus = options.eventBus ?? new EventBus();
     this.queue = options.queue ?? createQueue<ScheduleJob>();
+    this.taskStore = new TaskStore(options.databaseUrl);
+    this.mode = options.mode ?? resolveServiceMode();
+    this.executionWorkerUrl =
+      options.executionWorkerUrl?.trim() ||
+      process.env.EXECUTION_WORKER_URL?.trim() ||
+      undefined;
+    this.idleTimeoutMs = resolveTimeoutMs("DEVBOX_IDLE_TIMEOUT_SECONDS", 1800);
+  }
+
+  async initialize(): Promise<void> {
+    if (this.restored || !this.taskStore.isEnabled()) {
+      return;
+    }
+    this.restored = true;
+    await this.restoreFromStore();
+    this.startIdleWatchdog();
+  }
+
+  getMode(): ServiceMode {
+    return this.mode;
+  }
+
+  getTaskStore(): TaskStore {
+    return this.taskStore;
   }
 
   getEventBus(): EventBus {
@@ -151,6 +203,7 @@ export class TaskService {
     }
 
     this.tasks.set(task.id, task);
+    void this.taskStore.upsertTask(task);
     this.emit("task.created", task.id, "Task accepted", {
       agent: task.agent,
       repository: task.repository,
@@ -171,9 +224,20 @@ export class TaskService {
       testCommand: input.testCommand,
       issueTitle: input.issueTitle,
       issueBody: input.issueBody,
+      requireReviewBeforePush: input.requireReviewBeforePush ?? false,
       enqueuedAt: now,
     };
     this.pendingJobs.set(task.id, job);
+
+    if (this.mode === "brain") {
+      void this.delegateJobToWorker(job).catch((error) => {
+        const message =
+          error instanceof Error ? error.message : "Failed to delegate job";
+        this.updateTask(task.id, "failed", message);
+        this.emit("task.failed", task.id, message);
+      });
+      return task;
+    }
 
     void this.queue.enqueue(job).catch((error) => {
       const message =
@@ -183,6 +247,18 @@ export class TaskService {
     });
 
     return task;
+  }
+
+  /** Accept a job from the cloud brain on the execution worker. */
+  async ingestWorkerJob(job: ScheduleJob): Promise<void> {
+    const task =
+      this.tasks.get(job.taskId) ?? (await this.taskStore.getTask(job.taskId));
+    if (!task) {
+      throw new Error("task not found");
+    }
+    this.tasks.set(task.id, task);
+    this.pendingJobs.set(job.taskId, job);
+    await this.queue.enqueue(job);
   }
 
   async startExecution(taskId: string): Promise<Task> {
@@ -206,14 +282,182 @@ export class TaskService {
     return task;
   }
 
+  async commitTaskWork(taskId: string): Promise<Task> {
+    return this.finalizeReviewedTask(taskId, { createPullRequest: false });
+  }
+
+  async raiseTaskPullRequest(taskId: string): Promise<Task> {
+    return this.finalizeReviewedTask(taskId, { createPullRequest: true });
+  }
+
+  async continueTask(taskId: string, prompt: string): Promise<Task> {
+    const trimmed = prompt.trim();
+    if (!trimmed) {
+      throw new Error("prompt is required");
+    }
+
+    const task = this.tasks.get(taskId);
+    let session =
+      this.activeSessions.get(taskId) ?? this.reviewSessions.get(taskId);
+
+    if (!task) {
+      throw new Error("task not found");
+    }
+
+    if (!session && task.sessionSleeping) {
+      session = await this.wakeSession(taskId);
+    }
+
+    if (!session) {
+      throw new Error("no active devbox session for this task");
+    }
+
+    const followUpJob: ScheduleJob = {
+      ...session.job,
+      prompt: trimmed,
+      taskId,
+      skipDraft: true,
+      resumeSession: true,
+      runtimeBaseUrl: session.runtimeBaseUrl,
+      sandboxName: session.sandboxName,
+      enqueuedAt: new Date().toISOString(),
+    };
+
+    task.prompt = trimmed;
+    task.sessionSleeping = false;
+    task.sessionActive = true;
+    this.pendingJobs.set(taskId, followUpJob);
+    this.updateTask(taskId, "queued", "Follow-up queued for devbox session");
+    this.emit("task.scheduled", taskId, "Follow-up prompt queued", {
+      followUp: true,
+      sessionActive: true,
+    });
+
+    if (this.mode === "brain") {
+      await this.delegateJobToWorker(followUpJob);
+    } else {
+      await this.queue.enqueue(followUpJob);
+    }
+    return task;
+  }
+
+  async wakeSession(taskId: string): Promise<ReviewSession | undefined> {
+    if (this.mode === "brain") {
+      await this.delegateRequestToWorker(
+        `/api/v1/tasks/${encodeURIComponent(taskId)}/wake`,
+        { method: "POST" },
+      );
+      const task = await this.taskStore.getTask(taskId);
+      if (task) {
+        this.tasks.set(taskId, task);
+      }
+      return undefined;
+    }
+
+    const persisted = await this.taskStore.getSession(taskId);
+    if (!persisted || persisted.state !== "sleeping") {
+      return undefined;
+    }
+
+    await this.wakeSandbox(persisted.sandboxName);
+    const runtimeBaseUrl = await this.resolveRuntimeUrl(persisted.sandboxName);
+    const runtime = new RuntimeClient(runtimeBaseUrl);
+    await this.waitForRuntime(runtime, taskId, runtimeBaseUrl);
+
+    const session: ReviewSession = {
+      runtime,
+      sandboxName: persisted.sandboxName,
+      runtimeBaseUrl,
+      repoCwd: persisted.repoCwd,
+      job: persisted.job,
+      githubToken: persisted.githubToken,
+      createdNewRepo: persisted.createdNewRepo,
+      guestHost: persisted.guestHost,
+    };
+
+    this.activeSessions.set(taskId, session);
+    const task = this.tasks.get(taskId);
+    if (task) {
+      task.sessionActive = true;
+      task.sessionSleeping = false;
+      task.sandboxName = persisted.sandboxName;
+      await this.taskStore.upsertTask(task);
+    }
+
+    await this.persistSession(taskId, session, "active");
+    await this.taskStore.touchSession(taskId);
+    this.emit(
+      "task.phase_changed",
+      taskId,
+      "Devbox session woke from idle sleep",
+      {
+        phase: "running",
+        sessionActive: true,
+        sandboxName: persisted.sandboxName,
+      },
+    );
+
+    return session;
+  }
+
+  async terminateSession(taskId: string): Promise<Task> {
+    const task = this.tasks.get(taskId);
+    if (!task) {
+      throw new Error("task not found");
+    }
+
+    const session =
+      this.activeSessions.get(taskId) ?? this.reviewSessions.get(taskId);
+    if (session) {
+      await this.deleteSandbox(session.sandboxName);
+      this.activeSessions.delete(taskId);
+      this.reviewSessions.delete(taskId);
+      await this.taskStore.deleteSession(taskId);
+    }
+
+    task.sessionActive = false;
+    task.sessionSleeping = false;
+    if (task.status === "awaiting_review") {
+      this.updateTask(
+        taskId,
+        "cancelled",
+        "Session ended — sandbox terminated without push",
+      );
+      this.emit("task.phase_changed", taskId, "Devbox session terminated", {
+        phase: "terminated",
+        sessionActive: false,
+      });
+    } else if (task.status !== "completed" && task.status !== "failed") {
+      this.patchTask(taskId, {});
+      this.updateTask(taskId, task.status, "Devbox session terminated");
+    } else {
+      this.updateTask(taskId, task.status, "Devbox session terminated");
+    }
+
+    return task;
+  }
+
   getTask(taskId: string): Task | undefined {
     return this.tasks.get(taskId);
   }
 
   listTasks(): Task[] {
-    return [...this.tasks.values()].sort((a, b) =>
-      b.createdAt.localeCompare(a.createdAt),
-    );
+    if (this.tasks.size > 0) {
+      return [...this.tasks.values()].sort((a, b) =>
+        b.createdAt.localeCompare(a.createdAt),
+      );
+    }
+    return [];
+  }
+
+  async listTasksFromStore(userId?: string): Promise<Task[]> {
+    const stored = await this.taskStore.listTasks(userId);
+    for (const task of stored) {
+      if (!this.tasks.has(task.id)) {
+        this.tasks.set(task.id, task);
+      }
+    }
+    return stored;
   }
 
   async getInfraDiagnostics(): Promise<InfraDiagnostics> {
@@ -241,7 +485,7 @@ export class TaskService {
   }
 
   startWorker(): void {
-    if (this.workerStarted) {
+    if (this.workerStarted || this.mode === "brain") {
       return;
     }
     this.workerStarted = true;
@@ -257,16 +501,27 @@ export class TaskService {
   }
 
   private async processJob(job: ScheduleJob): Promise<void> {
-    const task = this.tasks.get(job.taskId);
+    let task = this.tasks.get(job.taskId);
+    if (!task) {
+      task = await this.taskStore.getTask(job.taskId);
+      if (task) {
+        this.tasks.set(job.taskId, task);
+      }
+    }
     if (!task) {
       return;
     }
 
     if (
-      task.status === "completed" ||
-      task.status === "failed" ||
-      task.status === "cancelled"
+      (task.status === "completed" ||
+        task.status === "failed" ||
+        task.status === "cancelled") &&
+      !job.resumeSession
     ) {
+      return;
+    }
+
+    if (task.status === "awaiting_review" && !job.resumeSession) {
       return;
     }
 
@@ -293,15 +548,53 @@ export class TaskService {
 
     let sandboxName: string | undefined;
     let retainSandboxForPreview = false;
+    let pausedForReview = false;
     let guestHost: string | undefined;
     let runtime: RuntimeClient | undefined;
     let repoCwd = "repo";
     let repository: string | undefined;
     let cloneUrl: string | undefined;
     let githubToken: string | undefined;
+    let createdNewRepo = false;
+    let runtimeBaseUrl: string | undefined;
+    let gitOwner: GitHubUserIdentity | undefined;
 
     try {
-      if (!job.skipDraft) {
+      const resumeSession =
+        job.resumeSession === true
+          ? (this.activeSessions.get(task.id) ??
+            this.reviewSessions.get(task.id) ??
+            (await this.wakeSession(task.id)))
+          : undefined;
+
+      if (resumeSession) {
+        this.reviewSessions.delete(task.id);
+        sandboxName = resumeSession.sandboxName;
+        runtimeBaseUrl = resumeSession.runtimeBaseUrl;
+        runtime = resumeSession.runtime;
+        guestHost = resumeSession.guestHost;
+        repoCwd = resumeSession.repoCwd;
+        repository = resumeSession.job.repository ?? task.repository;
+        cloneUrl = resumeSession.job.cloneUrl;
+        githubToken = resumeSession.job.githubToken;
+        createdNewRepo = resumeSession.createdNewRepo;
+        Object.assign(job, resumeSession.job, {
+          prompt: job.prompt,
+          resumeSession: true,
+        });
+        task.sandboxName = sandboxName;
+        task.sessionActive = true;
+        this.updateTask(
+          task.id,
+          "running",
+          "Follow-up running in devbox session",
+        );
+        this.emit("task.phase_changed", task.id, "Resuming devbox session", {
+          phase: "running",
+          sessionActive: true,
+          followUp: true,
+        });
+      } else if (!job.skipDraft) {
         this.updateTask(task.id, "scheduling", "Scheduler picked up task");
         this.emit("task.scheduled", task.id, "Task scheduled", {
           agent: task.agent,
@@ -311,255 +604,316 @@ export class TaskService {
         });
 
         this.validateAgentSecrets(task);
-        this.validateGreenfieldDraftSecrets(job);
 
-        this.updateTask(task.id, "drafting", "Preparing draft plan");
-        this.emit("task.phase_changed", task.id, "Entered draft phase", {
-          phase: "drafting",
-        });
-        await this.prepareDraft(task, job);
-
-        const autoStartSandbox = job.autoStartSandbox !== false;
-        if (!autoStartSandbox) {
-          await this.provisionGreenfieldRepository(task, job);
-          this.updateTask(
-            task.id,
-            "draft_ready",
-            "Draft ready — approve sandbox to continue",
-          );
+        if (usesRuntimeAgent(task.agent)) {
           this.emit(
             "task.phase_changed",
             task.id,
-            "Draft ready — waiting for sandbox approval",
+            "Runtime agent will implement changes in the sandbox",
             {
-              phase: "draft_ready",
-              awaitingApproval: true,
+              phase: "scheduling",
+              runtimeAgent: true,
             },
           );
-          return;
+        } else {
+          this.validateGreenfieldDraftSecrets(job);
+
+          this.updateTask(task.id, "drafting", "Preparing draft plan");
+          this.emit("task.phase_changed", task.id, "Entered draft phase", {
+            phase: "drafting",
+          });
+          await this.prepareDraft(task, job);
+
+          const autoStartSandbox = job.autoStartSandbox !== false;
+          if (!autoStartSandbox) {
+            await this.provisionGreenfieldRepository(task, job);
+            this.updateTask(
+              task.id,
+              "draft_ready",
+              "Draft ready — approve sandbox to continue",
+            );
+            this.emit(
+              "task.phase_changed",
+              task.id,
+              "Draft ready — waiting for sandbox approval",
+              {
+                phase: "draft_ready",
+                awaitingApproval: true,
+              },
+            );
+            return;
+          }
         }
       } else {
         this.validateAgentSecrets(task);
       }
 
-      await this.provisionGreenfieldRepository(task, job);
-
-      this.updateTask(task.id, "draft_ready", "Draft ready; starting sandbox");
-      this.emit(
-        "task.phase_changed",
-        task.id,
-        "Draft ready; moving to sandbox execution",
-        {
-          phase: "draft_ready",
-        },
-      );
-      this.emit("execution.started", task.id, "Execution starting in sandbox", {
-        phase: "sandbox_starting",
-      });
-
-      sandboxName = `sbx-${task.id.slice(0, 8)}`;
-      task.sandboxName = sandboxName;
-      this.updateTask(task.id, "sandbox_starting", "Creating sandbox");
-
-      const runtimeImage = runtimeForAgent(task.agent);
-
-      if (this.firecrackerHostUrl) {
-        const hostIssue = await validateFirecrackerHostForRuntime(
-          this.firecrackerHostUrl,
-          runtimeImage,
-        );
-        if (hostIssue) {
-          throw new Error(hostIssue);
-        }
-      }
-
-      this.emit(
-        "sandbox.requested",
-        task.id,
-        "Requesting sandbox from orchestrator",
-        {
-          sandboxName,
-          runtime: runtimeImage,
-          orchestratorUrl: this.orchestratorUrl,
-        },
-      );
-
-      await this.ensureSandbox(sandboxName, task.id, {
-        taskId: task.id,
-        runtime: runtimeImage,
-        cpu: 2,
-        memory: "4Gi",
-        ...(this.preferredHost ? { preferredHost: this.preferredHost } : {}),
-      });
-
-      const sandbox = await this.waitForSandbox(sandboxName, task.id);
-      this.assertSandboxOnLocalHost(sandbox, task.id);
-      this.emit("sandbox.started", task.id, "Sandbox microVM is running", {
-        sandboxName,
-        vmId: sandbox.status?.vmId,
-        host: sandbox.status?.host,
-        runtime: runtimeImage,
-      });
-
-      const runtimeBaseUrl = sandbox.status?.runtimeURL?.replace(/\/$/, "");
-      if (!runtimeBaseUrl) {
-        throw new Error(
-          "Sandbox is running but orchestrator did not publish a runtimeURL. Check firecracker-host and orchestrator sync.",
-        );
-      }
-      guestHost = new URL(runtimeBaseUrl).hostname;
-      runtime = new RuntimeClient({ baseUrl: runtimeBaseUrl });
-      this.emit(
-        "runtime.waiting",
-        task.id,
-        "Waiting for runtime supervisor health check",
-        {
-          runtimeURL: runtimeBaseUrl,
-        },
-      );
-      await this.waitForRuntime(runtime, task.id, runtimeBaseUrl);
-      await this.ensureSandboxDns(runtime, task.id);
-      this.emit("runtime.ready", task.id, "Runtime supervisor is ready", {
-        runtimeURL: runtimeBaseUrl,
-      });
-
-      repoCwd = "repo";
-      let agentPrompt = task.prompt;
-      let repoHydratedLocally = false;
-      repository = job.repository ?? task.repository;
-      cloneUrl = job.cloneUrl;
-      githubToken = job.githubToken;
-      let gitOwner: GitHubUserIdentity | undefined;
-      let createdNewRepo = Boolean(job.greenfieldPushed);
-      const repoReadyInSandbox = Boolean(repository && cloneUrl);
-
-      if (githubToken) {
-        try {
-          gitOwner = await fetchGitHubUserIdentity(githubToken);
-        } catch {
-          // commits still work with bot co-author trailer if identity lookup fails
-        }
-      }
-
-      if (!repository && (job.createRepository || job.autoCreateRepository)) {
-        throw new Error(
-          "Repository was not provisioned before sandbox execution",
-        );
-      }
-
-      if (
-        repository &&
-        githubToken &&
-        !cloneUrl &&
-        (job.autoCreateRepository || job.createRepository)
-      ) {
-        cloneUrl = authenticatedCloneUrl(githubToken, repository);
-        job.cloneUrl = cloneUrl;
-        job.repository = repository;
-        task.repository = repository;
-        createdNewRepo = true;
-      }
-
-      if (cloneUrl && repository) {
-        await this.ensureSandboxDns(runtime, task.id);
-
-        if (job.greenfieldPushed && job.draftPlan) {
-          this.emit(
-            "agent.log",
-            task.id,
-            "Using local scaffold hydration for greenfield repo (skipping git clone)",
-            { repository, fallback: "hydrate" },
-          );
-          await this.hydrateGreenfieldInSandbox(
-            runtime,
-            task,
-            job,
-            repoCwd,
-            gitOwner,
-            cloneUrl,
-            githubToken,
-          );
-          repoHydratedLocally = true;
+      if (!resumeSession) {
+        if (
+          usesRuntimeAgent(task.agent) &&
+          (job.createRepository || job.autoCreateRepository)
+        ) {
+          await this.provisionGreenfieldRepositoryShell(task, job);
         } else {
-          try {
-            await this.cloneRepositoryInSandbox(
-              runtime,
-              task.id,
-              cloneUrl,
-              repoCwd,
-              repository,
-            );
-          } catch (error) {
-            if (job.draftPlan && isNetworkCloneFailure(error)) {
-              this.emit(
-                "agent.log",
-                task.id,
-                "Git clone failed in sandbox; hydrating from draft scaffold",
-                { repository, fallback: "hydrate" },
-              );
-              await this.hydrateGreenfieldInSandbox(
-                runtime,
-                task,
-                job,
-                repoCwd,
-                gitOwner,
-                cloneUrl,
-                githubToken,
-              );
-              repoHydratedLocally = true;
-            } else {
-              throw error;
-            }
-          }
+          await this.provisionGreenfieldRepository(task, job);
         }
-        if (!repoHydratedLocally) {
-          await this.configureSandboxGit(runtime, task.id, gitOwner, {
-            repoCwd,
-            cloneUrl,
-            githubToken,
-          });
-        }
-        if (!job.greenfieldPushed && createdNewRepo) {
-          const bot = resolveBotAuthor();
-          try {
-            await bootstrapGreenfieldProject({
-              runtime,
-              taskId: task.id,
-              repoCwd,
-              prompt: task.prompt,
-              title: task.title ?? "project",
-              botName: bot.name,
-              botEmail: bot.email,
-              canPush: Boolean(job.permissions?.canPush),
-              githubToken,
-              cloneUrl,
-              emit: (type, message, data) =>
-                this.emitRuntime(task.id, type as TaskEventType, message, data),
-            });
-          } catch (error) {
-            const message =
-              error instanceof Error ? error.message : "Bootstrap failed";
-            this.emit("git.commit", task.id, `Bootstrap failed: ${message}`, {
-              error: message,
-              bootstrap: true,
-            });
-            throw error;
-          }
-        }
-        agentPrompt = buildAgentPrompt(
-          task.prompt,
-          repository,
-          repoCwd,
-          gitOwner,
+
+        this.updateTask(
+          task.id,
+          usesRuntimeAgent(task.agent) ? "sandbox_starting" : "draft_ready",
+          usesRuntimeAgent(task.agent)
+            ? "Booting devbox from snapshot"
+            : "Draft ready; starting sandbox",
         );
-      } else if (githubToken) {
-        await this.configureSandboxGit(runtime, task.id, gitOwner, {
-          githubToken,
+        this.emit(
+          "task.phase_changed",
+          task.id,
+          usesRuntimeAgent(task.agent)
+            ? "Booting devbox"
+            : "Draft ready; moving to sandbox execution",
+          {
+            phase: usesRuntimeAgent(task.agent)
+              ? "sandbox_starting"
+              : "draft_ready",
+          },
+        );
+        this.emit(
+          "execution.started",
+          task.id,
+          "Execution starting in devbox",
+          {
+            phase: "sandbox_starting",
+          },
+        );
+
+        sandboxName = `sbx-${task.id.slice(0, 8)}`;
+        task.sandboxName = sandboxName;
+        task.sessionActive = true;
+        this.updateTask(task.id, "sandbox_starting", "Creating devbox");
+
+        const runtimeImage = runtimeForAgent(task.agent);
+
+        if (this.firecrackerHostUrl) {
+          const hostIssue = await validateFirecrackerHostForRuntime(
+            this.firecrackerHostUrl,
+            runtimeImage,
+          );
+          if (hostIssue) {
+            throw new Error(hostIssue);
+          }
+        }
+
+        this.emit(
+          "sandbox.requested",
+          task.id,
+          "Requesting devbox from orchestrator",
+          {
+            sandboxName,
+            runtime: runtimeImage,
+            orchestratorUrl: this.orchestratorUrl,
+          },
+        );
+
+        await this.ensureSandbox(sandboxName, task.id, {
+          taskId: task.id,
+          runtime: runtimeImage,
+          cpu: 2,
+          memory: "4Gi",
+          ...(this.preferredHost ? { preferredHost: this.preferredHost } : {}),
+        });
+
+        const sandbox = await this.waitForSandbox(sandboxName, task.id);
+        this.assertSandboxOnLocalHost(sandbox, task.id);
+        this.emit("sandbox.started", task.id, "Devbox microVM is running", {
+          sandboxName,
+          vmId: sandbox.status?.vmId,
+          host: sandbox.status?.host,
+          runtime: runtimeImage,
+          sessionActive: true,
+        });
+
+        runtimeBaseUrl = sandbox.status?.runtimeURL?.replace(/\/$/, "");
+        if (!runtimeBaseUrl) {
+          throw new Error(
+            "Sandbox is running but orchestrator did not publish a runtimeURL. Check firecracker-host and orchestrator sync.",
+          );
+        }
+        guestHost = new URL(runtimeBaseUrl).hostname;
+        runtime = new RuntimeClient({ baseUrl: runtimeBaseUrl });
+        this.emit(
+          "runtime.waiting",
+          task.id,
+          "Waiting for runtime supervisor health check",
+          {
+            runtimeURL: runtimeBaseUrl,
+          },
+        );
+        await this.waitForRuntime(runtime, task.id, runtimeBaseUrl);
+        await this.ensureSandboxDns(runtime, task.id);
+        this.emit("runtime.ready", task.id, "Runtime supervisor is ready", {
+          runtimeURL: runtimeBaseUrl,
         });
       }
 
+      if (!runtime || !runtimeBaseUrl || !sandboxName) {
+        throw new Error("devbox session is not available");
+      }
+
+      if (!resumeSession) {
+        repoCwd = "repo";
+        repository = job.repository ?? task.repository;
+        cloneUrl = job.cloneUrl;
+        githubToken = job.githubToken;
+        createdNewRepo =
+          Boolean(job.greenfieldPushed) ||
+          (usesRuntimeAgent(task.agent) &&
+            Boolean(job.createRepository || job.autoCreateRepository));
+        let repoHydratedLocally = false;
+
+        if (githubToken) {
+          try {
+            gitOwner = await fetchGitHubUserIdentity(githubToken);
+          } catch {
+            // commits still work with bot co-author trailer if identity lookup fails
+          }
+        }
+
+        if (!repository && (job.createRepository || job.autoCreateRepository)) {
+          throw new Error(
+            "Repository was not provisioned before sandbox execution",
+          );
+        }
+
+        if (
+          repository &&
+          githubToken &&
+          !cloneUrl &&
+          (job.autoCreateRepository || job.createRepository)
+        ) {
+          cloneUrl = authenticatedCloneUrl(githubToken, repository);
+          job.cloneUrl = cloneUrl;
+          job.repository = repository;
+          task.repository = repository;
+          createdNewRepo = true;
+        }
+
+        if (cloneUrl && repository) {
+          await this.ensureSandboxDns(runtime, task.id);
+
+          if (job.greenfieldPushed && job.draftPlan) {
+            this.emit(
+              "agent.log",
+              task.id,
+              "Using local scaffold hydration for greenfield repo (skipping git clone)",
+              { repository, fallback: "hydrate" },
+            );
+            await this.hydrateGreenfieldInSandbox(
+              runtime,
+              task,
+              job,
+              repoCwd,
+              gitOwner,
+              cloneUrl,
+              githubToken,
+            );
+            repoHydratedLocally = true;
+          } else {
+            try {
+              await this.cloneRepositoryInSandbox(
+                runtime,
+                task.id,
+                cloneUrl,
+                repoCwd,
+                repository,
+              );
+            } catch (error) {
+              if (job.draftPlan && isNetworkCloneFailure(error)) {
+                this.emit(
+                  "agent.log",
+                  task.id,
+                  "Git clone failed in sandbox; hydrating from draft scaffold",
+                  { repository, fallback: "hydrate" },
+                );
+                await this.hydrateGreenfieldInSandbox(
+                  runtime,
+                  task,
+                  job,
+                  repoCwd,
+                  gitOwner,
+                  cloneUrl,
+                  githubToken,
+                );
+                repoHydratedLocally = true;
+              } else {
+                throw error;
+              }
+            }
+          }
+          if (!repoHydratedLocally) {
+            await this.configureSandboxGit(runtime, task.id, gitOwner, {
+              repoCwd,
+              cloneUrl,
+              githubToken,
+            });
+          }
+          if (!job.greenfieldPushed && createdNewRepo) {
+            const bot = resolveBotAuthor();
+            try {
+              await bootstrapGreenfieldProject({
+                runtime,
+                taskId: task.id,
+                repoCwd,
+                prompt: task.prompt,
+                title: task.title ?? "project",
+                botName: bot.name,
+                botEmail: bot.email,
+                canPush: Boolean(job.permissions?.canPush),
+                githubToken,
+                cloneUrl,
+                emit: (type, message, data) =>
+                  this.emitRuntime(
+                    task.id,
+                    type as TaskEventType,
+                    message,
+                    data,
+                  ),
+              });
+            } catch (error) {
+              const message =
+                error instanceof Error ? error.message : "Bootstrap failed";
+              this.emit("git.commit", task.id, `Bootstrap failed: ${message}`, {
+                error: message,
+                bootstrap: true,
+              });
+              throw error;
+            }
+          }
+        } else if (githubToken) {
+          await this.configureSandboxGit(runtime, task.id, gitOwner, {
+            githubToken,
+          });
+        }
+      }
+
+      if (!gitOwner && githubToken) {
+        try {
+          gitOwner = await fetchGitHubUserIdentity(githubToken);
+        } catch {
+          // optional for follow-up prompts
+        }
+      }
+
+      const agentPrompt = buildAgentPrompt(
+        job.prompt,
+        repository,
+        repoCwd,
+        gitOwner,
+      );
+      const repoReadyInSandbox = Boolean(repository && cloneUrl);
+
       const isTemplateGreenfield =
         task.agent === "mock" && Boolean(job.greenfieldPushed);
+      const runtimeAgentTask = usesRuntimeAgent(task.agent);
 
       const stopAutoCommit =
         repository && cloneUrl && !isTemplateGreenfield
@@ -640,6 +994,73 @@ export class TaskService {
         throw new Error(runResult.message);
       }
 
+      if (
+        runtimeAgentTask &&
+        repository &&
+        cloneUrl &&
+        runtime &&
+        sandboxName &&
+        runtimeBaseUrl &&
+        job.requireReviewBeforePush === true
+      ) {
+        const diffStat = await runtime.terminalAllowFailure({
+          taskId: task.id,
+          cwd: repoCwd,
+          command: "git diff --stat && git diff --cached --stat",
+          env: this.gitRuntimeEnv(githubToken),
+        });
+
+        this.reviewSessions.set(task.id, {
+          runtime,
+          sandboxName,
+          runtimeBaseUrl,
+          repoCwd,
+          job,
+          githubToken,
+          createdNewRepo,
+          guestHost,
+        });
+        void this.persistSession(
+          task.id,
+          this.reviewSessions.get(task.id)!,
+          "review",
+        );
+
+        pausedForReview = true;
+        retainSandboxForPreview = true;
+        task.sessionActive = true;
+        this.updateTask(
+          task.id,
+          "awaiting_review",
+          "Review agent changes, then commit or open a PR",
+        );
+        this.emit(
+          "task.phase_changed",
+          task.id,
+          "Agent work ready for review",
+          {
+            phase: "awaiting_review",
+            awaitingReview: true,
+            diff: diffStat.stdout.trim() || undefined,
+            agent: task.agent,
+            sessionActive: true,
+          },
+        );
+        if (diffStat.stdout.trim()) {
+          this.emit(
+            "git.commit",
+            task.id,
+            "Uncommitted agent changes in devbox",
+            {
+              auto: false,
+              awaitingReview: true,
+              diff: diffStat.stdout.trim(),
+            },
+          );
+        }
+        return;
+      }
+
       if (repository && cloneUrl) {
         if (job.testCommand) {
           await this.runTests(runtime, task, job.testCommand, repoCwd);
@@ -648,6 +1069,7 @@ export class TaskService {
         if (job.permissions) {
           await this.finalizeGitWork(runtime, task, job, repoCwd, githubToken, {
             greenfield: createdNewRepo,
+            createPullRequest: true,
           });
         }
 
@@ -690,7 +1112,34 @@ export class TaskService {
         branch: task.branch,
         previewUrl: task.previewUrl,
         pushedToGitHub: Boolean(repository && cloneUrl),
+        sessionActive: usesRuntimeAgent(task.agent),
       });
+
+      if (
+        usesRuntimeAgent(task.agent) &&
+        runtime &&
+        sandboxName &&
+        runtimeBaseUrl
+      ) {
+        this.activeSessions.set(task.id, {
+          runtime,
+          sandboxName,
+          runtimeBaseUrl,
+          repoCwd,
+          job,
+          githubToken,
+          createdNewRepo,
+          guestHost,
+        });
+        void this.persistSession(
+          task.id,
+          this.activeSessions.get(task.id)!,
+          "active",
+        );
+        void this.taskStore.touchSession(task.id);
+        task.sessionActive = true;
+        retainSandboxForPreview = true;
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : "Task failed";
       if (repository && cloneUrl && job.permissions?.canPush && runtime) {
@@ -718,10 +1167,108 @@ export class TaskService {
       throw error;
     } finally {
       this.processingTasks.delete(job.taskId);
-      if (sandboxName && !retainSandboxForPreview) {
+      if (
+        sandboxName &&
+        !retainSandboxForPreview &&
+        !pausedForReview &&
+        !this.activeSessions.has(job.taskId) &&
+        !this.reviewSessions.has(job.taskId)
+      ) {
         await this.deleteSandbox(sandboxName);
       }
     }
+  }
+
+  private async finalizeReviewedTask(
+    taskId: string,
+    opts: { createPullRequest: boolean },
+  ): Promise<Task> {
+    const task = this.tasks.get(taskId);
+    const session = this.reviewSessions.get(taskId);
+    if (!task || !session) {
+      throw new Error("task is not awaiting review");
+    }
+    if (task.status !== "awaiting_review") {
+      throw new Error("task is not awaiting review");
+    }
+
+    const {
+      runtime,
+      sandboxName,
+      repoCwd,
+      job,
+      githubToken,
+      createdNewRepo,
+      guestHost,
+    } = session;
+
+    try {
+      if (job.testCommand) {
+        await this.runTests(runtime, task, job.testCommand, repoCwd);
+      }
+
+      if (job.permissions && job.repository) {
+        await this.finalizeGitWork(runtime, task, job, repoCwd, githubToken, {
+          greenfield: createdNewRepo,
+          createPullRequest: opts.createPullRequest,
+        });
+      }
+
+      if (guestHost) {
+        const preview = await deployProductionPreview({
+          runtime,
+          taskId: task.id,
+          repoCwd,
+          guestHost,
+          emit: (type, message, data) =>
+            this.emit(type, task.id, message, data),
+        });
+        if (preview) {
+          this.patchTask(task.id, {
+            previewUrl: preview.previewUrl,
+            deployStatus: "live",
+          });
+        }
+      }
+
+      if (
+        job.issueTitle &&
+        job.permissions?.canCreateIssue &&
+        githubToken &&
+        job.repository
+      ) {
+        await this.createTaskIssue(task, job.repository, githubToken, job);
+      }
+
+      const completionMessage = opts.createPullRequest
+        ? task.prUrl
+          ? "Changes pushed and pull request opened"
+          : "Changes pushed to GitHub"
+        : task.previewUrl
+          ? "Changes committed — preview deployed"
+          : "Changes committed and pushed to GitHub";
+
+      this.updateTask(task.id, "completed", completionMessage);
+      this.emit("task.completed", task.id, completionMessage, {
+        agent: task.agent,
+        prUrl: task.prUrl,
+        branch: task.branch,
+        previewUrl: task.previewUrl,
+        pushedToGitHub: Boolean(job.repository && job.cloneUrl),
+        userApproved: true,
+        createPullRequest: opts.createPullRequest,
+      });
+    } finally {
+      this.reviewSessions.delete(taskId);
+      this.activeSessions.delete(taskId);
+      await this.taskStore.deleteSession(taskId);
+      await this.deleteSandbox(sandboxName);
+      task.sessionActive = false;
+      task.sessionSleeping = false;
+      void this.taskStore.upsertTask(task);
+    }
+
+    return task;
   }
 
   private validateGreenfieldDraftSecrets(job: ScheduleJob): void {
@@ -902,6 +1449,91 @@ export class TaskService {
       phase: "draft_ready",
       repository,
       scaffoldPushed: true,
+    });
+  }
+
+  private async provisionGreenfieldRepositoryShell(
+    task: Task,
+    job: ScheduleJob,
+  ): Promise<void> {
+    if (job.repository && job.cloneUrl) {
+      return;
+    }
+
+    if (!job.createRepository && !job.autoCreateRepository) {
+      return;
+    }
+
+    const githubToken = job.githubToken;
+    if (!githubToken) {
+      throw new Error("GitHub token is required for repository creation");
+    }
+    if (!job.permissions?.canCreateRepo) {
+      throw new Error("repository creation is not permitted");
+    }
+
+    const metadata = generateProjectMetadata(task.prompt);
+    task.title = metadata.title;
+
+    const created = await createGitHubRepositoryUnique(githubToken, {
+      description: metadata.description,
+      preferredName: job.createRepository?.trim() || undefined,
+    });
+
+    const repository = created.fullName;
+    const cloneUrl = authenticatedCloneUrl(githubToken, repository);
+    job.repository = repository;
+    job.cloneUrl = cloneUrl;
+    task.repository = repository;
+
+    this.emit("git.repo", task.id, `Created repository ${repository}`, {
+      repository,
+      htmlUrl: created.htmlUrl,
+      repoName: created.name,
+      runtimeAgent: true,
+    });
+
+    if (!job.permissions?.canPush) {
+      return;
+    }
+
+    const [owner, repo] = repository.split("/");
+    if (!owner || !repo) {
+      throw new Error(`invalid repository name: ${repository}`);
+    }
+
+    const readme = `# ${metadata.title}\n\n${metadata.description}\n\n_Implementation will be generated by the runtime agent in the sandbox._\n`;
+    const commitMessage = buildCommitMessage(
+      `devin: initialize ${task.title ?? metadata.title}`,
+    );
+
+    this.emit(
+      "git.commit",
+      task.id,
+      "Creating empty repository shell on GitHub",
+      {
+        repository,
+        controlPlane: true,
+        runtimeAgent: true,
+      },
+    );
+
+    await createGitHubInitialCommit(
+      githubToken,
+      owner,
+      repo,
+      [{ path: "README.md", content: readme }],
+      commitMessage,
+      created.defaultBranch,
+    );
+
+    this.pendingJobs.set(task.id, job);
+
+    this.emit("git.push", task.id, "Repository shell pushed to GitHub", {
+      repository,
+      branch: created.defaultBranch,
+      controlPlane: true,
+      runtimeAgent: true,
     });
   }
 
@@ -1355,13 +1987,14 @@ export class TaskService {
     job: ScheduleJob,
     repoCwd: string,
     githubToken?: string,
-    opts?: { greenfield?: boolean },
+    opts?: { greenfield?: boolean; createPullRequest?: boolean },
   ): Promise<void> {
     const permissions = job.permissions;
     if (!permissions || !job.repository) {
       return;
     }
 
+    const createPullRequest = opts?.createPullRequest ?? true;
     const gitEnv = this.gitRuntimeEnv(githubToken);
 
     const status = await runtime.terminal({
@@ -1371,65 +2004,17 @@ export class TaskService {
       env: gitEnv,
     });
 
-    if (opts?.greenfield) {
-      const branchName = "main";
-      task.branch = branchName;
-
-      if (status.stdout.trim() && permissions.canCommit) {
-        await runtime.gitCommit({
-          taskId: task.id,
-          message: buildCommitMessage(
-            `devin: ${task.title ?? "agent changes"}`,
-          ),
-          paths: ["."],
-          cwd: repoCwd,
-          env: gitEnv,
-        });
-        this.emit("git.commit", task.id, "Committed final agent changes", {
-          auto: true,
-        });
-      }
-
-      if (!permissions.canPush) {
-        return;
-      }
-
-      await this.ensureGitPushAuth(
-        runtime,
-        task.id,
-        repoCwd,
-        githubToken,
-        job.cloneUrl,
-      );
-
-      const pushResult = await runtime.gitPush({
-        taskId: task.id,
-        branch: branchName,
-        cwd: repoCwd,
-        env: gitEnv,
-      });
-
-      if (pushResult.status === "completed") {
-        this.emit("git.push", task.id, `Pushed branch ${branchName}`, {
-          branch: branchName,
-        });
-      } else {
-        this.emit("git.push", task.id, "Push skipped or failed", {
-          branch: branchName,
-        });
-      }
-      return;
-    }
-
-    const branchName = `devin/${task.id.slice(0, 8)}`;
+    const useMainBranch =
+      opts?.greenfield === true && createPullRequest === false;
+    const branchName = useMainBranch ? "main" : `devin/${task.id.slice(0, 8)}`;
     task.branch = branchName;
 
     if (!status.stdout.trim()) {
       return;
     }
 
-    if (permissions.canPush) {
-      await runtime.terminal({
+    if (!useMainBranch && permissions.canPush) {
+      await runtime.terminalAllowFailure({
         taskId: task.id,
         command: `git checkout -b ${branchName}`,
         cwd: repoCwd,
@@ -1444,6 +2029,10 @@ export class TaskService {
         paths: ["."],
         cwd: repoCwd,
         env: gitEnv,
+      });
+      this.emit("git.commit", task.id, "Committed agent changes", {
+        auto: !createPullRequest,
+        userApproved: true,
       });
     }
 
@@ -1475,9 +2064,10 @@ export class TaskService {
 
     this.emit("git.push", task.id, `Pushed branch ${branchName}`, {
       branch: branchName,
+      userApproved: true,
     });
 
-    if (!permissions.canCreatePr || !job.githubToken) {
+    if (!createPullRequest || !permissions.canCreatePr || !job.githubToken) {
       return;
     }
 
@@ -1502,6 +2092,7 @@ export class TaskService {
       this.emit("git.pr", task.id, `Opened pull request #${pr.number}`, {
         prUrl: pr.html_url,
         number: pr.number,
+        userApproved: true,
       });
     } catch (error) {
       const message =
@@ -2026,6 +2617,15 @@ export class TaskService {
         if (phase === "Running") {
           return sandbox;
         }
+        if (phase === "Suspended") {
+          await sleep(500);
+          continue;
+        }
+        if (phase === "Waking") {
+          lastPhase = phase;
+          await sleep(500);
+          continue;
+        }
         if (phase === "Failed") {
           const failureMessage = lastMessage
             ? `sandbox ${sandboxName} failed: ${lastMessage}`
@@ -2106,12 +2706,22 @@ export class TaskService {
     task.status = status;
     task.message = message;
     task.updatedAt = new Date().toISOString();
+    void this.taskStore.upsertTask(task);
   }
 
   private patchTask(
     taskId: string,
     patch: Partial<
-      Pick<Task, "previewUrl" | "deployStatus" | "branch" | "prUrl">
+      Pick<
+        Task,
+        | "previewUrl"
+        | "deployStatus"
+        | "branch"
+        | "prUrl"
+        | "sessionActive"
+        | "sessionSleeping"
+        | "sandboxName"
+      >
     >,
   ): void {
     const task = this.tasks.get(taskId);
@@ -2120,6 +2730,7 @@ export class TaskService {
     }
     Object.assign(task, patch);
     task.updatedAt = new Date().toISOString();
+    void this.taskStore.upsertTask(task);
   }
 
   private emit(
@@ -2157,7 +2768,7 @@ export class TaskService {
     data?: Record<string, unknown>,
   ): void {
     const sequence = this.nextEventSequence(taskId);
-    this.eventBus.publish({
+    const event: TaskEvent = {
       id: crypto.randomUUID(),
       taskId,
       type,
@@ -2168,7 +2779,9 @@ export class TaskService {
         sequence,
         ...(data ?? {}),
       },
-    });
+    };
+    this.eventBus.publish(event);
+    void this.taskStore.appendEvent(event, sequence);
   }
 
   private emitRuntime(
@@ -2178,7 +2791,7 @@ export class TaskService {
     data?: Record<string, unknown>,
   ): void {
     const sequence = this.nextEventSequence(taskId);
-    this.eventBus.publish({
+    const event: TaskEvent = {
       id: crypto.randomUUID(),
       taskId,
       type,
@@ -2189,7 +2802,9 @@ export class TaskService {
         sequence,
         ...(data ?? {}),
       },
-    });
+    };
+    this.eventBus.publish(event);
+    void this.taskStore.appendEvent(event, sequence);
   }
 
   private nextEventSequence(taskId: string): number {
@@ -2197,6 +2812,256 @@ export class TaskService {
     this.eventSequences.set(taskId, next);
     return next;
   }
+
+  private async restoreFromStore(): Promise<void> {
+    const sequences = await this.taskStore.restoreEventSequences();
+    for (const [taskId, seq] of sequences) {
+      this.eventSequences.set(taskId, seq);
+    }
+
+    const tasks = await this.taskStore.listTasks();
+    for (const task of tasks) {
+      this.tasks.set(task.id, task);
+      const events = await this.taskStore.loadEvents(task.id);
+      for (const event of events) {
+        this.eventBus.publish(event);
+      }
+    }
+
+    const sessions = await this.taskStore.loadActiveSessions();
+    for (const persisted of sessions) {
+      if (persisted.state === "sleeping") {
+        continue;
+      }
+      const task = this.tasks.get(persisted.taskId);
+      if (!task) {
+        continue;
+      }
+      const runtime = new RuntimeClient(persisted.runtimeBaseUrl);
+      try {
+        const health = await runtime.health();
+        if (health.status !== "ok") {
+          task.sessionActive = false;
+          continue;
+        }
+      } catch {
+        task.sessionActive = false;
+        continue;
+      }
+
+      const session: ReviewSession = {
+        runtime,
+        sandboxName: persisted.sandboxName,
+        runtimeBaseUrl: persisted.runtimeBaseUrl,
+        repoCwd: persisted.repoCwd,
+        job: persisted.job,
+        githubToken: persisted.githubToken,
+        createdNewRepo: persisted.createdNewRepo,
+        guestHost: persisted.guestHost,
+      };
+
+      if (persisted.state === "review") {
+        this.reviewSessions.set(persisted.taskId, session);
+      } else {
+        this.activeSessions.set(persisted.taskId, session);
+      }
+      this.pendingJobs.set(persisted.taskId, persisted.job);
+      task.sessionActive = true;
+      task.sandboxName = persisted.sandboxName;
+    }
+  }
+
+  private async persistSession(
+    taskId: string,
+    session: ReviewSession,
+    state: PersistedSession["state"],
+  ): Promise<void> {
+    await this.taskStore.upsertSession({
+      taskId,
+      sandboxName: session.sandboxName,
+      runtimeBaseUrl: session.runtimeBaseUrl,
+      repoCwd: session.repoCwd,
+      state,
+      job: session.job,
+      githubToken: session.githubToken,
+      createdNewRepo: session.createdNewRepo,
+      guestHost: session.guestHost,
+      lastActiveAt: new Date().toISOString(),
+    });
+  }
+
+  private startIdleWatchdog(): void {
+    if (this.idleWatchdog || this.mode === "brain") {
+      return;
+    }
+
+    this.idleWatchdog = setInterval(() => {
+      void this.runIdleWatchdog();
+    }, 60_000);
+  }
+
+  private async runIdleWatchdog(): Promise<void> {
+    const cutoff = Date.now() - this.idleTimeoutMs;
+    for (const [taskId, session] of this.activeSessions) {
+      const persisted = await this.taskStore.getSession(taskId);
+      const lastActive = persisted
+        ? new Date(persisted.lastActiveAt).getTime()
+        : Date.now();
+      if (lastActive >= cutoff) {
+        continue;
+      }
+      await this.sleepIdleSession(taskId, session);
+    }
+  }
+
+  private async sleepIdleSession(
+    taskId: string,
+    session: ReviewSession,
+  ): Promise<void> {
+    if (this.processingTasks.has(taskId)) {
+      return;
+    }
+
+    await this.suspendSandbox(session.sandboxName);
+    this.activeSessions.delete(taskId);
+    await this.taskStore.markSessionSleeping(taskId);
+
+    const task = this.tasks.get(taskId);
+    if (task) {
+      task.sessionActive = false;
+      task.sessionSleeping = true;
+      await this.taskStore.upsertTask(task);
+    }
+
+    this.emit("task.phase_changed", taskId, "Devbox idle — session sleeping", {
+      phase: "sleeping",
+      sessionActive: false,
+      sessionSleeping: true,
+      sandboxName: session.sandboxName,
+    });
+  }
+
+  private async suspendSandbox(sandboxName: string): Promise<void> {
+    try {
+      await fetch(
+        `${this.orchestratorUrl}/internal/v1/sandboxes/${encodeURIComponent(sandboxName)}/suspend`,
+        { method: "POST" },
+      );
+    } catch {
+      // best-effort soft sleep
+    }
+  }
+
+  private async wakeSandbox(sandboxName: string): Promise<void> {
+    const response = await fetch(
+      `${this.orchestratorUrl}/internal/v1/sandboxes/${encodeURIComponent(sandboxName)}/wake`,
+      { method: "POST" },
+    );
+    if (!response.ok) {
+      throw new Error(`failed to wake sandbox ${sandboxName}`);
+    }
+  }
+
+  private async resolveRuntimeUrl(sandboxName: string): Promise<string> {
+    const sandbox = await this.waitForSandbox(sandboxName, "wake");
+    const runtimeURL = sandbox.status?.runtimeURL?.trim();
+    if (!runtimeURL) {
+      throw new Error(`sandbox ${sandboxName} has no runtime URL after wake`);
+    }
+    return runtimeURL.replace(/\/$/, "");
+  }
+
+  private async delegateJobToWorker(job: ScheduleJob): Promise<void> {
+    if (!this.executionWorkerUrl) {
+      throw new Error(
+        "EXECUTION_WORKER_URL is required when SERVICE_MODE=brain",
+      );
+    }
+
+    const response = await fetch(
+      `${this.executionWorkerUrl.replace(/\/$/, "")}/internal/v1/jobs`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(job),
+      },
+    );
+
+    if (!response.ok) {
+      const body = (await response.json().catch(() => ({}))) as {
+        error?: string;
+      };
+      throw new Error(
+        body.error ?? `worker rejected job: HTTP ${response.status}`,
+      );
+    }
+  }
+
+  async proxyRuntimeRequest(
+    taskId: string,
+    path: string,
+    init?: RequestInit,
+  ): Promise<Response> {
+    if (this.mode === "brain") {
+      const workerPath = path.startsWith("/terminal")
+        ? `/api/v1/tasks/${encodeURIComponent(taskId)}/terminal`
+        : path.startsWith("/files/list")
+          ? `/api/v1/tasks/${encodeURIComponent(taskId)}/files?${path.split("?")[1] ?? ""}`
+          : path.startsWith("/files/read")
+            ? `/api/v1/tasks/${encodeURIComponent(taskId)}/files/read?${path.split("?")[1] ?? ""}`
+            : `/api/v1/tasks/${encodeURIComponent(taskId)}/runtime-proxy?path=${encodeURIComponent(path)}`;
+
+      if (path.startsWith("/terminal/stream")) {
+        return this.delegateRequestToWorker(workerPath, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            ...(init?.headers ?? {}),
+          },
+          body: init?.body,
+        });
+      }
+      if (path.startsWith("/files/list") || path.startsWith("/files/read")) {
+        return this.delegateRequestToWorker(workerPath, { method: "GET" });
+      }
+    }
+
+    const session =
+      this.activeSessions.get(taskId) ??
+      this.reviewSessions.get(taskId) ??
+      (await this.wakeSession(taskId));
+
+    if (!session) {
+      const persisted = await this.taskStore.getSession(taskId);
+      if (!persisted) {
+        throw new Error("no devbox session for task");
+      }
+      const runtimeBaseUrl = persisted.runtimeBaseUrl;
+      return fetch(`${runtimeBaseUrl}${path}`, init);
+    }
+
+    return fetch(`${session.runtimeBaseUrl}${path}`, init);
+  }
+
+  private async delegateRequestToWorker(
+    path: string,
+    init?: RequestInit,
+  ): Promise<Response> {
+    if (!this.executionWorkerUrl) {
+      throw new Error(
+        "EXECUTION_WORKER_URL is required when SERVICE_MODE=brain",
+      );
+    }
+    return fetch(`${this.executionWorkerUrl.replace(/\/$/, "")}${path}`, init);
+  }
+}
+
+function resolveServiceMode(): ServiceMode {
+  const raw = process.env.SERVICE_MODE?.trim().toLowerCase();
+  if (raw === "brain" || raw === "worker" || raw === "standalone") {
+    return raw;
+  }
+  return "standalone";
 }
 
 function runtimeForAgent(agent: AgentProvider): string {

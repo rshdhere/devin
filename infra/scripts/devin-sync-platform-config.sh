@@ -125,7 +125,7 @@ sync_scheduler_host_pinning || true
 mkdir -p /etc/systemd/system/devin-scheduler.service.d /etc/devin
 umask 077
 {
-  echo "DEFAULT_AGENT=mock"
+  echo "DEFAULT_AGENT=cursor"
   if [[ -n "$HOST_NAME" ]]; then
     echo "SCHEDULER_HOST_NAME=$HOST_NAME"
     echo "FIRECRACKER_HOST_NAME=$HOST_NAME"

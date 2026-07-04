@@ -16,6 +16,7 @@ const defaultSettings = {
   githubCanCreateRepo: true,
   githubCanCreateIssue: true,
   githubCanPush: true,
+  requireReviewBeforePush: false,
 } as const;
 
 async function getOrCreateSettings(userId: string) {
@@ -40,6 +41,7 @@ async function getOrCreateSettings(userId: string) {
       githubCanCreateRepo: defaultSettings.githubCanCreateRepo,
       githubCanCreateIssue: defaultSettings.githubCanCreateIssue,
       githubCanPush: defaultSettings.githubCanPush,
+      requireReviewBeforePush: defaultSettings.requireReviewBeforePush,
     })
     .returning();
 
@@ -60,6 +62,7 @@ function serializeSettings(
       canCreateIssue: settings.githubCanCreateIssue,
       canPush: settings.githubCanPush,
     },
+    requireReviewBeforePush: settings.requireReviewBeforePush,
   };
 }
 
@@ -132,6 +135,9 @@ export async function updateDashboardSettingsHandler(
   }
   if (parsed.data.githubCanPush !== undefined) {
     updateData.githubCanPush = parsed.data.githubCanPush;
+  }
+  if (parsed.data.requireReviewBeforePush !== undefined) {
+    updateData.requireReviewBeforePush = parsed.data.requireReviewBeforePush;
   }
 
   const [updated] = await db

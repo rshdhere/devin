@@ -50,7 +50,7 @@ export function AgentCapabilitiesPanel({
           setAnthropicConfigured(
             diagnostics.agent?.anthropicApiKeyConfigured ?? false,
           );
-          setDefaultAgent(diagnostics.agent?.defaultAgent ?? "mock");
+          setDefaultAgent(diagnostics.agent?.defaultAgent ?? "cursor");
         }
       })
       .catch(() => {

@@ -17,4 +17,5 @@ type SandboxStore interface {
 	Get(ctx context.Context, name string) (*devinv1.Sandbox, error)
 	List(ctx context.Context) ([]devinv1.Sandbox, error)
 	Delete(ctx context.Context, name string) error
+	UpdateStatus(ctx context.Context, sandbox *devinv1.Sandbox) error
 }

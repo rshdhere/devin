@@ -14,6 +14,8 @@ const (
 	SandboxPhaseFailed       SandboxPhase = "Failed"
 	SandboxPhaseTerminating  SandboxPhase = "Terminating"
 	SandboxPhaseTerminated   SandboxPhase = "Terminated"
+	SandboxPhaseSuspended    SandboxPhase = "Suspended"
+	SandboxPhaseWaking       SandboxPhase = "Waking"
 )
 
 type SandboxSpec struct {

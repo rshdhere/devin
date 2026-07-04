@@ -53,6 +53,7 @@ export const dashboardSettingsSchema = {
     githubCanCreateRepo: z.boolean().optional(),
     githubCanCreateIssue: z.boolean().optional(),
     githubCanPush: z.boolean().optional(),
+    requireReviewBeforePush: z.boolean().optional(),
   }),
 };
 

@@ -13,6 +13,7 @@ export interface DashboardSettings {
   selectedRepository: string | null;
   environment: string;
   githubPermissions: GitHubPermissions;
+  requireReviewBeforePush: boolean;
 }
 
 export const defaultDashboardSettings: DashboardSettings = {
@@ -26,6 +27,7 @@ export const defaultDashboardSettings: DashboardSettings = {
     canCreateIssue: true,
     canPush: true,
   },
+  requireReviewBeforePush: false,
 };
 
 const settingsUrl = `${authConfig.baseURL}/api/v1/settings/dashboard`;
@@ -64,6 +66,7 @@ export async function updateDashboardSettings(
     githubCanCreateRepo?: boolean;
     githubCanCreateIssue?: boolean;
     githubCanPush?: boolean;
+    requireReviewBeforePush?: boolean;
   },
 ) {
   const payload: Record<string, unknown> = {};
@@ -97,6 +100,9 @@ export async function updateDashboardSettings(
   }
   if (data.githubCanPush !== undefined) {
     payload.githubCanPush = data.githubCanPush;
+  }
+  if (data.requireReviewBeforePush !== undefined) {
+    payload.requireReviewBeforePush = data.requireReviewBeforePush;
   }
 
   const response = await fetch(settingsUrl, {

@@ -37,6 +37,10 @@ import {
   formatEventData,
   executeTask,
   retryTask,
+  commitTaskWork,
+  raiseTaskPullRequest,
+  continueTask,
+  terminateSession,
   subscribeToTaskEvents,
   taskStatusLabel,
   type InfraDiagnostics,
@@ -45,6 +49,7 @@ import {
   type TaskEvent,
 } from "@/lib/tasks-api";
 import { cn } from "@/lib/utils";
+import { DevboxWorkspace } from "@/components/dashboard/devbox-workspace";
 
 interface SessionDetailProps {
   task: Task;
@@ -200,21 +205,49 @@ function LiveWorkPanel({ task, events }: { task: Task; events: TaskEvent[] }) {
   const draftEvents = events.filter((event) => event.type.startsWith("draft."));
   const stepEvents = events.filter((event) => event.type === "draft.updated");
   const fileEvents = events.filter((event) => event.type === "draft.diff");
+  const agentLogEvents = events.filter(
+    (event) =>
+      event.type === "agent.log" ||
+      event.type === "agent.tool" ||
+      event.type === "agent.started" ||
+      event.type === "agent.completed",
+  );
   const latestDraft = draftEvents[draftEvents.length - 1];
   const draftSummary = events.find((event) => event.type === "draft.completed")
     ?.data?.summary;
+  const runtimeAgent = task.agent === "cursor" || task.agent === "claude";
+  const reviewDiff = events.find((event) => event.data?.awaitingReview === true)
+    ?.data?.diff;
 
   if (
     draftEvents.length === 0 &&
+    agentLogEvents.length === 0 &&
     task.status !== "drafting" &&
-    task.status !== "draft_ready"
+    task.status !== "draft_ready" &&
+    task.status !== "running" &&
+    task.status !== "awaiting_review"
   ) {
     return null;
   }
 
-  const defaultExpanded = ["drafting", "draft_ready", "scheduling"].includes(
-    task.status,
-  );
+  const defaultExpanded = [
+    "drafting",
+    "draft_ready",
+    "scheduling",
+    "running",
+    "awaiting_review",
+  ].includes(task.status);
+
+  const summaryText = runtimeAgent
+    ? task.status === "awaiting_review"
+      ? "Agent finished in the sandbox — review output and activity below."
+      : String(
+          agentLogEvents[agentLogEvents.length - 1]?.message ??
+            "Runtime agent working in sandbox…",
+        )
+    : String(
+        draftSummary ?? latestDraft?.message ?? "Generating draft plan...",
+      );
 
   return (
     <CollapsiblePanel
@@ -224,11 +257,7 @@ function LiveWorkPanel({ task, events }: { task: Task; events: TaskEvent[] }) {
       defaultExpanded={defaultExpanded}
       className="border-indigo-500/30 bg-indigo-500/5"
     >
-      <p className="text-[12px] text-indigo-100/80">
-        {String(
-          draftSummary ?? latestDraft?.message ?? "Generating draft plan...",
-        )}
-      </p>
+      <p className="text-[12px] text-indigo-100/80">{summaryText}</p>
       {stepEvents.length > 0 ? (
         <div className="mt-2 space-y-1">
           {stepEvents.slice(-4).map((event) => (
@@ -250,6 +279,20 @@ function LiveWorkPanel({ task, events }: { task: Task; events: TaskEvent[] }) {
             </p>
           ))}
         </div>
+      ) : null}
+      {agentLogEvents.length > 0 ? (
+        <div className="mt-2 space-y-1 rounded-lg border border-indigo-500/20 bg-[#101326] px-3 py-2">
+          {agentLogEvents.slice(-6).map((event) => (
+            <p key={event.id} className="text-[11px] text-indigo-100/80">
+              • {event.message}
+            </p>
+          ))}
+        </div>
+      ) : null}
+      {reviewDiff ? (
+        <pre className="mt-2 overflow-x-auto rounded-lg border border-indigo-500/20 bg-[#101326] px-3 py-2 font-mono text-[11px] leading-relaxed text-indigo-100/80">
+          {String(reviewDiff)}
+        </pre>
       ) : null}
     </CollapsiblePanel>
   );
@@ -887,20 +930,27 @@ function PreviewDeployBanner({
 }
 
 function PhaseTimeline({ task, events }: { task: Task; events: TaskEvent[] }) {
+  const runtimeAgent = task.agent === "cursor" || task.agent === "claude";
   const draftCompleted = events.some(
     (event) => event.type === "draft.completed",
   );
   const draftDone =
+    runtimeAgent ||
     draftCompleted ||
     events.some((event) => event.type === "execution.started") ||
     events.some((event) => event.type.startsWith("sandbox."));
   const sandboxDone = events.some((event) => event.type === "sandbox.started");
   const executeDone =
     task.status === "completed" ||
-    events.some((event) => event.type === "task.completed");
+    task.status === "awaiting_review" ||
+    events.some((event) => event.type === "task.completed") ||
+    events.some((event) => event.data?.awaitingReview === true);
 
   const currentPhase = (() => {
-    if (["queued", "scheduling", "drafting"].includes(task.status)) {
+    if (
+      !runtimeAgent &&
+      ["queued", "scheduling", "drafting"].includes(task.status)
+    ) {
       return "draft";
     }
     if (
@@ -913,8 +963,12 @@ function PhaseTimeline({ task, events }: { task: Task; events: TaskEvent[] }) {
     ) {
       return "sandbox";
     }
-    if (task.status === "running" || task.status === "runtime_ready") {
-      return "execute";
+    if (
+      task.status === "running" ||
+      task.status === "runtime_ready" ||
+      task.status === "awaiting_review"
+    ) {
+      return task.status === "awaiting_review" ? "review" : "execute";
     }
     if (executeDone) {
       return "complete";
@@ -922,12 +976,23 @@ function PhaseTimeline({ task, events }: { task: Task; events: TaskEvent[] }) {
     return draftDone ? "sandbox" : "draft";
   })();
 
-  const phases = [
-    { id: "draft", label: "Draft plan", done: draftDone },
-    { id: "sandbox", label: "Sandbox", done: sandboxDone },
-    { id: "execute", label: "Execute", done: executeDone },
-    { id: "complete", label: "Done", done: executeDone },
-  ] as const;
+  const phases = runtimeAgent
+    ? ([
+        { id: "sandbox", label: "Sandbox", done: sandboxDone },
+        { id: "execute", label: "Execute", done: executeDone },
+        {
+          id: "review",
+          label: "Review",
+          done: task.status === "completed",
+        },
+        { id: "complete", label: "Done", done: task.status === "completed" },
+      ] as const)
+    : ([
+        { id: "draft", label: "Draft plan", done: draftDone },
+        { id: "sandbox", label: "Sandbox", done: sandboxDone },
+        { id: "execute", label: "Execute", done: executeDone },
+        { id: "complete", label: "Done", done: executeDone },
+      ] as const);
 
   return (
     <div className="mb-4 rounded-xl border border-[#2a2a2a] bg-[#111] px-4 py-3">
@@ -1055,6 +1120,11 @@ export function SessionDetail({
   const [diagnosticsError, setDiagnosticsError] = useState<string | null>(null);
   const [startingSandbox, setStartingSandbox] = useState(false);
   const [retryingTask, setRetryingTask] = useState(false);
+  const [committingWork, setCommittingWork] = useState(false);
+  const [raisingPr, setRaisingPr] = useState(false);
+  const [followUpPrompt, setFollowUpPrompt] = useState("");
+  const [continuingSession, setContinuingSession] = useState(false);
+  const [terminatingSession, setTerminatingSession] = useState(false);
   const feedRef = useRef<HTMLDivElement>(null);
 
   const isActive =
@@ -1070,6 +1140,10 @@ export function SessionDetail({
     task.status === "draft_ready" &&
     (task.message?.toLowerCase().includes("approve") ||
       events.some((event) => event.data?.awaitingApproval === true));
+
+  const awaitingReview =
+    task.status === "awaiting_review" ||
+    events.some((event) => event.data?.awaitingReview === true);
 
   const handleRetryTask = useCallback(async () => {
     setRetryingTask(true);
@@ -1100,6 +1174,82 @@ export function SessionDetail({
       );
     } finally {
       setStartingSandbox(false);
+    }
+  }, [refreshTasks, task.id]);
+
+  const handleCommitNow = useCallback(async () => {
+    setCommittingWork(true);
+    setStreamError(null);
+    try {
+      const updated = await commitTaskWork(task.id);
+      setTask(updated);
+      await refreshTasks();
+    } catch (error) {
+      setStreamError(
+        error instanceof Error ? error.message : "Failed to commit changes",
+      );
+    } finally {
+      setCommittingWork(false);
+    }
+  }, [refreshTasks, task.id]);
+
+  const handleRaisePr = useCallback(async () => {
+    setRaisingPr(true);
+    setStreamError(null);
+    try {
+      const updated = await raiseTaskPullRequest(task.id);
+      setTask(updated);
+      await refreshTasks();
+    } catch (error) {
+      setStreamError(
+        error instanceof Error ? error.message : "Failed to open pull request",
+      );
+    } finally {
+      setRaisingPr(false);
+    }
+  }, [refreshTasks, task.id]);
+
+  const sessionActive =
+    task.sessionActive === true ||
+    task.status === "awaiting_review" ||
+    (task.status === "completed" &&
+      (task.agent === "cursor" || task.agent === "claude"));
+
+  const handleContinueSession = useCallback(async () => {
+    const trimmed = followUpPrompt.trim();
+    if (!trimmed) {
+      return;
+    }
+    setContinuingSession(true);
+    setStreamError(null);
+    try {
+      const updated = await continueTask(task.id, trimmed);
+      setTask(updated);
+      setFollowUpPrompt("");
+      setEvents([]);
+      await refreshTasks();
+    } catch (error) {
+      setStreamError(
+        error instanceof Error ? error.message : "Failed to continue session",
+      );
+    } finally {
+      setContinuingSession(false);
+    }
+  }, [followUpPrompt, refreshTasks, task.id]);
+
+  const handleTerminateSession = useCallback(async () => {
+    setTerminatingSession(true);
+    setStreamError(null);
+    try {
+      const updated = await terminateSession(task.id);
+      setTask(updated);
+      await refreshTasks();
+    } catch (error) {
+      setStreamError(
+        error instanceof Error ? error.message : "Failed to end session",
+      );
+    } finally {
+      setTerminatingSession(false);
     }
   }, [refreshTasks, task.id]);
 
@@ -1363,10 +1513,101 @@ export function SessionDetail({
               ) : (
                 <Server className="size-3.5" />
               )}
-              Run in sandbox
+              Run in devbox
             </MotionButton>
           </div>
         ) : null}
+
+        {awaitingReview ? (
+          <div className="flex flex-col gap-3 rounded-xl border border-emerald-500/30 bg-emerald-500/5 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <p className="text-[13px] font-medium text-emerald-100">
+                Review changes
+              </p>
+              <p className="text-[12px] text-emerald-100/70">
+                Manual review is enabled for your account. Commit or open a PR
+                when you are satisfied with the devbox work.
+              </p>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <MotionButton
+                type="button"
+                onClick={() => void handleCommitNow()}
+                disabled={committingWork || raisingPr}
+                className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-emerald-400/40 bg-emerald-500/20 px-3 py-1.5 text-[12px] text-emerald-100 transition-colors hover:bg-emerald-500/30 disabled:opacity-60"
+              >
+                {committingWork ? (
+                  <Loader2 className="size-3.5 animate-spin" />
+                ) : (
+                  <GitCommit className="size-3.5" />
+                )}
+                Commit now
+              </MotionButton>
+              <MotionButton
+                type="button"
+                onClick={() => void handleRaisePr()}
+                disabled={committingWork || raisingPr}
+                className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-indigo-400/40 bg-indigo-500/20 px-3 py-1.5 text-[12px] text-indigo-100 transition-colors hover:bg-indigo-500/30 disabled:opacity-60"
+              >
+                {raisingPr ? (
+                  <Loader2 className="size-3.5 animate-spin" />
+                ) : (
+                  <GitPullRequest className="size-3.5" />
+                )}
+                Raise a PR
+              </MotionButton>
+            </div>
+          </div>
+        ) : null}
+
+        {sessionActive && !awaitingReview && task.status !== "running" ? (
+          <div className="space-y-3 rounded-xl border border-[#2a2a2a] bg-[#141414] px-4 py-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <p className="text-[13px] font-medium text-gray-200">
+                  Devbox session active
+                </p>
+                <p className="text-[12px] text-gray-500">
+                  Send a follow-up prompt in the same environment, use Shell /
+                  Files / Browser below, or end the session to tear down the
+                  microVM.
+                </p>
+              </div>
+              <MotionButton
+                type="button"
+                onClick={() => void handleTerminateSession()}
+                disabled={terminatingSession || continuingSession}
+                className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-[#333] bg-[#1a1a1a] px-3 py-1.5 text-[12px] text-gray-300 transition-colors hover:bg-[#222] disabled:opacity-60"
+              >
+                {terminatingSession ? (
+                  <Loader2 className="size-3.5 animate-spin" />
+                ) : null}
+                End session
+              </MotionButton>
+            </div>
+            <div className="flex gap-2">
+              <input
+                value={followUpPrompt}
+                onChange={(event) => setFollowUpPrompt(event.target.value)}
+                placeholder="Ask for a follow-up change in this devbox…"
+                className="min-w-0 flex-1 rounded-lg border border-[#333] bg-[#0d0d0d] px-3 py-2 text-[13px] text-gray-200 outline-none placeholder:text-gray-600 focus:border-[#444]"
+              />
+              <MotionButton
+                type="button"
+                onClick={() => void handleContinueSession()}
+                disabled={!followUpPrompt.trim() || continuingSession}
+                className="inline-flex shrink-0 cursor-pointer items-center gap-2 rounded-lg border border-indigo-400/40 bg-indigo-500/20 px-3 py-2 text-[12px] text-indigo-100 transition-colors hover:bg-indigo-500/30 disabled:opacity-60"
+              >
+                {continuingSession ? (
+                  <Loader2 className="size-3.5 animate-spin" />
+                ) : null}
+                Send follow-up
+              </MotionButton>
+            </div>
+          </div>
+        ) : null}
+
+        <DevboxWorkspace task={task} onTaskChange={setTask} />
 
         <LiveWorkPanel task={task} events={events} />
 
