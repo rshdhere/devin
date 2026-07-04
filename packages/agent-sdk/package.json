@@ -6,6 +6,9 @@
   "exports": {
     ".": "./src/index.ts"
   },
+  "dependencies": {
+    "undici": "^6.21.0"
+  },
   "peerDependencies": {
     "typescript": "^5"
   }

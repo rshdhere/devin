@@ -17,6 +17,12 @@ read_ssm() {
 }
 
 read_execution_host_name() {
+  local from_ssm
+  from_ssm="$(read_ssm "$SSM_PREFIX/scheduler_host_name")"
+  if [[ -n "$from_ssm" ]]; then
+    echo "$from_ssm"
+    return
+  fi
   if [[ -f /etc/devin/host-name ]]; then
     tr -d '[:space:]' </etc/devin/host-name
     return

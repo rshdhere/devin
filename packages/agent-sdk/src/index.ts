@@ -85,6 +85,28 @@ export interface RuntimeClientOptions {
 
 const DEFAULT_RUNTIME_FETCH_TIMEOUT_MS = 35 * 60 * 1000;
 
+/** Node's fetch uses undici with a 300s default headersTimeout — too short for blocking /terminal calls. */
+let runtimeFetchDispatcher: RequestInit["dispatcher"];
+
+async function resolveRuntimeFetchDispatcher(
+  timeoutMs: number,
+): Promise<RequestInit["dispatcher"]> {
+  if (runtimeFetchDispatcher) {
+    return runtimeFetchDispatcher;
+  }
+  try {
+    const undici = await import("undici");
+    runtimeFetchDispatcher = new undici.Agent({
+      headersTimeout: timeoutMs,
+      bodyTimeout: timeoutMs,
+      connectTimeout: 30_000,
+    }) as RequestInit["dispatcher"];
+    return runtimeFetchDispatcher;
+  } catch {
+    return undefined;
+  }
+}
+
 export class RuntimeClient {
   private readonly fetchTimeoutMs: number;
 
@@ -101,9 +123,11 @@ export class RuntimeClient {
     path: string,
     init?: RequestInit,
   ): Promise<Response> {
+    const dispatcher = await resolveRuntimeFetchDispatcher(this.fetchTimeoutMs);
     return fetch(this.base(path), {
       ...init,
       signal: AbortSignal.timeout(this.fetchTimeoutMs),
+      ...(dispatcher ? { dispatcher } : {}),
     });
   }
 

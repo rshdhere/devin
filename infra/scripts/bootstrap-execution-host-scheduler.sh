@@ -5,7 +5,12 @@ set -euo pipefail
 REGISTRY="${CONTAINER_REGISTRY:-docker.io/rshdhere}"
 TAG="${IMAGE_TAG:-latest}"
 ORCHESTRATOR_URL="${ORCHESTRATOR_URL:-http://REPLACE_WITH_ORCHESTRATOR_NLB:9090}"
-HOST_NAME="${HOST_NAME:-$(hostname)}"
+if [[ -z "${HOST_NAME:-}" && -f /etc/devin/host-name ]]; then
+  HOST_NAME="$(tr -d '[:space:]' </etc/devin/host-name)"
+fi
+HOST_NAME="${HOST_NAME:-devin-production-fc-01}"
+mkdir -p /etc/devin
+echo "$HOST_NAME" >/etc/devin/host-name
 
 if [[ "$ORCHESTRATOR_URL" == http://REPLACE_WITH_ORCHESTRATOR_NLB:* ]]; then
   echo "Set ORCHESTRATOR_URL to the internal NLB hostname (terraform output orchestrator_url)" >&2
@@ -33,6 +38,8 @@ ExecStart=/usr/bin/docker run --rm --name scheduler \\
   --network host \\
   -e SCHEDULER_PORT=9091 \\
   -e ORCHESTRATOR_URL=\${ORCHESTRATOR_URL} \\
+  -e SCHEDULER_HOST_NAME=${HOST_NAME} \\
+  -e FIRECRACKER_HOST_NAME=${HOST_NAME} \\
   -e FIRECRACKER_HOST_URL=http://127.0.0.1:9092 \\
   -e DEFAULT_AGENT=mock \\
   -e SANDBOX_READY_TIMEOUT_SECONDS=300 \\

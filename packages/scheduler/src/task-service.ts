@@ -558,8 +558,11 @@ export class TaskService {
         });
       }
 
+      const isTemplateGreenfield =
+        task.agent === "mock" && Boolean(job.greenfieldPushed);
+
       const stopAutoCommit =
-        repository && cloneUrl
+        repository && cloneUrl && !isTemplateGreenfield
           ? this.startAutoCommitWatcher(
               runtime,
               task,
@@ -572,9 +575,6 @@ export class TaskService {
           : () => undefined;
 
       const stopEvents = this.forwardRuntimeEvents(runtimeBaseUrl, task.id);
-
-      const isTemplateGreenfield =
-        task.agent === "mock" && Boolean(job.greenfieldPushed);
 
       if (task.agent === "cursor") {
         await this.ensureSandboxConnectivity(runtime, task.id);
@@ -1724,8 +1724,14 @@ export class TaskService {
       const install = await runtime.terminal({
         taskId: task.id,
         cwd: repoCwd,
-        command: "npm install",
+        command: "timeout 180 npm install --no-audit --progress=false 2>&1",
       });
+
+      if (install.exitCode === 124) {
+        throw new Error(
+          "npm install timed out after 180s — check sandbox outbound network, DNS, and npm registry access",
+        );
+      }
 
       if (install.exitCode !== 0) {
         throw new Error(

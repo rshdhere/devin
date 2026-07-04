@@ -335,10 +335,38 @@ function DiagnosticsPanel({
           ) : null}
           {/timed out/i.test(task.message) ? (
             <p className="text-[12px] leading-relaxed text-amber-200/90">
-              The task hit a timeout before finishing. For greenfield runs,
-              confirm SCHEDULER_HOST_NAME matches your FirecrackerHost CR name,
-              the orchestrator sandbox controller is running, and the nextjs
-              snapshot is built on the execution host.
+              {/npm install timed out/i.test(task.message) ? (
+                <>
+                  Dependency install in the sandbox timed out. On the execution
+                  host run{" "}
+                  <span className="font-mono text-amber-100">
+                    sudo ./infra/scripts/fix-sandbox-dns.sh
+                  </span>{" "}
+                  and confirm the microVM has outbound HTTPS (443) to the npm
+                  registry.
+                </>
+              ) : /sandbox.*did not become ready/i.test(task.message) ? (
+                <>
+                  The sandbox never reached Running. Confirm{" "}
+                  <span className="font-mono text-amber-100">
+                    SCHEDULER_HOST_NAME
+                  </span>{" "}
+                  matches your FirecrackerHost CR name, the orchestrator sandbox
+                  controller is running, and the nextjs snapshot is built on the
+                  execution host.
+                </>
+              ) : (
+                <>
+                  The task hit a timeout before finishing. For greenfield runs,
+                  confirm{" "}
+                  <span className="font-mono text-amber-100">
+                    SCHEDULER_HOST_NAME
+                  </span>{" "}
+                  matches your FirecrackerHost CR name, the orchestrator sandbox
+                  controller is running, and the nextjs snapshot is built on the
+                  execution host.
+                </>
+              )}
             </p>
           ) : null}
           {/cannot reach Cursor or GitHub/i.test(task.message) ? (
