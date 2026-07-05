@@ -31,8 +31,8 @@ dist
 apps/*/bin/
 apps/orchestrator/orchestrator
 apps/runtime/runtime
-apps/firecracker-host/host
-apps/firecracker-host/tc-redirect-tap
+apps/firecracker/firecracker
+apps/firecracker/tc-redirect-tap
 
 
 # Debug

@@ -20,7 +20,7 @@ flowchart TB
   SandboxController --> MachineCRD["FirecrackerMachine CR"]
   MachineController --> MachineCRD
   MachineController --> HostSelect["Firecracker Host Selection"]
-  HostSelect --> FCHost["firecracker-host daemon"]
+  HostSelect --> FCHost["firecracker daemon"]
   FCHost --> SnapshotPool["Warm Snapshot Pool"]
   SnapshotPool --> microVM["Firecracker microVM"]
   microVM --> Runtime["Runtime Supervisor"]
@@ -86,7 +86,7 @@ devin/
 │   ├── server/              # API gateway (auth + task proxy)
 │   ├── scheduler/           # Task queue worker + SSE events
 │   ├── orchestrator/        # Sandbox CRD controller + internal API
-│   ├── firecracker-host/    # Node daemon: VM pool + snapshot manager
+│   ├── firecracker/         # Node daemon: VM pool + snapshot manager
 │   └── runtime/             # In-VM supervisor (PID 1)
 ├── packages/
 │   ├── orchestrator/        # K8s reconciliation logic
@@ -109,7 +109,7 @@ devin/
 | `devin-app` | web, server |
 | `devin-system` | orchestrator |
 | `devin-sandboxes` | Sandbox + FirecrackerMachine CRs |
-| `devin-firecracker` | firecracker-host DaemonSet, scheduler DaemonSet, FirecrackerHost CRs |
+| `devin-firecracker` | firecracker DaemonSet, scheduler DaemonSet, FirecrackerHost CRs |
 
 ### Runtime supervisor API
 
@@ -135,12 +135,12 @@ The orchestrator **never** executes shell commands — it only provisions infras
 | --- | --- |
 | `Sandbox` | Task-facing sandbox intent (`taskId`, `runtime`, `cpu`, `memory`) |
 | `FirecrackerMachine` | Controller-managed microVM for a sandbox |
-| `FirecrackerHost` | Node capacity + firecracker-host API address |
+| `FirecrackerHost` | Node capacity + firecracker API address |
 | `Snapshot` | Golden snapshot metadata per runtime image |
 
 ### Warm snapshots
 
-Production hosts maintain a pool of ready microVMs restored from golden snapshots (~300ms) instead of cold booting kernels (~8–12s). Each `runtime/*` directory builds a snapshot consumed by `firecracker-host`.
+Production hosts maintain a pool of ready microVMs restored from golden snapshots (~300ms) instead of cold booting kernels (~8–12s). Each `runtime/*` directory builds a snapshot consumed by `firecracker`.
 
 Build snapshots on a Linux Firecracker host:
 
@@ -150,7 +150,7 @@ sudo ./scripts/build-firecracker-rootfs.sh nextjs devin-runtime-nextjs:latest
 sudo ./scripts/build-firecracker-snapshot.sh nextjs
 ```
 
-Set `FIRECRACKER_DRY_RUN=false` on `firecracker-host` to enable snapshot restore via the Firecracker SDK + CNI (`fcnet`).
+Set `FIRECRACKER_DRY_RUN=false` on `firecracker` to enable snapshot restore via the Firecracker SDK + CNI (`fcnet`).
 
 ### Swappable execution backends
 
@@ -161,10 +161,10 @@ The scheduler → HTTP → runtime path works whether the runtime lives in a Pod
 ```sh
 bun install
 
-# terminal 1 — firecracker-host (dry-run VM pool)
-bun run dev --filter=@devin/firecracker-host
+# terminal 1 — firecracker (dry-run VM pool)
+bun run dev --filter=@devin/firecracker
 
-# terminal 2 — orchestrator (dry-run, calls firecracker-host)
+# terminal 2 — orchestrator (dry-run, calls firecracker)
 ORCHESTRATOR_DRY_RUN=true bun run dev --filter=@devin/orchestrator-app
 
 # terminal 3 — runtime supervisor

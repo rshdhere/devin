@@ -421,7 +421,7 @@ function DiagnosticsPanel({
           {/Runtime request failed/i.test(task.message) ? (
             <p className="text-[12px] leading-relaxed text-amber-200/90">
               The scheduler could not talk to the runtime supervisor inside the
-              microVM. Rebuild the agent snapshot, restart firecracker-host and
+              microVM. Rebuild the agent snapshot, restart firecracker and
               scheduler, and confirm SCHEDULER_HOST_NAME matches the
               FirecrackerHost CR on this execution host.
             </p>
@@ -433,8 +433,8 @@ function DiagnosticsPanel({
               <span className="font-mono text-amber-100">
                 sudo ./infra/scripts/fix-sandbox-dns.sh
               </span>{" "}
-              (enables ip_forward + CNI DNS), restart firecracker-host and
-              scheduler, then rebuild the agent snapshot.
+              (enables ip_forward + CNI DNS), restart firecracker and scheduler,
+              then rebuild the agent snapshot.
             </p>
           ) : null}
         </div>
@@ -597,11 +597,11 @@ function DiagnosticsPanel({
         <p className="mt-3 text-[12px] leading-relaxed text-amber-200/90">
           Firecracker snapshot warm-up failed on the execution host:{" "}
           {host.lastWarmError}. Rebuild snapshots on the host or check{" "}
-          <span className="font-mono">docker logs firecracker-host</span>.
+          <span className="font-mono">docker logs firecracker</span>.
         </p>
       ) : task.status === "failed" && host?.readyVMs === 0 ? (
         <p className="mt-3 text-[12px] leading-relaxed text-amber-200/90">
-          No warm microVMs are available. The firecracker-host may still be
+          No warm microVMs are available. The firecracker service may still be
           warming snapshots, snapshots may be missing for the requested runtime,
           or the host process may not be running.
         </p>

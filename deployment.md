@@ -33,7 +33,7 @@ Both paths share the same control-plane CRDs (`Sandbox`, `FirecrackerMachine`, `
 
 ## Path B — External execution hosts (recommended for AWS / EKS)
 
-When your Kubernetes workers lack hardware KVM (typical on EKS/GKE), run `firecracker-host` + `scheduler` on **dedicated Linux VMs outside the cluster** and register them with `FirecrackerHost` CRs.
+When your Kubernetes workers lack hardware KVM (typical on EKS/GKE), run `firecracker` + `scheduler` on **dedicated Linux VMs outside the cluster** and register them with `FirecrackerHost` CRs.
 
 ```text
                          ┌─────────────────────────────────────┐
@@ -48,7 +48,7 @@ When your Kubernetes workers lack hardware KVM (typical on EKS/GKE), run `firecr
                     VPC / private net   │
          ┌──────────────────────────────┼──────────────────────────────┐
          │  Execution host A (EC2)      │    Execution host B (EC2)     │
-         │  firecracker-host :9092      │    firecracker-host :9092     │
+         │  firecracker :9092      │    firecracker :9092     │
          │  scheduler        :9091      │    scheduler        :9091     │
          │  microVMs 192.168.127.x      │    microVMs 192.168.127.x   │
          └──────────────────────────────┴──────────────────────────────┘
@@ -66,7 +66,7 @@ See [§2–§4 below](#2-prepare-firecracker-snapshots-on-execution-hosts) for E
 
 ## Path A — In-cluster KVM worker pool (self-managed clusters only)
 
-Sandboxes run as Firecracker microVMs with host-local networking (`192.168.127.0/24`). The runtime supervisor is only reachable **from the node running `firecracker-host`**, so the scheduler runs as a **co-located DaemonSet** on the same labeled workers.
+Sandboxes run as Firecracker microVMs with host-local networking (`192.168.127.0/24`). The runtime supervisor is only reachable **from the node running `firecracker`**, so the scheduler runs as a **co-located DaemonSet** on the same labeled workers.
 
 ```text
                          ┌──────────────────────────────────────────────┐
@@ -75,7 +75,7 @@ Sandboxes run as Firecracker microVMs with host-local networking (`192.168.127.0
                          │  devin-system: orchestrator                   │
                          │  devin-sandboxes: Sandbox / Machine CRs       │
                          │  devin-firecracker:                           │
-                         │    firecracker-host DaemonSet (KVM nodes)     │
+                         │    firecracker DaemonSet (KVM nodes)     │
                          │    scheduler DaemonSet (same nodes)           │
                          │    FirecrackerHost CRs (auto-registered)      │
                          └──────────────────────────────────────────────┘
@@ -89,7 +89,7 @@ Traffic flow:
 User → Ingress → web (3000) + server (8080)
 server → scheduler on KVM node (:9091, hostNetwork)
 scheduler → orchestrator (:9090) → Sandbox CR (preferredHost = node name)
-orchestrator → firecracker-host on same node (:9092) → microVM (:8081, 192.168.127.x)
+orchestrator → firecracker on same node (:9092) → microVM (:8081, 192.168.127.x)
 scheduler → runtime inside microVM (host-local CNI)
 ```
 
@@ -97,7 +97,7 @@ scheduler → runtime inside microVM (host-local CNI)
 | --- | --- | --- |
 | App | Kubernetes | `devin-app` |
 | Orchestrator | Kubernetes | `devin-system` |
-| firecracker-host + scheduler | **KVM worker nodes** (DaemonSets) | `devin-firecracker` |
+| firecracker + scheduler | **KVM worker nodes** (DaemonSets) | `devin-firecracker` |
 | CRDs / sandbox state | Kubernetes | `devin-sandboxes`, `devin-firecracker` |
 
 ### A.1 Prerequisites
@@ -237,7 +237,7 @@ On **AWS**: use EC2 instances in the **same VPC** as your EKS cluster (e.g. `c7i
 
 - `bun` 1.2+ (build web/server/scheduler images)
 - `docker` + buildx
-- `go` 1.22+ (build orchestrator, runtime, firecracker-host)
+- `go` 1.22+ (build orchestrator, runtime, firecracker)
 - `kubectl`
 
 ---
@@ -289,7 +289,7 @@ EOF
 docker push $REGISTRY/devin-orchestrator:$TAG
 ```
 
-### Scheduler + firecracker-host (run on execution hosts)
+### Scheduler + firecracker (run on execution hosts)
 
 ```sh
 docker build -t $REGISTRY/devin-scheduler:$TAG -f - . <<'EOF'
@@ -305,10 +305,10 @@ EXPOSE 9091
 CMD ["bun", "run", "--cwd", "apps/scheduler", "start"]
 EOF
 
-docker build -f apps/firecracker-host/Dockerfile -t $REGISTRY/devin-firecracker-host:$TAG .
+docker build -f docker/firecracker/Dockerfile -t $REGISTRY/devin-firecracker:$TAG .
 
 docker push $REGISTRY/devin-scheduler:$TAG
-docker push $REGISTRY/devin-firecracker-host:$TAG
+docker push $REGISTRY/devin-firecracker:$TAG
 ```
 
 Pin image tags in your GitOps overlay `images` block (see `migration.md` §3).
@@ -381,10 +381,10 @@ curl -fsSL https://get.docker.com | sh
 docker login $REGISTRY
 ```
 
-### 3.3 Run firecracker-host
+### 3.3 Run firecracker
 
 ```sh
-docker run -d --name firecracker-host --restart unless-stopped \
+docker run -d --name firecracker --restart unless-stopped \
   --privileged \
   --network host \
   -v /var/lib/devin:/var/lib/devin \
@@ -402,15 +402,15 @@ docker run -d --name firecracker-host --restart unless-stopped \
   -e FIRECRACKER_CNI_BIN_PATH=/opt/cni/bin \
   -e FIRECRACKER_CAPACITY_CPU=8 \
   -e FIRECRACKER_CAPACITY_MEMORY=16Gi \
-  $REGISTRY/devin-firecracker-host:$TAG
+  $REGISTRY/devin-firecracker:$TAG
 ```
 
 Install CNI config on the host before starting (from repo):
 
 ```sh
 sudo mkdir -p /etc/cni/conf.d /opt/cni/bin
-sudo cp apps/firecracker-host/config/cni/fcnet.conflist /etc/cni/conf.d/
-# CNI plugins are bundled inside the firecracker-host image at /opt/cni/bin
+sudo cp apps/firecracker/config/cni/fcnet.conflist /etc/cni/conf.d/
+# CNI plugins are bundled inside the firecracker image at /opt/cni/bin
 ```
 
 Health check:
@@ -422,7 +422,7 @@ curl -s http://127.0.0.1:9092/v1/status
 
 ### 3.4 Run scheduler on the same host
 
-The scheduler must run **on the same machine** as firecracker-host so it can reach microVM runtime URLs (`http://192.168.127.x:8081`).
+The scheduler must run **on the same machine** as firecracker so it can reach microVM runtime URLs (`http://192.168.127.x:8081`).
 
 Point it at the in-cluster orchestrator. Use the orchestrator's **VPC-private** endpoint (see [Expose orchestrator to execution hosts](#44-expose-orchestrator-to-execution-hosts)).
 
@@ -465,7 +465,7 @@ Already covered in [Path A](#path-a--in-cluster-kvm-worker-pool-self-managed-clu
 
 Sync `overlays/<env>-external` from GitOps. Pin `devin-orchestrator` image tag in the overlay.
 
-**Do not** include the in-cluster `firecracker-host` DaemonSet or co-located `scheduler` DaemonSet on Path B — those run on EC2 outside the cluster.
+**Do not** include the in-cluster `firecracker` DaemonSet or co-located `scheduler` DaemonSet on Path B — those run on EC2 outside the cluster.
 
 Confirm orchestrator env:
 
@@ -560,7 +560,7 @@ Set `ORCHESTRATOR_URL` on each execution host to this NLB's private DNS name or 
 
 | Source | Port | Purpose |
 | --- | --- | --- |
-| EKS cluster VPC CIDR / node security group | `9092` | orchestrator → firecracker-host API |
+| EKS cluster VPC CIDR / node security group | `9092` | orchestrator → firecracker API |
 | EKS cluster VPC CIDR / node security group | `9091` | server → scheduler (if scheduler on this host) |
 | Your admin IP / bastion SG | `22` | SSH |
 
@@ -761,7 +761,7 @@ kubectl -n devin-sandboxes get sandboxes,firecrackermachines -w
 On the execution host:
 
 ```sh
-docker logs -f firecracker-host
+docker logs -f firecracker
 docker logs -f scheduler
 ```
 
@@ -783,7 +783,7 @@ docker logs -f scheduler
 | Variable | Description |
 | --- | --- |
 | `ORCHESTRATOR_URL` | `http://devin-orchestrator.devin-system.svc:9090` (in-cluster) or LB private IP (Path B) |
-| `SCHEDULER_HOST_NAME` | Kubernetes node name — pins sandboxes to the local firecracker-host (Path A) |
+| `SCHEDULER_HOST_NAME` | Kubernetes node name — pins sandboxes to the local firecracker (Path A) |
 | `DEFAULT_AGENT` | `mock`, `cursor`, or `claude` |
 
 ### Orchestrator (in Kubernetes)
@@ -796,7 +796,7 @@ docker logs -f scheduler
 | `FIRECRACKER_NODE_LABEL` | `devin.baby/firecracker-host` |
 | `FIRECRACKER_NAMESPACE` | `devin-firecracker` |
 
-### firecracker-host
+### firecracker
 
 | Variable | Description |
 | --- | --- |
@@ -810,7 +810,7 @@ docker logs -f scheduler
 
 | Field | Description |
 | --- | --- |
-| `spec.address` | `http://<host-ip>:9092` — firecracker-host HTTP API |
+| `spec.address` | `http://<host-ip>:9092` — firecracker HTTP API |
 | `spec.schedulerAddress` | `http://<host-ip>:9091` — co-located scheduler (auto-set on Path A) |
 | `spec.nodeName` | Kubernetes node name (Path A, auto-set) |
 | `spec.capacity.cpu` | Max vCPUs this host advertises |

@@ -18,7 +18,7 @@ How devin.baby maps to [Devin](https://devin.ai) concepts and where we intention
 
 ## Sandbox lifecycle (Devin-like)
 
-1. **Boot** — Orchestrator creates `Sandbox` CR → firecracker-host starts microVM from snapshot (~warm pool).
+1. **Boot** — Orchestrator creates `Sandbox` CR → firecracker starts microVM from snapshot (~warm pool).
 2. **Work** — Runtime supervisor in VM executes shell, git, and agent CLI. Brain/worker streams events to web UI.
 3. **Persist** — Devbox stays alive after agent run for follow-ups until user ends session, idle sleep, or explicit terminate.
 4. **Idle sleep** — After `DEVBOX_IDLE_TIMEOUT_SECONDS` (default 30m), sandbox phase → `Suspended`; session row kept in Postgres; wake on continue or `POST /tasks/:id/wake`.
@@ -32,7 +32,7 @@ How devin.baby maps to [Devin](https://devin.ai) concepts and where we intention
 Web UI → API server → Brain (cloud, DATABASE_URL)
                          ↓ POST /internal/v1/jobs
                     Scheduler worker (execution host, SERVICE_MODE=worker)
-                         ↓ orchestrator + firecracker-host
+                         ↓ orchestrator + firecracker
                     Runtime supervisor in microVM (agent CLI)
 ```
 

@@ -735,7 +735,7 @@ export class TaskService {
         runtimeBaseUrl = sandbox.status?.runtimeURL?.replace(/\/$/, "");
         if (!runtimeBaseUrl) {
           throw new Error(
-            "Sandbox is running but orchestrator did not publish a runtimeURL. Check firecracker-host and orchestrator sync.",
+            "Sandbox is running but orchestrator did not publish a runtimeURL. Check firecracker and orchestrator sync.",
           );
         }
         guestHost = new URL(runtimeBaseUrl).hostname;

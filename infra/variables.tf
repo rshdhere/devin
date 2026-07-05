@@ -148,7 +148,7 @@ variable "container_registry" {
 }
 
 variable "container_image_tag" {
-  description = "Image tag for firecracker-host and scheduler containers."
+  description = "Image tag for firecracker and scheduler containers."
   type        = string
   default     = "latest"
 }

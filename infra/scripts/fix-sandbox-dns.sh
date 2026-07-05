@@ -14,7 +14,7 @@ RESOLV
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
-FCNET_SRC="${REPO_ROOT}/apps/firecracker-host/config/cni/fcnet.conflist"
+FCNET_SRC="${REPO_ROOT}/apps/firecracker/config/cni/fcnet.conflist"
 
 if [[ -f "${FCNET_SRC}" ]]; then
   cp "${FCNET_SRC}" /etc/cni/conf.d/fcnet.conflist
@@ -52,7 +52,7 @@ echo "CNI DNS configured:"
 echo "  /etc/cni/resolv.conf"
 echo "  /etc/cni/conf.d/fcnet.conflist"
 echo ""
-echo "Restart firecracker-host and rebuild runtime snapshots for full effect:"
-echo "  sudo systemctl restart devin-firecracker-host"
+echo "Restart firecracker and rebuild runtime snapshots for full effect:"
+echo "  sudo systemctl restart devin-firecracker"
 echo "  sudo systemctl restart devin-scheduler"
 echo "  sudo DEVIN_REPO_URL=https://github.com/rshdhere/devin.git ./infra/scripts/bootstrap-execution-host-snapshots.sh"

@@ -1,6 +1,6 @@
 # Runtime images
 
-Runtime images become **Firecracker golden snapshots**. Each directory builds a Docker image that is exported to `rootfs.ext4`, booted once, snapshotted, and restored in ~300ms by `firecracker-host`.
+Runtime images become **Firecracker golden snapshots**. Each directory builds a Docker image that is exported to `rootfs.ext4`, booted once, snapshotted, and restored in ~300ms by `firecracker`.
 
 Build every image from the **repository root**.
 
@@ -77,7 +77,7 @@ spec:
   memory: 4Gi
 ```
 
-The orchestrator selects a `FirecrackerHost`, and `firecracker-host` restores the matching snapshot. The runtime supervisor listens on port **8081** inside the microVM.
+The orchestrator selects a `FirecrackerHost`, and `firecracker` restores the matching snapshot. The runtime supervisor listens on port **8081** inside the microVM.
 
 Greenfield template tasks use the **`nextjs`** snapshot only (no `agent` snapshot rebuild required). Rebuild `nextjs` after changing `runtime/nextjs/` or shared supervisor code under `apps/runtime/`.
 

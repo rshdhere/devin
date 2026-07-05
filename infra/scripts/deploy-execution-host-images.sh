@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Pull and roll devin-scheduler + devin-firecracker-host on execution host(s) via SSM.
+# Pull and roll devin-scheduler + devin-firecracker on execution host(s) via SSM.
 #
 # Usage:
 #   ./deploy-execution-host-images.sh <instance-id> [instance-id...]
@@ -65,6 +65,11 @@ read_execution_host_name() {
     tr -d '[:space:]' </etc/devin/host-name
     return
   fi
+  if [[ -f /etc/systemd/system/devin-firecracker.service ]]; then
+    grep -oE 'FIRECRACKER_HOST_NAME=[^ \\\\]+' /etc/systemd/system/devin-firecracker.service 2>/dev/null \\
+      | head -1 | cut -d= -f2
+    return
+  fi
   if [[ -f /etc/systemd/system/devin-firecracker-host.service ]]; then
     grep -oE 'FIRECRACKER_HOST_NAME=[^ \\\\]+' /etc/systemd/system/devin-firecracker-host.service 2>/dev/null \\
       | head -1 | cut -d= -f2
@@ -80,8 +85,8 @@ write_scheduler_unit() {
   cat >"\$unit" <<UNIT
 [Unit]
 Description=devin.baby scheduler
-After=devin-firecracker-host.service
-Wants=devin-firecracker-host.service
+After=devin-firecracker.service
+Wants=devin-firecracker.service
 
 [Service]
 Restart=always
@@ -112,13 +117,17 @@ UNIT
 }
 
 patch_firecracker_unit() {
-  local unit="/etc/systemd/system/devin-firecracker-host.service"
-  [[ -f "\$unit" ]] || return 0
-  sed -i "s|\${REGISTRY}/devin-firecracker-host:[^\" ]*|\${REGISTRY}/devin-firecracker-host:\${IMAGE_TAG}|g" "\$unit"
+  for unit in \
+    /etc/systemd/system/devin-firecracker.service \
+    /etc/systemd/system/devin-firecracker-host.service; do
+    [[ -f "\$unit" ]] || continue
+    sed -i "s|\${REGISTRY}/devin-firecracker-host:[^\" ]*|\${REGISTRY}/devin-firecracker:\${IMAGE_TAG}|g" "\$unit"
+    sed -i "s|\${REGISTRY}/devin-firecracker:[^\" ]*|\${REGISTRY}/devin-firecracker:\${IMAGE_TAG}|g" "\$unit"
+  done
 }
 
-log "Pulling \${REGISTRY}/devin-firecracker-host:\${IMAGE_TAG}"
-docker pull "\${REGISTRY}/devin-firecracker-host:\${IMAGE_TAG}"
+log "Pulling \${REGISTRY}/devin-firecracker:\${IMAGE_TAG}"
+docker pull "\${REGISTRY}/devin-firecracker:\${IMAGE_TAG}"
 log "Pulling \${REGISTRY}/devin-scheduler:\${IMAGE_TAG}"
 docker pull "\${REGISTRY}/devin-scheduler:\${IMAGE_TAG}"
 
@@ -126,9 +135,10 @@ patch_firecracker_unit
 write_scheduler_unit
 systemctl daemon-reload
 
-if systemctl list-unit-files | grep -q devin-firecracker-host.service; then
-  log "Restarting devin-firecracker-host"
-  systemctl restart devin-firecracker-host.service
+if systemctl list-unit-files | grep -qE 'devin-firecracker(-host)?\.service'; then
+  log "Restarting devin-firecracker"
+  systemctl restart devin-firecracker.service 2>/dev/null \
+    || systemctl restart devin-firecracker-host.service 2>/dev/null || true
   for _ in \$(seq 1 30); do
     if curl -sf http://127.0.0.1:9092/health >/dev/null 2>&1; then
       break
@@ -138,7 +148,7 @@ if systemctl list-unit-files | grep -q devin-firecracker-host.service; then
   curl -sf http://127.0.0.1:9092/health | jq . 2>/dev/null || curl -sf http://127.0.0.1:9092/health
   curl -sf http://127.0.0.1:9092/v1/status | jq . 2>/dev/null || curl -sf http://127.0.0.1:9092/v1/status
 else
-  log "devin-firecracker-host.service not installed — skipping"
+  log "devin-firecracker.service not installed — skipping"
 fi
 
 if [[ -x /usr/local/bin/devin-sync-platform-config.sh ]]; then

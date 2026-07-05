@@ -1,6 +1,6 @@
 # Terraform — devin.baby AWS infrastructure
 
-Terraform provisions the **AWS foundation** for [deployment.md](../deployment.md) **Path B** (EKS control plane + external EC2 Firecracker execution hosts + Neon Postgres outside AWS).
+Terraform provisions the **AWS foundation** for [deployment.md](../deployment.md) **Path B** (EKS control plane + external EC2 Firecracker execution hosts). Postgres can be **Neon** (external) or **self-hosted in EKS** — see [docs/brain-and-postgres.md](../docs/brain-and-postgres.md).
 
 Container images are expected on **Docker Hub** (not ECR). Configure `imagePullSecrets` in your GitOps repo for private repos on EKS.
 
@@ -9,18 +9,20 @@ Container images are expected on **Docker Hub** (not ECR). Configure `imagePullS
 ```text
                          ┌─────────────────────────────────────┐
                          │           EKS (this repo)            │
-                         │  web, server, orchestrator           │
+                         │  web, server, brain, orchestrator    │
+                         │  postgres (self-hosted, optional)    │
                          │  private subnets                     │
                          └──────────────┬──────────────────────┘
                                         │
                     VPC 10.0.0.0/16     │
          ┌──────────────────────────────┼──────────────────────────────┐
          │  Execution host(s) EC2       │    NAT → public subnets      │
-         │  firecracker-host :9092      │    (ALB / NLB via GitOps)    │
+         │  firecracker :9092           │    (ALB / NLB via GitOps)    │
          │  scheduler        :9091    │                              │
          └──────────────────────────────┴──────────────────────────────┘
 
-         Neon Postgres — provision separately (not in this Terraform)
+         Neon Postgres — optional; or self-hosted Postgres in EKS (GitOps)
+         devin-brain     — cloud task API (GitOps, image devin-brain)
          Docker Hub    — container images (not provisioned here)
 ```
 
@@ -85,7 +87,8 @@ Set `container_registry` in `terraform.tfvars` (e.g. `docker.io/youruser`). Imag
 | web | `<container_registry>/devin-web:<tag>` |
 | orchestrator | `<container_registry>/devin-orchestrator:<tag>` |
 | scheduler | `<container_registry>/devin-scheduler:<tag>` |
-| firecracker-host | `<container_registry>/devin-firecracker-host:<tag>` |
+| brain | `<container_registry>/devin-brain:<tag>` |
+| firecracker | `<container_registry>/devin-firecracker:<tag>` |
 
 On **EKS**, add a `kubernetes.io/dockerconfigjson` secret and reference it in your GitOps manifests for private repos.
 
@@ -95,8 +98,8 @@ On **execution hosts**, run `docker login` before enabling the systemd units if 
 
 | Workflow | Trigger | What it does |
 | --- | --- | --- |
-| **Registry** | push to `main` | Builds and pushes all images including `devin-scheduler` and `devin-firecracker-host` |
-| **Deploy execution hosts** | after Registry on `main`; or manual | SSM: `docker pull` + restart scheduler and firecracker-host on EC2 |
+| **Registry** | push to `main` | Builds and pushes all images including `devin-brain`, `devin-scheduler`, and `devin-firecracker` |
+| **Deploy execution hosts** | after Registry on `main`; or manual | SSM: `docker pull` + restart scheduler and firecracker on EC2 |
 | **build-check** | push / PR | Compiles Go services and dry-builds the scheduler Docker image |
 
 Execution hosts are **not** rolled by GitOps. Runtime golden snapshots require a manual deploy with `rebuild_runtime_snapshots=true` or `./infra/scripts/run-ssm-bootstrap-snapshots.sh`.
@@ -209,7 +212,7 @@ For staging orchestrator NLB (fixes `orchestrator rejected sandbox: 500` on stag
 
 ---
 
-1. **Neon** — create Postgres project; set `DATABASE_URL` in GitOps secrets
+1. **Postgres** — self-hosted in EKS (manifests in [ops repo](https://github.com/rshdhere/ops)) or Neon; see [docs/brain-and-postgres.md](../docs/brain-and-postgres.md)
 2. **Build & push images** to Docker Hub
 3. **Execution hosts** — Terraform writes SSM platform URLs and runs SSM bootstrap; verify `curl http://127.0.0.1:9091/health` on the host
 4. **GitOps** — sync `infra/generated/firecracker-hosts.yaml` (or `terraform output execution_hosts`) into your ops repo `firecracker-hosts.yaml`
@@ -312,7 +315,7 @@ Aligned with deployment.md §4.5:
 
 | Direction | Port | Source / dest |
 | --- | --- | --- |
-| Execution host inbound | 9092 | EKS node SG → firecracker-host |
+| Execution host inbound | 9092 | EKS node SG → firecracker |
 | Execution host inbound | 9091 | EKS node SG → scheduler |
 | Execution host outbound | 443 | GitHub, agent APIs, Docker Hub |
 | Execution host outbound | 9090 | Orchestrator NLB |

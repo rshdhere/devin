@@ -33,8 +33,9 @@ require_root() {
 require_kvm() {
   if [[ -d /dev/kvm && ! -c /dev/kvm ]]; then
     log "repairing /dev/kvm (docker created a directory bind mount)"
-    systemctl stop devin-firecracker-host.service 2>/dev/null || true
-    docker stop firecracker-host 2>/dev/null || true
+    systemctl stop devin-firecracker.service 2>/dev/null \
+      || systemctl stop devin-firecracker-host.service 2>/dev/null || true
+    docker stop firecracker 2>/dev/null || docker stop firecracker-host 2>/dev/null || true
     rm -rf /dev/kvm
   fi
   modprobe kvm 2>/dev/null || true
@@ -84,13 +85,13 @@ RESOLV
     log "installing fcnet CNI config"
     local raw_base="${DEVIN_RAW_BASE:-https://raw.githubusercontent.com/rshdhere/devin/${REPO_REF}}"
     curl -fsSL \
-      "${raw_base}/apps/firecracker-host/config/cni/fcnet.conflist" \
+      "${raw_base}/apps/firecracker/config/cni/fcnet.conflist" \
       -o /etc/cni/conf.d/fcnet.conflist
   fi
 
   if [[ ! -f /opt/cni/bin/tc-redirect-tap ]]; then
-    log "extracting CNI plugins from devin-firecracker-host image"
-    docker create --name devin-cni-extract "${CONTAINER_REGISTRY:-docker.io/rshdhere}/devin-firecracker-host:${CONTAINER_IMAGE_TAG:-latest}" >/dev/null
+    log "extracting CNI plugins from devin-firecracker image"
+    docker create --name devin-cni-extract "${CONTAINER_REGISTRY:-docker.io/rshdhere}/devin-firecracker:${CONTAINER_IMAGE_TAG:-latest}" >/dev/null
     docker cp devin-cni-extract:/opt/cni/bin/. /opt/cni/bin/
     docker rm devin-cni-extract >/dev/null
     chmod 755 /opt/cni/bin/*
@@ -154,7 +155,7 @@ build_runtime() {
     export FIRECRACKER_SNAPSHOT_MEM_MIB=512
     export DEVIN_FORCE_SNAPSHOT_REBUILD="${DEVIN_FORCE_SNAPSHOT_REBUILD:-false}"
     mkdir -p "${GOCACHE}" "${GOPATH}"
-    (cd apps/firecracker-host && go build -o /usr/local/bin/snapshot-cni ./cmd/snapshot-cni)
+    (cd apps/firecracker && go build -o /usr/local/bin/snapshot-cni ./cmd/snapshot-cni)
     ./scripts/build-firecracker-rootfs.sh "${runtime}"
     ./scripts/build-firecracker-snapshot.sh "${runtime}"
   )
@@ -166,10 +167,12 @@ start_services() {
   fi
   systemctl daemon-reload
   if [[ "${DEVIN_FORCE_SNAPSHOT_REBUILD:-false}" == "true" ]]; then
-    systemctl restart devin-firecracker-host.service || true
+    systemctl restart devin-firecracker.service 2>/dev/null \
+      || systemctl restart devin-firecracker-host.service 2>/dev/null || true
     sleep 5
   else
-    systemctl enable --now devin-firecracker-host.service
+    systemctl enable --now devin-firecracker.service 2>/dev/null \
+      || systemctl enable --now devin-firecracker-host.service 2>/dev/null || true
   fi
   systemctl enable --now devin-scheduler.service
   sleep 3

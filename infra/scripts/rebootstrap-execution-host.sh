@@ -84,16 +84,16 @@ net.ipv4.conf.default.rp_filter=0
 SYSCTL
 sysctl --system >/dev/null 2>&1 || sysctl -p /etc/sysctl.d/99-devin-microvm.conf
 
-cat >/etc/systemd/system/devin-firecracker-host.service <<'UNIT'
+cat >/etc/systemd/system/devin-firecracker.service <<'UNIT'
 [Unit]
-Description=devin.baby firecracker-host
+Description=devin.baby firecracker
 After=docker.service
 Requires=docker.service
 
 [Service]
 Restart=always
 RestartSec=5
-ExecStart=/usr/bin/docker run --rm --name firecracker-host \\
+ExecStart=/usr/bin/docker run --rm --name firecracker \\
   --privileged \\
   --network host \\
   -v /dev/kvm:/dev/kvm \\
@@ -116,8 +116,8 @@ ExecStart=/usr/bin/docker run --rm --name firecracker-host \\
   -e FIRECRACKER_CNI_BIN_PATH=/opt/cni/bin \\
   -e FIRECRACKER_CAPACITY_CPU=8 \\
   -e FIRECRACKER_CAPACITY_MEMORY=16Gi \\
-  ${CONTAINER_REGISTRY}/devin-firecracker-host:${IMAGE_TAG}
-ExecStop=/usr/bin/docker stop firecracker-host
+  ${CONTAINER_REGISTRY}/devin-firecracker:${IMAGE_TAG}
+ExecStop=/usr/bin/docker stop firecracker
 
 [Install]
 WantedBy=multi-user.target
@@ -126,8 +126,8 @@ UNIT
 cat >/etc/systemd/system/devin-scheduler.service <<'UNIT'
 [Unit]
 Description=devin.baby scheduler
-After=devin-firecracker-host.service
-Wants=devin-firecracker-host.service
+After=devin-firecracker.service
+Wants=devin-firecracker.service
 
 [Service]
 Restart=always

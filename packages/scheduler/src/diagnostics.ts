@@ -214,10 +214,10 @@ export async function validateFirecrackerHostForRuntime(
 ): Promise<string | undefined> {
   const status = await fetchFirecrackerHostStatus(baseUrl);
   if (!status) {
-    return "firecracker-host URL is not configured";
+    return "firecracker URL is not configured";
   }
   if (!status.reachable) {
-    return status.error ?? "firecracker-host is unreachable";
+    return status.error ?? "firecracker is unreachable";
   }
 
   if (status.availableRuntimes && status.availableRuntimes.length === 0) {
@@ -236,7 +236,7 @@ export async function validateFirecrackerHostForRuntime(
     (entry) => entry.runtime === runtime,
   );
   if (runtimeWarm?.lastWarmError) {
-    return `firecracker-host cannot warm ${runtime} microVMs: ${runtimeWarm.lastWarmError}`;
+    return `firecracker cannot warm ${runtime} microVMs: ${runtimeWarm.lastWarmError}`;
   }
 
   if (status.lastWarmError && (status.readyVMs ?? 0) === 0) {

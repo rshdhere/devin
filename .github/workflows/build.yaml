@@ -21,6 +21,12 @@ jobs:
       - name: Build scheduler image
         run: docker build -f docker/scheduler/Dockerfile -t devin-scheduler:ci .
 
+      - name: Build brain image
+        run: docker build -f docker/brain/Dockerfile -t devin-brain:ci .
+
+      - name: Build firecracker image
+        run: docker build -f docker/firecracker/Dockerfile -t devin-firecracker:ci .
+
   go:
     runs-on: ubuntu-latest
     steps:
@@ -33,7 +39,7 @@ jobs:
           go-version: "1.22"
           cache-dependency-path: |
             apps/orchestrator/go.sum
-            apps/firecracker-host/go.sum
+            apps/firecracker/go.sum
             apps/runtime/go.sum
             packages/orchestrator/go.sum
             packages/sandbox/go.sum
@@ -42,9 +48,9 @@ jobs:
         working-directory: apps/orchestrator
         run: go build ./cmd/orchestrator
 
-      - name: Build firecracker-host
-        working-directory: apps/firecracker-host
-        run: go build ./cmd/host
+      - name: Build firecracker
+        working-directory: apps/firecracker
+        run: go build ./cmd/firecracker
 
       - name: Build runtime supervisor
         working-directory: apps/runtime

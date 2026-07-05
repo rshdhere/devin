@@ -26,7 +26,7 @@ resource "aws_security_group" "execution_host" {
   vpc_id      = var.vpc_id
 
   ingress {
-    description     = "orchestrator to firecracker-host API"
+    description     = "orchestrator to firecracker API"
     from_port       = 9092
     to_port         = 9092
     protocol        = "tcp"

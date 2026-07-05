@@ -27,18 +27,22 @@ read_execution_host_name() {
     tr -d '[:space:]' </etc/devin/host-name
     return
   fi
-  if [[ -f /etc/systemd/system/devin-firecracker-host.service ]]; then
-    local from_unit
-    from_unit="$(
-      grep -oE 'FIRECRACKER_HOST_NAME=[^ \\]+' \
-        /etc/systemd/system/devin-firecracker-host.service 2>/dev/null \
-        | head -1 | cut -d= -f2
-    )"
-    if [[ -n "$from_unit" ]]; then
-      echo "$from_unit"
-      return
+  local fc_unit
+  for fc_unit in \
+    /etc/systemd/system/devin-firecracker.service \
+    /etc/systemd/system/devin-firecracker-host.service; do
+    if [[ -f "$fc_unit" ]]; then
+      local from_unit
+      from_unit="$(
+        grep -oE 'FIRECRACKER_HOST_NAME=[^ \\]+' "$fc_unit" 2>/dev/null \
+          | head -1 | cut -d= -f2
+      )"
+      if [[ -n "$from_unit" ]]; then
+        echo "$from_unit"
+        return
+      fi
     fi
-  fi
+  done
   if [[ -f /etc/systemd/system/devin-scheduler.service ]]; then
     local from_scheduler
     from_scheduler="$(
@@ -94,6 +98,7 @@ CURSOR_API_KEY="$(read_ssm "$SSM_PREFIX/cursor_api_key")"
 ANTHROPIC_API_KEY="$(read_ssm "$SSM_PREFIX/anthropic_api_key")"
 OPENAI_API_KEY="$(read_ssm "$SSM_PREFIX/openai_api_key")"
 GITHUB_BOT_TOKEN="$(read_ssm "$SSM_PREFIX/github_bot_token")"
+DATABASE_URL="$(read_ssm "$SSM_PREFIX/database_url")"
 
 if [[ -z "$ORCHESTRATOR_URL" || "$ORCHESTRATOR_URL" == http://REPLACE_AFTER_ORCHESTRATOR_NLB:* ]]; then
   echo "Orchestrator URL not ready in SSM yet ($SSM_PREFIX/orchestrator_url)" >&2
@@ -126,6 +131,10 @@ mkdir -p /etc/systemd/system/devin-scheduler.service.d /etc/devin
 umask 077
 {
   echo "DEFAULT_AGENT=cursor"
+  echo "SERVICE_MODE=worker"
+  if [[ -n "$DATABASE_URL" ]]; then
+    printf 'DATABASE_URL=%s\n' "${DATABASE_URL}"
+  fi
   if [[ -n "$HOST_NAME" ]]; then
     echo "SCHEDULER_HOST_NAME=$HOST_NAME"
     echo "FIRECRACKER_HOST_NAME=$HOST_NAME"
@@ -154,16 +163,24 @@ if [[ -f /etc/systemd/system/devin-scheduler.service ]] \
   echo "devin-scheduler.service ExecStart is missing image — redeploy execution host images to repair" >&2
 fi
 
-if [[ -f /etc/systemd/system/devin-firecracker-host.service ]] \
-  && grep -q 'FIRECRACKER_POOL_SIZE=8' /etc/systemd/system/devin-firecracker-host.service; then
-  sed -i 's/FIRECRACKER_POOL_SIZE=8/FIRECRACKER_POOL_SIZE=1/' \
-    /etc/systemd/system/devin-firecracker-host.service
+firecracker_service_unit() {
+  if [[ -f /etc/systemd/system/devin-firecracker.service ]]; then
+    echo "/etc/systemd/system/devin-firecracker.service"
+  elif [[ -f /etc/systemd/system/devin-firecracker-host.service ]]; then
+    echo "/etc/systemd/system/devin-firecracker-host.service"
+  fi
+}
+
+FC_UNIT="$(firecracker_service_unit || true)"
+if [[ -n "$FC_UNIT" ]] && grep -q 'FIRECRACKER_POOL_SIZE=8' "$FC_UNIT"; then
+  sed -i 's/FIRECRACKER_POOL_SIZE=8/FIRECRACKER_POOL_SIZE=1/' "$FC_UNIT"
   systemctl daemon-reload
-  systemctl restart devin-firecracker-host.service 2>/dev/null || true
+  systemctl restart "$(basename "$FC_UNIT")" 2>/dev/null || true
 fi
 
 if [[ -d /var/lib/devin/snapshots/nextjs ]] || [[ -d /var/lib/devin/snapshots/agent ]]; then
-  systemctl enable --now devin-firecracker-host.service 2>/dev/null || true
+  systemctl enable --now devin-firecracker.service 2>/dev/null \
+    || systemctl enable --now devin-firecracker-host.service 2>/dev/null || true
 fi
 
 systemctl enable --now devin-scheduler.service 2>/dev/null || true

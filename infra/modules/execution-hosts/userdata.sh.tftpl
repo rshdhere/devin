@@ -39,7 +39,7 @@ if ! command -v docker &>/dev/null; then
   systemctl enable --now docker
 fi
 
-# CNI directories for firecracker-host and snapshot builds
+# CNI directories for firecracker and snapshot builds
 mkdir -p /etc/cni/conf.d /opt/cni/bin /var/lib/devin/linux /var/lib/devin/snapshots /var/lib/devin/vms
 
 cat >/etc/cni/resolv.conf <<'RESOLV'
@@ -79,22 +79,22 @@ sysctl --system >/dev/null 2>&1 || sysctl -p /etc/sysctl.d/99-devin-microvm.conf
 
 # Verify KVM (required for Firecracker)
 if [[ -d /dev/kvm && ! -c /dev/kvm ]]; then
-  echo "WARNING: /dev/kvm is a directory — remove before starting firecracker-host" >&2
+  echo "WARNING: /dev/kvm is a directory — remove before starting firecracker" >&2
 elif [[ ! -c /dev/kvm ]]; then
   echo "WARNING: /dev/kvm not found — enable nested virtualization on C7i (see infra/README.md)" >&2
 fi
 
 # Systemd unit templates — scheduler ORCHESTRATOR_URL is updated by devin-sync-platform-config
-cat >/etc/systemd/system/devin-firecracker-host.service <<UNIT
+cat >/etc/systemd/system/devin-firecracker.service <<UNIT
 [Unit]
-Description=devin.baby firecracker-host
+Description=devin.baby firecracker
 After=docker.service
 Requires=docker.service
 
 [Service]
 Restart=always
 RestartSec=5
-ExecStart=/usr/bin/docker run --rm --name firecracker-host \\
+ExecStart=/usr/bin/docker run --rm --name firecracker \\
   --privileged \\
   --network host \\
   -v /dev/kvm:/dev/kvm \\
@@ -117,8 +117,8 @@ ExecStart=/usr/bin/docker run --rm --name firecracker-host \\
   -e FIRECRACKER_CNI_BIN_PATH=/opt/cni/bin \\
   -e FIRECRACKER_CAPACITY_CPU=8 \\
   -e FIRECRACKER_CAPACITY_MEMORY=16Gi \\
-  ${container_registry}/devin-firecracker-host:${image_tag}
-ExecStop=/usr/bin/docker stop firecracker-host
+  ${container_registry}/devin-firecracker:${image_tag}
+ExecStop=/usr/bin/docker stop firecracker
 
 [Install]
 WantedBy=multi-user.target
@@ -127,8 +127,8 @@ UNIT
 cat >/etc/systemd/system/devin-scheduler.service <<UNIT
 [Unit]
 Description=devin.baby scheduler
-After=devin-firecracker-host.service
-Wants=devin-firecracker-host.service
+After=devin-firecracker.service
+Wants=devin-firecracker.service
 
 [Service]
 Restart=always

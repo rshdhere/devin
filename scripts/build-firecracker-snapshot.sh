@@ -27,7 +27,7 @@ MEM_SIZE_MIB="${FIRECRACKER_SNAPSHOT_MEM_MIB:-512}"
 RUNTIME_PORT="${FIRECRACKER_RUNTIME_PORT:-8081}"
 CNI_NETWORK="${FIRECRACKER_CNI_NETWORK:-fcnet}"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-SNAPSHOT_CNI_BIN="${SNAPSHOT_CNI_BIN:-${ROOT}/apps/firecracker-host/bin/snapshot-cni}"
+SNAPSHOT_CNI_BIN="${SNAPSHOT_CNI_BIN:-${ROOT}/apps/firecracker/bin/snapshot-cni}"
 CONTAINER_ID="snapshot-build-${RUNTIME}-$$"
 
 if [[ ! -f "${ROOTFS}" ]]; then
@@ -49,7 +49,7 @@ fi
 
 if [[ ! -x "${SNAPSHOT_CNI_BIN}" ]]; then
   echo "building snapshot-cni helper..."
-  (cd "${ROOT}/apps/firecracker-host" && go build -o "${SNAPSHOT_CNI_BIN}" ./cmd/snapshot-cni)
+  (cd "${ROOT}/apps/firecracker" && go build -o "${SNAPSHOT_CNI_BIN}" ./cmd/snapshot-cni)
 fi
 
 mkdir -p "${WORK}"

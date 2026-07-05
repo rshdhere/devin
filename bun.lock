@@ -28,8 +28,8 @@
         "typescript": "^5",
       },
     },
-    "apps/firecracker-host": {
-      "name": "@devin/firecracker-host",
+    "apps/firecracker": {
+      "name": "@devin/firecracker",
     },
     "apps/orchestrator": {
       "name": "@devin/orchestrator-app",
@@ -362,7 +362,7 @@
 
     "@devin/events": ["@devin/events@workspace:packages/events"],
 
-    "@devin/firecracker-host": ["@devin/firecracker-host@workspace:apps/firecracker-host"],
+    "@devin/firecracker": ["@devin/firecracker@workspace:apps/firecracker"],
 
     "@devin/integration": ["@devin/integration@workspace:tests/integration"],
 

@@ -19,7 +19,7 @@ variable "private_subnet_ids" {
 }
 
 variable "eks_node_security_group_id" {
-  description = "EKS node security group — allowed to reach firecracker-host and scheduler ports."
+  description = "EKS node security group — allowed to reach firecracker and scheduler ports."
   type        = string
 }
 
@@ -71,7 +71,7 @@ variable "container_registry" {
 }
 
 variable "image_tag" {
-  description = "Container image tag for firecracker-host and scheduler."
+  description = "Container image tag for firecracker and scheduler."
   type        = string
   default     = "latest"
 }

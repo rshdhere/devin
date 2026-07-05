@@ -31,9 +31,12 @@ jobs:
           - app: scheduler
             image: devin-scheduler
             dockerfile: docker/scheduler/Dockerfile
-          - app: firecracker-host
-            image: devin-firecracker-host
-            dockerfile: docker/firecracker-host/Dockerfile
+          - app: brain
+            image: devin-brain
+            dockerfile: docker/brain/Dockerfile
+          - app: firecracker
+            image: devin-firecracker
+            dockerfile: docker/firecracker/Dockerfile
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -187,5 +190,5 @@ jobs:
           git config user.name "actions-user"
           git config user.email "actions@github.com"
           git add "${OVERLAY}"
-          git commit -m "chore(devin): update orchestrator, server and web images to ${{ steps.target.outputs.sha }}"
+          git commit -m "chore(devin): update orchestrator, server, brain, and web images to ${{ steps.target.outputs.sha }}"
           git push
