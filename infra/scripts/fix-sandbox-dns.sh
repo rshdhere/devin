@@ -28,9 +28,21 @@ else
       "type": "ptp",
       "ipMasq": true,
       "ipam": {
-        "type": "host-local",
-        "subnet": "192.168.127.0/24",
-        "resolvConf": "/etc/cni/resolv.conf"
+        "type": "static",
+        "addresses": [
+          {
+            "address": "192.168.127.8/24",
+            "gateway": "192.168.127.1"
+          }
+        ],
+        "routes": [
+          {
+            "dst": "0.0.0.0/0"
+          }
+        ],
+        "dns": {
+          "nameservers": ["8.8.8.8", "1.1.1.1", "8.8.4.4"]
+        }
       }
     },
     {
@@ -51,6 +63,11 @@ sysctl --system >/dev/null 2>&1 || sysctl -p /etc/sysctl.d/99-devin-microvm.conf
 echo "CNI DNS configured:"
 echo "  /etc/cni/resolv.conf"
 echo "  /etc/cni/conf.d/fcnet.conflist"
+echo ""
+if [[ -d /var/lib/cni/networks/fcnet ]]; then
+  echo "Removing legacy host-local IPAM state (static IPAM no longer tracks allocations)..."
+  rm -rf /var/lib/cni/networks/fcnet
+fi
 echo ""
 echo "Restart firecracker and rebuild runtime snapshots for full effect:"
 echo "  sudo systemctl restart devin-firecracker"

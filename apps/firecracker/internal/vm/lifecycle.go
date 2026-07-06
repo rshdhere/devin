@@ -82,7 +82,6 @@ func (l *Launcher) Restore(ctx context.Context, vmID, name, runtime string, cpu 
 					ConfDir:     l.cfg.CNIConfDir,
 					BinPath:     []string{l.cfg.CNIBinPath},
 					VMIfName:    meta.NetworkIfaceID,
-					Args:        cnihelper.GuestIPArgs(meta.GuestIP),
 				},
 			},
 		},

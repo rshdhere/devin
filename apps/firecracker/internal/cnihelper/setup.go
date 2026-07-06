@@ -230,6 +230,10 @@ func setLinkUp(args []string) error {
 	return nil
 }
 
+// SnapshotGuestIP is the guest address baked into golden snapshots. Each microVM
+// runs in an isolated network namespace, so every restore can reuse this IP.
+const SnapshotGuestIP = "192.168.127.8"
+
 // GuestIPArgs converts a stored guest IP into CNI runtime args.
 func GuestIPArgs(guestIP string) [][2]string {
 	ip := strings.TrimSpace(guestIP)

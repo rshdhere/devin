@@ -65,9 +65,21 @@ cat >/etc/cni/conf.d/fcnet.conflist <<'CNI'
       "type": "ptp",
       "ipMasq": true,
       "ipam": {
-        "type": "host-local",
-        "subnet": "192.168.127.0/24",
-        "resolvConf": "/etc/cni/resolv.conf"
+        "type": "static",
+        "addresses": [
+          {
+            "address": "192.168.127.8/24",
+            "gateway": "192.168.127.1"
+          }
+        ],
+        "routes": [
+          {
+            "dst": "0.0.0.0/0"
+          }
+        ],
+        "dns": {
+          "nameservers": ["8.8.8.8", "1.1.1.1", "8.8.4.4"]
+        }
       }
     },
     {
