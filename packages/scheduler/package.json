@@ -8,6 +8,7 @@
     "./start-server": "./src/start-server.ts"
   },
   "dependencies": {
+    "@devin/types": "workspace:*",
     "@devin/agent-sdk": "workspace:*",
     "@devin/drizzle": "workspace:*",
     "@devin/events": "workspace:*",

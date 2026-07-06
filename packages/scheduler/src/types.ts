@@ -1,6 +1,7 @@
 import type { DraftPlan } from "./draft-planner.js";
+import type { SandboxRuntime } from "@devin/types";
 
-export type AgentProvider = "cursor" | "claude" | "mock";
+export type { AgentProvider } from "@devin/types";
 
 export type TaskStatus =
   | "queued"
@@ -43,6 +44,7 @@ export interface Task {
   sandboxName?: string;
   message?: string;
   title?: string;
+  runtime?: SandboxRuntime;
   createdAt: string;
   updatedAt: string;
 }
@@ -50,6 +52,7 @@ export interface Task {
 export interface CreateTaskInput {
   prompt: string;
   agent?: AgentProvider;
+  runtime?: SandboxRuntime;
   userId?: string;
   repository?: string;
   createRepository?: string;
@@ -69,6 +72,7 @@ export interface ScheduleJob {
   taskId: string;
   prompt: string;
   agent: AgentProvider;
+  runtime?: SandboxRuntime;
   userId?: string;
   repository?: string;
   createRepository?: string;

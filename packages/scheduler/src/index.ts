@@ -7,6 +7,12 @@ export type {
   QueueJob,
   TaskQueue,
 } from "@devin/queue";
+export {
+  inferStackFromPrompt,
+  resolveRuntimeForTask,
+  runtimeLabel,
+} from "@devin/types";
+export type { SandboxRuntime, StackRuntime } from "@devin/types";
 export { resolveDefaultAgent, usesRuntimeAgent } from "./agent-defaults.js";
 export { resolvePreferredHost } from "./preferred-host.js";
 export { TaskService } from "./task-service.js";

@@ -91,6 +91,7 @@ tasksRouter.post("/", async (req, res) => {
     const response = await createTask({
       prompt: parsed.data.prompt,
       agent: parsed.data.agent,
+      runtime: parsed.data.runtime,
       userId,
       repository,
       createRepository,

@@ -3,6 +3,11 @@ import { EventBus } from "@devin/events";
 import type { TaskEvent, TaskEventType } from "@devin/events";
 import { createQueue, type TaskQueue } from "@devin/queue";
 import { resolveDefaultAgent, usesRuntimeAgent } from "./agent-defaults.js";
+import {
+  inferStackFromPrompt,
+  resolveRuntimeForTask,
+  type StackRuntime,
+} from "@devin/types";
 import { resolvePreferredHost } from "./preferred-host.js";
 import {
   collectInfraDiagnostics,
@@ -183,6 +188,11 @@ export class TaskService {
   createTask(input: CreateTaskInput): Task {
     const now = new Date().toISOString();
     const agent = input.agent ?? this.defaultAgent;
+    const runtime = resolveRuntimeForTask(
+      agent,
+      input.prompt.trim(),
+      input.runtime,
+    );
     const title =
       input.prompt.trim().slice(0, 80) +
       (input.prompt.trim().length > 80 ? "…" : "");
@@ -190,6 +200,7 @@ export class TaskService {
       id: crypto.randomUUID(),
       prompt: input.prompt.trim(),
       agent,
+      runtime,
       status: "queued",
       userId: input.userId,
       repository: input.repository,
@@ -206,6 +217,7 @@ export class TaskService {
     void this.taskStore.upsertTask(task);
     this.emit("task.created", task.id, "Task accepted", {
       agent: task.agent,
+      runtime: task.runtime,
       repository: task.repository,
     });
 
@@ -213,6 +225,7 @@ export class TaskService {
       taskId: task.id,
       prompt: task.prompt,
       agent: task.agent,
+      runtime: task.runtime,
       userId: input.userId,
       repository: input.repository,
       createRepository: input.createRepository,
@@ -438,14 +451,15 @@ export class TaskService {
   }
 
   getTask(taskId: string): Task | undefined {
-    return this.tasks.get(taskId);
+    const task = this.tasks.get(taskId);
+    return task ? hydrateTaskRuntime(task) : undefined;
   }
 
   listTasks(): Task[] {
     if (this.tasks.size > 0) {
-      return [...this.tasks.values()].sort((a, b) =>
-        b.createdAt.localeCompare(a.createdAt),
-      );
+      return [...this.tasks.values()]
+        .map(hydrateTaskRuntime)
+        .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
     }
     return [];
   }
@@ -453,11 +467,12 @@ export class TaskService {
   async listTasksFromStore(userId?: string): Promise<Task[]> {
     const stored = await this.taskStore.listTasks(userId);
     for (const task of stored) {
-      if (!this.tasks.has(task.id)) {
-        this.tasks.set(task.id, task);
+      const hydrated = hydrateTaskRuntime(task);
+      if (!this.tasks.has(hydrated.id)) {
+        this.tasks.set(hydrated.id, hydrated);
       }
     }
-    return stored;
+    return stored.map(hydrateTaskRuntime);
   }
 
   async getInfraDiagnostics(): Promise<InfraDiagnostics> {
@@ -510,6 +525,11 @@ export class TaskService {
     }
     if (!task) {
       return;
+    }
+    task = hydrateTaskRuntime(task);
+    if (job.runtime) {
+      task.runtime = job.runtime;
+      this.tasks.set(task.id, task);
     }
 
     if (
@@ -691,7 +711,10 @@ export class TaskService {
         task.sessionActive = true;
         this.updateTask(task.id, "sandbox_starting", "Creating devbox");
 
-        const runtimeImage = runtimeForAgent(task.agent);
+        const runtimeImage =
+          task.runtime ??
+          job.runtime ??
+          resolveRuntimeForTask(task.agent, task.prompt);
 
         if (this.firecrackerHostUrl) {
           const hostIssue = await validateFirecrackerHostForRuntime(
@@ -864,6 +887,7 @@ export class TaskService {
                 taskId: task.id,
                 repoCwd,
                 prompt: task.prompt,
+                stackRuntime: resolveStackRuntime(task, job),
                 title: task.title ?? "project",
                 botName: bot.name,
                 botEmail: bot.email,
@@ -962,6 +986,7 @@ export class TaskService {
             runtime,
             task,
             repoCwd,
+            resolveStackRuntime(task, job),
           );
         } else {
           runResult = await runtime.runAndWait(
@@ -2295,10 +2320,12 @@ export class TaskService {
     runtime: RuntimeClient,
     task: Task,
     repoCwd: string,
+    stackRuntime: StackRuntime,
   ): Promise<RunResponse> {
     this.emit("agent.log", task.id, "Running template verify pipeline", {
       agent: "mock",
       phase: "template_verify",
+      runtime: stackRuntime,
     });
 
     const hasPackageJson = await runtime.terminalAllowFailure({
@@ -2307,7 +2334,69 @@ export class TaskService {
       command: "test -f package.json && echo yes || echo no",
     });
 
-    if (hasPackageJson.stdout.trim() === "yes") {
+    const hasGoMod = await runtime.terminalAllowFailure({
+      taskId: task.id,
+      cwd: repoCwd,
+      command: "test -f go.mod && echo yes || echo no",
+    });
+
+    const hasCargoToml = await runtime.terminalAllowFailure({
+      taskId: task.id,
+      cwd: repoCwd,
+      command: "test -f Cargo.toml && echo yes || echo no",
+    });
+
+    const hasPythonProject = await runtime.terminalAllowFailure({
+      taskId: task.id,
+      cwd: repoCwd,
+      command:
+        "test -f requirements.txt -o -f pyproject.toml -o -f setup.py && echo yes || echo no",
+    });
+
+    if (stackRuntime === "go" || hasGoMod.stdout.trim() === "yes") {
+      this.emit("agent.log", task.id, "Verifying Go module", { cwd: repoCwd });
+      const tidy = await runtime.terminalAllowFailure({
+        taskId: task.id,
+        cwd: repoCwd,
+        command: "timeout 120 go mod tidy 2>&1",
+      });
+      if (tidy.exitCode !== 0 && tidy.exitCode !== 124) {
+        throw new Error(
+          `go mod tidy failed: ${tidy.stderr || tidy.stdout}`.trim(),
+        );
+      }
+    } else if (
+      stackRuntime === "rust" ||
+      hasCargoToml.stdout.trim() === "yes"
+    ) {
+      this.emit("agent.log", task.id, "Verifying Rust crate", { cwd: repoCwd });
+      const check = await runtime.terminalAllowFailure({
+        taskId: task.id,
+        cwd: repoCwd,
+        command: "timeout 180 cargo check 2>&1",
+      });
+      if (check.exitCode !== 0 && check.exitCode !== 124) {
+        throw new Error(
+          `cargo check failed: ${check.stderr || check.stdout}`.trim(),
+        );
+      }
+    } else if (
+      stackRuntime === "python" ||
+      hasPythonProject.stdout.trim() === "yes"
+    ) {
+      this.emit("agent.log", task.id, "Installing Python dependencies", {
+        cwd: repoCwd,
+      });
+      const install = await runtime.terminalAllowFailure({
+        taskId: task.id,
+        cwd: repoCwd,
+        command:
+          "timeout 180 bash -lc 'if [ -f requirements.txt ]; then pip install -r requirements.txt; elif [ -f pyproject.toml ]; then pip install .; else pip install flask fastapi; fi' 2>&1",
+      });
+      if (install.exitCode === 124) {
+        throw new Error("Python dependency install timed out after 180s");
+      }
+    } else if (hasPackageJson.stdout.trim() === "yes") {
       this.emit("agent.log", task.id, "Installing dependencies (npm install)", {
         cwd: repoCwd,
       });
@@ -3064,11 +3153,19 @@ function resolveServiceMode(): ServiceMode {
   return "standalone";
 }
 
-function runtimeForAgent(agent: AgentProvider): string {
-  if (agent === "mock") {
-    return "nextjs";
+function hydrateTaskRuntime(task: Task): Task {
+  if (!task.runtime) {
+    task.runtime = resolveRuntimeForTask(task.agent, task.prompt);
   }
-  return "agent";
+  return task;
+}
+
+function resolveStackRuntime(task: Task, job?: ScheduleJob): StackRuntime {
+  const candidate = task.runtime ?? job?.runtime;
+  if (candidate && candidate !== "agent") {
+    return candidate;
+  }
+  return inferStackFromPrompt(task.prompt);
 }
 
 function resolveBotToken(): string | undefined {

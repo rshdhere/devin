@@ -1,4 +1,7 @@
 import type { AgentProvider } from "./types.js";
+import { usesRuntimeAgent } from "@devin/types";
+
+export { usesRuntimeAgent };
 
 export function resolveDefaultAgent(): AgentProvider {
   const raw = process.env.DEFAULT_AGENT?.trim();
@@ -12,8 +15,4 @@ export function resolveDefaultAgent(): AgentProvider {
     return "claude";
   }
   return "cursor";
-}
-
-export function usesRuntimeAgent(agent: AgentProvider): boolean {
-  return agent === "cursor" || agent === "claude";
 }

@@ -68,6 +68,7 @@
       "name": "@devin/web",
       "version": "0.1.0",
       "dependencies": {
+        "@devin/types": "workspace:*",
         "@devin/ui": "workspace:*",
         "better-auth": "^1.6.18",
         "motion": "^12.40.0",
@@ -172,6 +173,7 @@
         "@devin/drizzle": "workspace:*",
         "@devin/events": "workspace:*",
         "@devin/queue": "workspace:*",
+        "@devin/types": "workspace:*",
       },
       "peerDependencies": {
         "typescript": "^5",
@@ -200,9 +202,6 @@
     },
     "packages/types": {
       "name": "@devin/types",
-      "devDependencies": {
-        "@types/bun": "latest",
-      },
       "peerDependencies": {
         "typescript": "^5",
       },

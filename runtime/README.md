@@ -2,6 +2,17 @@
 
 Runtime images become **Firecracker golden snapshots**. Each directory builds a Docker image that is exported to `rootfs.ext4`, booted once, snapshotted, and restored in ~300ms by `firecracker`.
 
+The scheduler picks a **runtime** snapshot from the user prompt (Template agent) or always **`agent`** for Cursor/Claude:
+
+| Prompt signals | Snapshot |
+| --- | --- |
+| next.js, nextjs, turbopack | `nextjs` |
+| node, express, todo-app, npm | `node` |
+| go, golang, gin | `go` |
+| rust, cargo | `rust` |
+| python, django, fastapi | `python` |
+| Cursor / Claude agent | `agent` (always) |
+
 Build every image from the **repository root**.
 
 ## Prerequisites

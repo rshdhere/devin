@@ -11,6 +11,7 @@
     "check-types": "next typegen && tsc --noEmit"
   },
   "dependencies": {
+    "@devin/types": "workspace:*",
     "@devin/ui": "workspace:*",
     "better-auth": "^1.6.18",
     "motion": "^12.40.0",

@@ -9,7 +9,8 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { createTask, fetchTasks, type Task } from "@/lib/tasks-api";
+import { createTask, fetchTasks } from "@/lib/api/tasks";
+import type { Task } from "@devin/types";
 
 interface SessionsContextValue {
   tasks: Task[];

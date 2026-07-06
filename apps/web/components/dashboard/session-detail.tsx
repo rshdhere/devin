@@ -28,6 +28,17 @@ import {
 import { MotionButton } from "@/components/dashboard/motion-button";
 import { DEVIN_BOT } from "@/lib/devin-bot";
 import { useSessions } from "@/components/dashboard/sessions-context";
+import type {
+  InfraDiagnostics,
+  Task,
+  TaskDiagnostics,
+  TaskEvent,
+} from "@devin/types";
+import {
+  resolveRuntimeForTask,
+  runtimeLabel,
+  usesRuntimeAgent,
+} from "@devin/types";
 import {
   eventTypeLabel,
   fetchInfraDiagnostics,
@@ -43,10 +54,6 @@ import {
   terminateSession,
   subscribeToTaskEvents,
   taskStatusLabel,
-  type InfraDiagnostics,
-  type Task,
-  type TaskDiagnostics,
-  type TaskEvent,
 } from "@/lib/tasks-api";
 import { cn } from "@/lib/utils";
 import { DevboxWorkspace } from "@/components/dashboard/devbox-workspace";
@@ -215,7 +222,7 @@ function LiveWorkPanel({ task, events }: { task: Task; events: TaskEvent[] }) {
   const latestDraft = draftEvents[draftEvents.length - 1];
   const draftSummary = events.find((event) => event.type === "draft.completed")
     ?.data?.summary;
-  const runtimeAgent = task.agent === "cursor" || task.agent === "claude";
+  const runtimeAgent = usesRuntimeAgent(task.agent);
   const reviewDiff = events.find((event) => event.data?.awaitingReview === true)
     ?.data?.diff;
 
@@ -930,7 +937,7 @@ function PreviewDeployBanner({
 }
 
 function PhaseTimeline({ task, events }: { task: Task; events: TaskEvent[] }) {
-  const runtimeAgent = task.agent === "cursor" || task.agent === "claude";
+  const runtimeAgent = usesRuntimeAgent(task.agent);
   const draftCompleted = events.some(
     (event) => event.type === "draft.completed",
   );
@@ -1132,6 +1139,10 @@ export function SessionDetail({
     task.status !== "failed" &&
     task.status !== "cancelled";
 
+  const runtimeAgent = usesRuntimeAgent(task.agent);
+  const devboxRuntime =
+    task.runtime ?? resolveRuntimeForTask(task.agent, task.prompt);
+
   const elapsedTime = useElapsedTime(task.createdAt, isActive);
   const isLongRunning =
     isActive && Date.now() - new Date(task.createdAt).getTime() > 5 * 60 * 1000;
@@ -1212,8 +1223,7 @@ export function SessionDetail({
   const sessionActive =
     task.sessionActive === true ||
     task.status === "awaiting_review" ||
-    (task.status === "completed" &&
-      (task.agent === "cursor" || task.agent === "claude"));
+    (task.status === "completed" && usesRuntimeAgent(task.agent));
 
   const handleContinueSession = useCallback(async () => {
     const trimmed = followUpPrompt.trim();
@@ -1424,6 +1434,14 @@ export function SessionDetail({
                 <span className="text-gray-600">{task.branch}</span>
               </>
             ) : null}
+            {devboxRuntime ? (
+              <>
+                <span>•</span>
+                <span className="text-indigo-300/80">
+                  {runtimeLabel(devboxRuntime)}
+                </span>
+              </>
+            ) : null}
           </div>
         </div>
 
@@ -1608,6 +1626,13 @@ export function SessionDetail({
         ) : null}
 
         <DevboxWorkspace task={task} onTaskChange={setTask} />
+
+        {runtimeAgent ? (
+          <p className="text-[12px] text-gray-500">
+            Shell, Files, and Browser are available while the devbox is booting
+            or the agent is running.
+          </p>
+        ) : null}
 
         <LiveWorkPanel task={task} events={events} />
 

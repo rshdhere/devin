@@ -13,7 +13,7 @@ set -euo pipefail
 REPO_URL="${DEVIN_REPO_URL:-https://github.com/rshdhere/devin.git}"
 REPO_REF="${DEVIN_REPO_REF:-main}"
 BUILD_DIR="${DEVIN_BUILD_DIR:-/opt/devin-build}"
-RUNTIMES="${DEVIN_RUNTIMES:-nextjs agent}"
+RUNTIMES="${DEVIN_RUNTIMES:-nextjs agent node go rust python}"
 CONTAINER_REGISTRY="${DEVIN_CONTAINER_REGISTRY:-docker.io/rshdhere}"
 CONTAINER_IMAGE_TAG="${DEVIN_CONTAINER_IMAGE_TAG:-latest}"
 FIRECRACKER_VERSION="${FIRECRACKER_VERSION:-1.8.0}"

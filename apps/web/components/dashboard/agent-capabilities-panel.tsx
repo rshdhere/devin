@@ -1,10 +1,10 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { ExternalLink, KeyRound, Loader2, X } from "lucide-react";
+import { KeyRound, Loader2, X } from "lucide-react";
 import { motion } from "motion/react";
 import { MotionButton } from "@/components/dashboard/motion-button";
-import { fetchInfraDiagnostics } from "@/lib/tasks-api";
+import { fetchInfraDiagnostics } from "@/lib/api/tasks";
 import { cn } from "@/lib/utils";
 
 interface AgentCapabilitiesPanelProps {
@@ -32,7 +32,7 @@ export function AgentCapabilitiesPanel({
   const [openaiConfigured, setOpenaiConfigured] = useState(false);
   const [cursorConfigured, setCursorConfigured] = useState(false);
   const [anthropicConfigured, setAnthropicConfigured] = useState(false);
-  const [defaultAgent, setDefaultAgent] = useState("mock");
+  const [defaultAgent, setDefaultAgent] = useState("cursor");
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -100,8 +100,8 @@ export function AgentCapabilitiesPanel({
                 Agent capabilities
               </h3>
               <p className="mt-1 text-[13px] text-gray-500">
-                OpenAI plans greenfield scaffolds; Cursor and Claude are
-                optional for in-sandbox agents.
+                Runtime agents (Cursor / Claude) run inside the devbox. OpenAI
+                is only required for the legacy Template agent.
               </p>
             </div>
           </div>
@@ -126,31 +126,9 @@ export function AgentCapabilitiesPanel({
             <div className="rounded-lg border border-[#2a2a2a] bg-[#141414] px-3 py-2.5">
               <div className="flex items-center justify-between gap-3">
                 <div>
-                  <p className="text-[13px] text-gray-200">OpenAI API key</p>
-                  <p className="text-[11px] text-gray-600">
-                    Required for greenfield draft planning (default:{" "}
-                    {defaultAgent})
-                  </p>
-                </div>
-                <span
-                  className={cn(
-                    "rounded-full px-2.5 py-1 text-[11px] font-medium",
-                    openaiConfigured
-                      ? "bg-emerald-500/10 text-emerald-400"
-                      : "bg-red-500/10 text-red-400",
-                  )}
-                >
-                  {openaiConfigured ? "Configured" : "Missing"}
-                </span>
-              </div>
-            </div>
-
-            <div className="rounded-lg border border-[#2a2a2a] bg-[#141414] px-3 py-2.5">
-              <div className="flex items-center justify-between gap-3">
-                <div>
                   <p className="text-[13px] text-gray-200">Cursor API key</p>
                   <p className="text-[11px] text-gray-600">
-                    Required only when explicitly using the Cursor agent
+                    Required for the default Cursor agent in the devbox
                   </p>
                 </div>
                 <span
@@ -158,10 +136,10 @@ export function AgentCapabilitiesPanel({
                     "rounded-full px-2.5 py-1 text-[11px] font-medium",
                     cursorConfigured
                       ? "bg-emerald-500/10 text-emerald-400"
-                      : "bg-amber-500/10 text-amber-400",
+                      : "bg-red-500/10 text-red-400",
                   )}
                 >
-                  {cursorConfigured ? "Configured" : "Optional"}
+                  {cursorConfigured ? "Configured" : "Missing"}
                 </span>
               </div>
             </div>
@@ -171,7 +149,7 @@ export function AgentCapabilitiesPanel({
                 <div>
                   <p className="text-[13px] text-gray-200">Anthropic API key</p>
                   <p className="text-[11px] text-gray-600">
-                    Required only when using the Claude agent
+                    Required when using the Claude agent
                   </p>
                 </div>
                 <span
@@ -186,44 +164,56 @@ export function AgentCapabilitiesPanel({
                 </span>
               </div>
             </div>
+
+            <div className="rounded-lg border border-[#2a2a2a] bg-[#141414] px-3 py-2.5">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-[13px] text-gray-200">OpenAI API key</p>
+                  <p className="text-[11px] text-gray-600">
+                    Legacy Template agent only (platform default: {defaultAgent}
+                    )
+                  </p>
+                </div>
+                <span
+                  className={cn(
+                    "rounded-full px-2.5 py-1 text-[11px] font-medium",
+                    openaiConfigured
+                      ? "bg-emerald-500/10 text-emerald-400"
+                      : "bg-amber-500/10 text-amber-400",
+                  )}
+                >
+                  {openaiConfigured ? "Configured" : "Not needed for Cursor"}
+                </span>
+              </div>
+            </div>
           </div>
         )}
 
         <div className="mt-5 rounded-lg border border-[#2a2a2a] bg-[#111] p-3">
           <p className="text-[12px] font-medium text-gray-300">
-            Where to set the platform OpenAI key (admin)
+            Where to set platform API keys (admin)
           </p>
           <ol className="mt-2 list-decimal space-y-1.5 pl-4 text-[12px] leading-relaxed text-gray-500">
             <li>
-              Create an API key at{" "}
-              <a
-                href="https://platform.openai.com/api-keys"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-1 text-[#5a9fd4] hover:text-[#6aa8ef]"
-              >
-                platform.openai.com/api-keys
-                <ExternalLink className="size-3" />
-              </a>
-            </li>
-            <li>
-              Store it in AWS SSM as a{" "}
-              <span className="text-gray-400">SecureString</span> at{" "}
+              Store keys in AWS SSM as SecureStrings, e.g.{" "}
               <code className="rounded bg-[#1a1a1a] px-1 py-0.5 text-[11px] text-gray-300">
-                /devin-production/platform/openai_api_key
+                /devin-production/platform/cursor_api_key
               </code>
             </li>
             <li>
               Sync the execution host:{" "}
               <code className="rounded bg-[#1a1a1a] px-1 py-0.5 text-[11px] text-gray-300">
-                ./infra/scripts/sync-execution-host-config.sh
-                &lt;instance-id&gt;
+                ./infra/scripts/devin-sync-platform-config.sh
               </code>
             </li>
             <li>
-              Greenfield tasks use the Template agent with the{" "}
-              <span className="text-gray-400">nextjs</span> runtime snapshot —
-              no Cursor key required.
+              Runtime agents boot the{" "}
+              <span className="text-gray-400">agent</span> snapshot and call
+              Cursor or Anthropic from inside the microVM.
+            </li>
+            <li>
+              Set <span className="text-gray-400">DEFAULT_AGENT=cursor</span> on
+              the scheduler for Devin-like sessions (no control-plane draft).
             </li>
           </ol>
         </div>

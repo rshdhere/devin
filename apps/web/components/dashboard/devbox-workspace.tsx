@@ -9,8 +9,9 @@ import {
   runTaskTerminalStream,
   wakeSession,
   fetchTask,
-  type Task,
-} from "@/lib/tasks-api";
+} from "@/lib/api/tasks";
+import type { Task } from "@devin/types";
+import { canUseDevbox } from "@/lib/sessions/devbox";
 import { cn } from "@/lib/utils";
 
 type WorkspaceTab = "shell" | "files" | "browser";
@@ -28,12 +29,7 @@ interface FileEntry {
 }
 
 export function DevboxWorkspace({ task, onTaskChange }: DevboxWorkspaceProps) {
-  const canUse =
-    task.sessionActive === true ||
-    task.sessionSleeping === true ||
-    task.status === "awaiting_review" ||
-    (task.status === "completed" &&
-      (task.agent === "cursor" || task.agent === "claude"));
+  const canUse = canUseDevbox(task);
 
   const [tab, setTab] = useState<WorkspaceTab>("shell");
   const [waking, setWaking] = useState(false);
