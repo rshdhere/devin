@@ -1,12 +1,12 @@
-export type { AgentProvider } from "./agents.js";
-export { isTemplateAgent, usesRuntimeAgent } from "./agents.js";
+export type { AgentProvider } from "./agents";
+export { isTemplateAgent, usesRuntimeAgent } from "./agents";
 export type {
   CreateTaskRequest,
   GitHubPermissions,
   Task,
   TaskStatus,
-} from "./tasks.js";
-export type { TaskEvent, TaskEventType } from "./events.js";
+} from "./tasks";
+export type { TaskEvent, TaskEventType } from "./events";
 export type {
   FirecrackerHostStatus,
   InfraDiagnostics,
@@ -14,7 +14,7 @@ export type {
   ServiceProbe,
   TaskDiagnostics,
   WarmRuntimeStatus,
-} from "./diagnostics.js";
+} from "./diagnostics";
 export {
   inferStackFromPrompt,
   isSandboxRuntime,
@@ -22,5 +22,5 @@ export {
   runtimeLabel,
   stackRuntimes,
   SANDBOX_RUNTIMES,
-} from "./runtime.js";
-export type { SandboxRuntime, StackRuntime } from "./runtime.js";
+} from "./runtime";
+export type { SandboxRuntime, StackRuntime } from "./runtime";
