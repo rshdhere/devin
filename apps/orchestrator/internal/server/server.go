@@ -16,11 +16,12 @@ import (
 // InternalServer exposes sandbox lifecycle endpoints for the scheduler only.
 type InternalServer struct {
 	store     store.SandboxStore
+	hostStore store.HostStore
 	namespace string
 }
 
-func NewInternal(sandboxStore store.SandboxStore, namespace string) *InternalServer {
-	return &InternalServer{store: sandboxStore, namespace: namespace}
+func NewInternal(sandboxStore store.SandboxStore, hostStore store.HostStore, namespace string) *InternalServer {
+	return &InternalServer{store: sandboxStore, hostStore: hostStore, namespace: namespace}
 }
 
 func (s *InternalServer) Handler() http.Handler {
@@ -32,6 +33,7 @@ func (s *InternalServer) Handler() http.Handler {
 	mux.HandleFunc("DELETE /internal/v1/sandboxes/{name}", s.handleDeleteSandbox)
 	mux.HandleFunc("POST /internal/v1/sandboxes/{name}/suspend", s.handleSuspendSandbox)
 	mux.HandleFunc("POST /internal/v1/sandboxes/{name}/wake", s.handleWakeSandbox)
+	mux.HandleFunc("PUT /internal/v1/firecracker-hosts/{name}", s.handleUpsertFirecrackerHost)
 	return mux
 }
 
@@ -204,6 +206,59 @@ func (s *InternalServer) handleWakeSandbox(w http.ResponseWriter, r *http.Reques
 	}
 
 	writeJSON(w, http.StatusOK, sandbox)
+}
+
+type upsertFirecrackerHostRequest struct {
+	Spec devinv1.FirecrackerHostSpec `json:"spec"`
+}
+
+func (s *InternalServer) handleUpsertFirecrackerHost(w http.ResponseWriter, r *http.Request) {
+	if s.hostStore == nil {
+		writeError(w, http.StatusServiceUnavailable, "firecracker host registry is unavailable")
+		return
+	}
+
+	name := strings.TrimSpace(r.PathValue("name"))
+	if name == "" {
+		writeError(w, http.StatusBadRequest, "name is required")
+		return
+	}
+
+	var req upsertFirecrackerHostRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	if strings.TrimSpace(req.Spec.Address) == "" {
+		writeError(w, http.StatusBadRequest, "spec.address is required")
+		return
+	}
+	if req.Spec.Capacity.CPU <= 0 {
+		req.Spec.Capacity.CPU = 8
+	}
+	if strings.TrimSpace(req.Spec.Capacity.Memory) == "" {
+		req.Spec.Capacity.Memory = "16Gi"
+	}
+
+	host := &devinv1.FirecrackerHost{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: name,
+			Labels: map[string]string{
+				"devin.baby/managed-by": "scheduler",
+			},
+		},
+		Spec: req.Spec,
+	}
+
+	if err := s.hostStore.Upsert(r.Context(), host); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"name": name,
+		"spec": host.Spec,
+	})
 }
 
 func writeJSON(w http.ResponseWriter, status int, payload any) {

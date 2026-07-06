@@ -6,6 +6,7 @@ import {
 import {
   formatSSE,
   handlePreviewProxy,
+  registerExecutionHost,
   resolvePreferredHost,
   shouldHandlePreviewHost,
   TaskService,
@@ -41,6 +42,19 @@ export async function startSchedulerServer(
   });
 
   await tasks.initialize();
+
+  try {
+    await registerExecutionHost({
+      orchestratorUrl: options.orchestratorUrl,
+      hostName: preferredHost,
+    });
+  } catch (error) {
+    console.error(
+      "firecracker host registration failed:",
+      error instanceof Error ? error.message : error,
+    );
+  }
+
   tasks.startWorker();
 
   const server = createServer(async (req, res) => {

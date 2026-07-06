@@ -15,6 +15,7 @@ export {
 export type { SandboxRuntime, StackRuntime } from "@devin/types";
 export { resolveDefaultAgent, usesRuntimeAgent } from "./agent-defaults.js";
 export { resolvePreferredHost } from "./preferred-host.js";
+export { registerExecutionHost } from "./register-execution-host.js";
 export { TaskService } from "./task-service.js";
 export { TaskStore } from "./task-store.js";
 export type { PersistedSession, AgentSessionState } from "./task-store.js";

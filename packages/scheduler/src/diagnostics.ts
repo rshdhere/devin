@@ -1,6 +1,5 @@
 import { resolveDefaultAgent } from "./agent-defaults.js";
 import { resolvePreferredHost } from "./preferred-host.js";
-import { resolvePreferredHost } from "./preferred-host.js";
 
 export interface ServiceProbe {
   url: string;

@@ -199,3 +199,39 @@ else
   echo "scheduler health check failed after sync" >&2
   journalctl -u devin-scheduler.service --no-pager -n 20 || true
 fi
+
+register_firecracker_host() {
+  if [[ -z "${ORCHESTRATOR_URL:-}" || "$ORCHESTRATOR_URL" == http://REPLACE_AFTER_ORCHESTRATOR_NLB:* ]]; then
+    return 0
+  fi
+  local host_name private_ip
+  host_name="$(read_execution_host_name 2>/dev/null || true)"
+  if [[ -z "$host_name" ]]; then
+    return 0
+  fi
+  private_ip="$(curl -sf --max-time 2 http://169.254.169.254/latest/meta-data/local-ipv4 2>/dev/null || true)"
+  if [[ -z "$private_ip" ]]; then
+    private_ip="$(hostname -I 2>/dev/null | awk '{print $1}')"
+  fi
+  if [[ -z "$private_ip" ]]; then
+    echo "could not resolve execution host private IP for FirecrackerHost registration" >&2
+    return 0
+  fi
+
+  local payload
+  payload="$(jq -nc \
+    --arg address "http://${private_ip}:9092" \
+    --arg scheduler "http://${private_ip}:9091" \
+    '{spec:{address:$address,schedulerAddress:$scheduler,capacity:{cpu:8,memory:"16Gi"}}}')"
+
+  if curl -sfS -X PUT \
+    -H 'Content-Type: application/json' \
+    --data "$payload" \
+    "${ORCHESTRATOR_URL%/}/internal/v1/firecracker-hosts/${host_name}" >/dev/null; then
+    echo "registered FirecrackerHost ${host_name} with orchestrator at ${ORCHESTRATOR_URL}"
+  else
+    echo "FirecrackerHost registration failed (orchestrator may need redeploy with host registry API)" >&2
+  fi
+}
+
+register_firecracker_host || true

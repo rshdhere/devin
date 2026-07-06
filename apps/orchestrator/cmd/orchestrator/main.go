@@ -37,6 +37,7 @@ func main() {
 	defer stop()
 
 	var sandboxStore store.SandboxStore
+	var hostStore store.HostStore
 
 	if cfg.DryRun {
 		slog.Info("orchestrator running in dry-run mode", "namespace", cfg.SandboxNamespace)
@@ -92,10 +93,12 @@ func main() {
 		}()
 
 		sandboxStore = store.NewKubernetesStore(mgr.GetClient(), cfg.SandboxNamespace)
+		hostStore = store.NewKubernetesHostStore(mgr.GetClient(), cfg.FirecrackerNamespace)
+		reconcile.StartExternalHostBootstrap(ctx, hostStore, cfg)
 		slog.Info("orchestrator connected to kubernetes", "namespace", cfg.SandboxNamespace)
 	}
 
-	httpServer := server.NewInternal(sandboxStore, cfg.SandboxNamespace)
+	httpServer := server.NewInternal(sandboxStore, hostStore, cfg.SandboxNamespace)
 	addr := ":" + strconv.Itoa(port)
 	srv := &http.Server{
 		Addr:              addr,

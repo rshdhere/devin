@@ -10,6 +10,7 @@ import (
 var (
 	ErrNotFound      = errors.New("sandbox not found")
 	ErrAlreadyExists = errors.New("sandbox already exists")
+	ErrInvalidHost   = errors.New("invalid firecracker host")
 )
 
 type SandboxStore interface {

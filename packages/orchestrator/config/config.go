@@ -21,6 +21,8 @@ type Config struct {
 	SchedulerPort        int
 	DefaultHostCPU       int32
 	DefaultHostMemory    string
+	ExternalHostsJSON    string
+	ExternalHostsFile    string
 }
 
 func LoadFromEnv() Config {
@@ -39,6 +41,8 @@ func LoadFromEnv() Config {
 		SchedulerPort:        envInt("SCHEDULER_PORT", 9091),
 		DefaultHostCPU:       int32(envInt("FIRECRACKER_DEFAULT_HOST_CPU", 8)),
 		DefaultHostMemory:    envString("FIRECRACKER_DEFAULT_HOST_MEMORY", "16Gi"),
+		ExternalHostsJSON:    envString("ORCHESTRATOR_EXTERNAL_HOSTS", ""),
+		ExternalHostsFile:    envString("ORCHESTRATOR_EXTERNAL_HOSTS_FILE", ""),
 	}
 }
 
