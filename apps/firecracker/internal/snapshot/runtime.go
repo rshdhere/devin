@@ -3,9 +3,12 @@ package snapshot
 import (
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/rshdhere/devin/apps/firecracker/internal/cnihelper"
 )
 
 type Metadata struct {
@@ -52,6 +55,10 @@ func (s *Store) Resolve(runtime string) (*Metadata, error) {
 		var meta Metadata
 		if err := json.Unmarshal(data, &meta); err != nil {
 			return nil, fmt.Errorf("decode snapshot metadata: %w", err)
+		}
+		if meta.GuestIP != "" && meta.GuestIP != cnihelper.SnapshotGuestIP {
+			slog.Warn("snapshot guest IP differs from static cni guest IP; rebuild snapshot after migrating to static ipam",
+				"runtime", runtime, "guestIP", meta.GuestIP, "expected", cnihelper.SnapshotGuestIP)
 		}
 		meta.Runtime = runtime
 		s.applyDefaults(&meta, dir)

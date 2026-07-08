@@ -444,6 +444,23 @@ function DiagnosticsPanel({
               then rebuild the agent snapshot.
             </p>
           ) : null}
+          {/not available in range|failed to allocate|failed to create CNI network/i.test(
+            task.message,
+          ) ? (
+            <p className="text-[12px] leading-relaxed text-amber-200/90">
+              Sandbox networking failed while allocating the microVM IP. On the
+              execution host run{" "}
+              <span className="font-mono text-amber-100">
+                sudo ./infra/scripts/fix-sandbox-dns.sh
+              </span>
+              , then restart firecracker and scheduler. If the error persists,
+              redeploy the latest{" "}
+              <span className="font-mono text-amber-100">
+                devin-firecracker
+              </span>{" "}
+              image on the host.
+            </p>
+          ) : null}
         </div>
       ) : null}
 

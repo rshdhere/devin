@@ -81,12 +81,13 @@ nameserver 8.8.4.4
 RESOLV
   fi
 
-  if [[ ! -f /etc/cni/conf.d/fcnet.conflist ]]; then
-    log "installing fcnet CNI config"
+  if [[ ! -f /etc/cni/conf.d/fcnet.conflist ]] || grep -q '"host-local"' /etc/cni/conf.d/fcnet.conflist; then
+    log "installing fcnet CNI config (static IPAM)"
     local raw_base="${DEVIN_RAW_BASE:-https://raw.githubusercontent.com/rshdhere/devin/${REPO_REF}}"
     curl -fsSL \
       "${raw_base}/apps/firecracker/config/cni/fcnet.conflist" \
       -o /etc/cni/conf.d/fcnet.conflist
+    rm -rf /var/lib/cni/networks/fcnet
   fi
 
   if [[ ! -f /opt/cni/bin/tc-redirect-tap ]]; then

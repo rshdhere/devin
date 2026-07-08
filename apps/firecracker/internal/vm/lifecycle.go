@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	firecracker "github.com/firecracker-microvm/firecracker-go-sdk"
@@ -17,6 +18,10 @@ import (
 	"github.com/rshdhere/devin/apps/firecracker/internal/config"
 	"github.com/rshdhere/devin/apps/firecracker/internal/snapshot"
 )
+
+// restoreNetworkMu serializes CNI setup. Static fcnet IPAM uses a single host-side
+// peer address, so only one microVM network can be provisioned at a time.
+var restoreNetworkMu sync.Mutex
 
 type Launcher struct {
 	cfg      config.Config
@@ -110,10 +115,13 @@ func (l *Launcher) Restore(ctx context.Context, vmID, name, runtime string, cpu 
 		return nil, fmt.Errorf("create firecracker machine: %w", err)
 	}
 
-	if err := machine.Start(vmmCtx); err != nil {
+	restoreNetworkMu.Lock()
+	startErr := machine.Start(vmmCtx)
+	restoreNetworkMu.Unlock()
+	if startErr != nil {
 		cancel()
 		_ = machine.StopVMM()
-		return nil, fmt.Errorf("start firecracker machine: %w", err)
+		return nil, fmt.Errorf("start firecracker machine: %w", startErr)
 	}
 
 	if tapDevice, err := tapDeviceFromMachine(machine); err == nil {

@@ -68,6 +68,33 @@ if [[ -d /var/lib/cni/networks/fcnet ]]; then
   echo "Removing legacy host-local IPAM state (static IPAM no longer tracks allocations)..."
   rm -rf /var/lib/cni/networks/fcnet
 fi
+if [[ -f /etc/cni/conf.d/fcnet.conflist ]] && grep -q '"host-local"' /etc/cni/conf.d/fcnet.conflist; then
+  echo "Migrating fcnet CNI config from host-local to static IPAM..."
+  cp "${FCNET_SRC}" /etc/cni/conf.d/fcnet.conflist 2>/dev/null || true
+fi
+
+if [[ -d /var/run/netns ]]; then
+  echo "Removing orphaned microVM network namespaces..."
+  for netns_path in /var/run/netns/*; do
+    [[ -e "$netns_path" ]] || continue
+    container_id="$(basename "$netns_path")"
+    CNI_PATH="${CNI_PATH:-/opt/cni/bin}" \
+      cnitool del fcnet "$container_id" >/dev/null 2>&1 \
+      || /opt/cni/bin/cnitool del fcnet "$container_id" >/dev/null 2>&1 \
+      || true
+    ip netns del "$container_id" >/dev/null 2>&1 || rm -f "$netns_path"
+    rm -rf "${CNI_STATE_DIR}/${container_id}"
+  done
+fi
+
+if command -v iptables >/dev/null; then
+  echo "Removing stale CNI iptables chains..."
+  while read -r chain; do
+    [[ -n "$chain" ]] || continue
+    iptables -t nat -F "$chain" 2>/dev/null || true
+    iptables -t nat -X "$chain" 2>/dev/null || true
+  done < <(iptables -t nat -S 2>/dev/null | awk '/^-N CNI-/{print $2}')
+fi
 echo ""
 echo "Restart firecracker and rebuild runtime snapshots for full effect:"
 echo "  sudo systemctl restart devin-firecracker"

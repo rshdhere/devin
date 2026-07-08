@@ -106,13 +106,12 @@ Requires=docker.service
 [Service]
 Restart=always
 RestartSec=5
+ExecStartPre=/bin/bash -c 'rm -rf /var/lib/cni/networks/fcnet || true'
 ExecStart=/usr/bin/docker run --rm --name firecracker \\
   --privileged \\
   --network host \\
   -v /dev/kvm:/dev/kvm \\
   -v /var/lib/devin:/var/lib/devin \\
-  -v /etc/cni/conf.d:/etc/cni/conf.d:ro \\
-  -v /opt/cni/bin:/opt/cni/bin:ro \\
   -e FIRECRACKER_DRY_RUN=false \\
   -e FIRECRACKER_HOST_PORT=9092 \\
   -e FIRECRACKER_HOST_NAME=${host_name} \\

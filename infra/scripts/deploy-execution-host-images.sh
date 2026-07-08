@@ -131,6 +131,53 @@ docker pull "\${REGISTRY}/devin-firecracker:\${IMAGE_TAG}"
 log "Pulling \${REGISTRY}/devin-scheduler:\${IMAGE_TAG}"
 docker pull "\${REGISTRY}/devin-scheduler:\${IMAGE_TAG}"
 
+log "Clearing legacy CNI host-local IPAM state"
+rm -rf /var/lib/cni/networks/fcnet 2>/dev/null || true
+if [[ -d /var/run/netns ]]; then
+  for netns_path in /var/run/netns/*; do
+    [[ -e "$netns_path" ]] || continue
+    id=$(basename "$netns_path")
+    ip netns del "$id" 2>/dev/null || rm -f "$netns_path"
+    rm -rf "/var/lib/cni/$id"
+  done
+fi
+if [[ -f /etc/cni/conf.d/fcnet.conflist ]] && grep -q '"host-local"' /etc/cni/conf.d/fcnet.conflist; then
+  log "Migrating fcnet CNI config from host-local to static IPAM"
+  mkdir -p /etc/cni/conf.d
+  cat >/etc/cni/conf.d/fcnet.conflist <<'CNI'
+{
+  "cniVersion": "0.4.0",
+  "name": "fcnet",
+  "plugins": [
+    {
+      "type": "ptp",
+      "ipMasq": true,
+      "ipam": {
+        "type": "static",
+        "addresses": [
+          {
+            "address": "192.168.127.8/24",
+            "gateway": "192.168.127.1"
+          }
+        ],
+        "routes": [
+          {
+            "dst": "0.0.0.0/0"
+          }
+        ],
+        "dns": {
+          "nameservers": ["8.8.8.8", "1.1.1.1", "8.8.4.4"]
+        }
+      }
+    },
+    {
+      "type": "tc-redirect-tap"
+    }
+  ]
+}
+CNI
+fi
+
 patch_firecracker_unit
 write_scheduler_unit
 systemctl daemon-reload

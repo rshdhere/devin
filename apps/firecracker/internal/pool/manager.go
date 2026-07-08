@@ -97,10 +97,10 @@ func (m *Manager) Start(ctx context.Context) {
 		return
 	}
 
-	if err := cnihelper.CleanupStaleAllocations(m.cfg.CNINetworkName); err != nil {
-		slog.Warn("failed to cleanup stale CNI allocations on startup", "error", err)
+	if err := cnihelper.PrepareCNIEnvironment(m.cfg.CNIConfDir, m.cfg.CNINetworkName); err != nil {
+		slog.Warn("failed to prepare cni environment on startup", "error", err)
 	} else {
-		slog.Info("cleaned up stale CNI allocations on startup")
+		slog.Info("prepared cni environment on startup")
 	}
 
 	runtimes, err := m.snapshotStore().ListRuntimes()
@@ -116,14 +116,18 @@ func (m *Manager) Start(ctx context.Context) {
 	m.availableRuntimes = append([]string(nil), runtimes...)
 	m.mu.Unlock()
 
-	for _, runtime := range runtimes {
-		queue := make(chan *vm.Instance, m.cfg.PoolSize)
-		m.mu.Lock()
-		m.ready[runtime] = queue
-		m.mu.Unlock()
-
-		go m.warmRuntimePool(ctx, runtime, queue)
+	// Static CNI IPAM pins the host-side ptp peer to 192.168.127.1, so only one
+	// microVM network can be active per host. Warm the default runtime only.
+	warmRuntime := m.cfg.DefaultRuntime
+	if !containsRuntime(runtimes, warmRuntime) {
+		warmRuntime = runtimes[0]
 	}
+	queue := make(chan *vm.Instance, m.cfg.PoolSize)
+	m.mu.Lock()
+	m.ready[warmRuntime] = queue
+	m.mu.Unlock()
+	go m.warmRuntimePool(ctx, warmRuntime, queue)
+	slog.Info("warming microvm pool", "runtime", warmRuntime, "poolSize", m.cfg.PoolSize)
 }
 
 func (m *Manager) warmDryRunPool(ctx context.Context) {
@@ -192,8 +196,8 @@ func (m *Manager) launchWarm(ctx context.Context, runtime string) (*vm.Instance,
 	)
 	if err != nil && isCNIAllocationError(err) {
 		slog.Warn("CNI allocation failed, cleaning stale state and retrying", "vmId", vmID, "error", err)
-		if cleanErr := cnihelper.CleanupStaleAllocations(m.cfg.CNINetworkName); cleanErr != nil {
-			slog.Warn("failed to cleanup stale CNI allocations", "error", cleanErr)
+		if cleanErr := cnihelper.PrepareCNIEnvironment(m.cfg.CNIConfDir, m.cfg.CNINetworkName); cleanErr != nil {
+			slog.Warn("failed to prepare cni environment after allocation failure", "error", cleanErr)
 		}
 		vmID = xid.New().String()
 		instance, err = m.launcher.Restore(
@@ -317,8 +321,8 @@ func (m *Manager) provisionCold(vmID, name, runtime string, cpu int32, memory st
 	if err != nil && isCNIAllocationError(err) {
 		slog.Warn("CNI allocation failed during cold provision, cleaning stale state and retrying",
 			"vmId", vmID, "error", err)
-		if cleanErr := cnihelper.CleanupStaleAllocations(m.cfg.CNINetworkName); cleanErr != nil {
-			slog.Warn("failed to cleanup stale CNI allocations", "error", cleanErr)
+		if cleanErr := cnihelper.PrepareCNIEnvironment(m.cfg.CNIConfDir, m.cfg.CNINetworkName); cleanErr != nil {
+			slog.Warn("failed to prepare cni environment after allocation failure", "error", cleanErr)
 		}
 		newVMID := xid.New().String()
 		m.mu.Lock()
@@ -466,5 +470,15 @@ func isCNIAllocationError(err error) bool {
 	errStr := err.Error()
 	return strings.Contains(errStr, "failed to allocate") ||
 		strings.Contains(errStr, "not available in range") ||
-		strings.Contains(errStr, "failed to create CNI network")
+		strings.Contains(errStr, "failed to create CNI network") ||
+		strings.Contains(errStr, "file exists")
+}
+
+func containsRuntime(runtimes []string, runtime string) bool {
+	for _, candidate := range runtimes {
+		if candidate == runtime {
+			return true
+		}
+	}
+	return false
 }
