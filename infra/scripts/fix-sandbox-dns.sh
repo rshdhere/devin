@@ -88,6 +88,13 @@ if [[ -d /var/run/netns ]]; then
 fi
 
 if command -v iptables >/dev/null; then
+  echo "Ensuring fcnet MASQUERADE for 192.168.127.0/24"
+  iptables -t nat -C POSTROUTING -s 192.168.127.0/24 -j MASQUERADE 2>/dev/null \
+    || iptables -t nat -A POSTROUTING -s 192.168.127.0/24 -j MASQUERADE
+  iptables -C FORWARD -s 192.168.127.0/24 -j ACCEPT 2>/dev/null \
+    || iptables -A FORWARD -s 192.168.127.0/24 -j ACCEPT
+  iptables -C FORWARD -d 192.168.127.0/24 -m state --state RELATED,ESTABLISHED -j ACCEPT 2>/dev/null \
+    || iptables -A FORWARD -d 192.168.127.0/24 -m state --state RELATED,ESTABLISHED -j ACCEPT
   echo "Removing stale CNI iptables chains..."
   while read -r chain; do
     [[ -n "$chain" ]] || continue

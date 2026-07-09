@@ -36,9 +36,6 @@ ENV RUNTIME_WORKSPACE=/workspace
 
 WORKDIR /workspace
 
-# Firecracker microVMs do not run Docker DNS; use public resolvers in golden images.
-RUN printf 'nameserver 8.8.8.8\nnameserver 1.1.1.1\nnameserver 8.8.4.4\n' > /etc/resolv.conf
-
 COPY apps/runtime/bin/runtime /usr/local/bin/devin-runtime-supervisor
 
 EXPOSE 8080

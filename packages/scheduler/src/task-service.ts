@@ -1824,17 +1824,15 @@ export class TaskService {
       );
 
       if (attempt === 2) {
-        this.emit(
-          "agent.log",
-          taskId,
-          "Cursor API probe failed — starting agent anyway (check microVM NAT and outbound HTTPS)",
-          {
-            cursorReachable: false,
-            dns: dnsCheck,
-            cursor: cursorCheck,
-          },
-        );
-        return;
+        const message =
+          "Sandbox has no outbound DNS (cannot reach GitHub or Cursor API). " +
+          "On the execution host run fix-sandbox-dns.sh and fix-cni-and-redeploy-firecracker.sh, then rebuild the agent snapshot.";
+        this.emit("agent.log", taskId, message, {
+          cursorReachable: false,
+          dns: dnsCheck,
+          cursor: cursorCheck,
+        });
+        throw new Error(message);
       }
     }
 
