@@ -27,7 +27,7 @@ const advancedItems = [
   { id: "integration", label: "Connect an integration" },
   { id: "automations", label: "Set up automations" },
   { id: "playbook", label: "Create a playbook" },
-  { id: "capabilities", label: "Explore advanced capabilities" },
+  { id: "capabilities", label: "Check platform status" },
 ];
 
 export function OnboardingPanel({

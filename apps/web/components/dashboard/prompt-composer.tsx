@@ -20,11 +20,7 @@ import { MotionButton } from "@/components/dashboard/motion-button";
 import { PromptMetadataBar } from "@/components/dashboard/prompt-metadata-bar";
 import { useSessions } from "@/components/dashboard/sessions-context";
 import { DEVIN_BOT } from "@/lib/devin-bot";
-import {
-  isTemplateAgent,
-  resolveRuntimeForTask,
-  runtimeLabel,
-} from "@devin/types";
+import { resolveRuntimeForTask, runtimeLabel } from "@devin/types";
 import { cn } from "@/lib/utils";
 
 const MIN_TEXTAREA_HEIGHT = 72;
@@ -49,11 +45,6 @@ const agentOptions = [
     label: "Claude",
     description: "Claude Code in the devbox",
   },
-  {
-    id: "mock" as const,
-    label: "Template (legacy)",
-    description: "OpenAI draft on control plane",
-  },
 ];
 
 interface PromptComposerProps {
@@ -77,7 +68,6 @@ export function PromptComposer({ selectedRepository }: PromptComposerProps) {
     selectedRepository ? "existing" : "create",
   );
   const [newRepoName, setNewRepoName] = useState("");
-  const [autoStartSandbox, setAutoStartSandbox] = useState(true);
   const [showRepoOptions, setShowRepoOptions] = useState(false);
 
   useEffect(() => {
@@ -138,9 +128,7 @@ export function PromptComposer({ selectedRepository }: PromptComposerProps) {
           repoMode === "create" && finalRepoName ? finalRepoName : undefined,
         autoCreateRepository:
           repoMode === "create" && !finalRepoName ? true : undefined,
-        ...(isTemplateAgent(agent)
-          ? { autoStartSandbox }
-          : { autoStartSandbox: true }),
+        autoStartSandbox: true,
       });
       setPrompt("");
       setNewRepoName("");
@@ -164,7 +152,6 @@ export function PromptComposer({ selectedRepository }: PromptComposerProps) {
 
   const selectedAgent =
     agentOptions.find((option) => option.id === agent) ?? agentOptions[0]!;
-  const templateAgent = isTemplateAgent(agent);
   const resolvedRuntime = resolveRuntimeForTask(agent, prompt);
 
   return (
@@ -399,26 +386,6 @@ export function PromptComposer({ selectedRepository }: PromptComposerProps) {
                         </p>
                       </div>
                     ) : null}
-
-                    {templateAgent ? (
-                      <div className="border-t border-[#333] px-3 py-2">
-                        <label className="flex cursor-pointer items-center justify-between gap-2 text-[12px] text-gray-300">
-                          <span>Auto-start devbox after draft</span>
-                          <input
-                            type="checkbox"
-                            checked={autoStartSandbox}
-                            onChange={(event) =>
-                              setAutoStartSandbox(event.target.checked)
-                            }
-                            className="size-3.5 accent-indigo-400"
-                          />
-                        </label>
-                        <p className="mt-1 text-[11px] text-gray-500">
-                          Template agent only — runtime agents boot the devbox
-                          immediately
-                        </p>
-                      </div>
-                    ) : null}
                   </motion.div>
                 ) : null}
               </AnimatePresence>
@@ -484,14 +451,10 @@ export function PromptComposer({ selectedRepository }: PromptComposerProps) {
           <span className="font-medium text-indigo-300/90">
             {runtimeLabel(resolvedRuntime)}
           </span>
-          {templateAgent ? (
-            <span className="text-gray-600"> — inferred from your prompt</span>
-          ) : (
-            <span className="text-gray-600">
-              {" "}
-              — runtime agents always use the agent image
-            </span>
-          )}
+          <span className="text-gray-600">
+            {" "}
+            — runtime agents always use the agent image
+          </span>
         </p>
       ) : null}
 

@@ -1,63 +1,21 @@
+import type {
+  FirecrackerHostStatus,
+  InfraDiagnostics,
+  SandboxSummary,
+  ServiceMode,
+  ServiceProbe,
+  TaskDiagnostics,
+} from "@devin/types";
 import { resolveDefaultAgent } from "./agent-defaults.js";
 import { resolvePreferredHost } from "./preferred-host.js";
 
-export interface ServiceProbe {
-  url: string;
-  reachable: boolean;
-  status?: string;
-  error?: string;
-  latencyMs?: number;
-}
-
-export interface WarmRuntimeStatus {
-  runtime: string;
-  readyVMs: number;
-  lastWarmError?: string;
-}
-
-export interface FirecrackerHostStatus {
-  host?: string;
-  readyVMs?: number;
-  activeVMs?: number;
-  capacityCPU?: number;
-  usedCPU?: number;
-  defaultRuntime?: string;
-  availableRuntimes?: string[];
-  warmRuntimes?: WarmRuntimeStatus[];
-  lastWarmError?: string;
-}
-
-export interface SandboxSummary {
-  name: string;
-  phase: string;
-  message?: string;
-  taskId?: string;
-  runtime?: string;
-  vmId?: string;
-  host?: string;
-}
-
-export interface InfraDiagnostics {
-  checkedAt: string;
-  orchestrator: ServiceProbe;
-  firecrackerHost?: ServiceProbe & FirecrackerHostStatus;
-  agent?: {
-    defaultAgent: string;
-    cursorApiKeyConfigured: boolean;
-    anthropicApiKeyConfigured: boolean;
-  };
-  sandboxes: {
-    total: number;
-    byPhase: Record<string, number>;
-    items: SandboxSummary[];
-  };
-}
-
-export interface TaskDiagnostics {
-  taskId: string;
-  sandboxName?: string;
-  sandbox?: SandboxSummary;
-}
+export type {
+  FirecrackerHostStatus,
+  InfraDiagnostics,
+  SandboxSummary,
+  ServiceProbe,
+  TaskDiagnostics,
+} from "@devin/types";
 
 type SandboxRecord = {
   metadata?: { name?: string; labels?: Record<string, string> };
@@ -93,17 +51,23 @@ export async function probeService(
     }
 
     let status: string | undefined;
+    let mode: string | undefined;
+    let durable: boolean | undefined;
     try {
       const payload = (await response.json()) as {
         status?: string;
+        mode?: string;
+        durable?: boolean;
         readyVMs?: number;
       };
       status = payload.status;
+      mode = payload.mode;
+      durable = payload.durable;
     } catch {
       status = "ok";
     }
 
-    return { url: target, reachable: true, status, latencyMs };
+    return { url: target, reachable: true, status, latencyMs, mode, durable };
   } catch (error) {
     return {
       url: target,
@@ -248,6 +212,9 @@ export async function validateFirecrackerHostForRuntime(
 export async function collectInfraDiagnostics(options: {
   orchestratorUrl: string;
   firecrackerHostUrl?: string;
+  mode?: ServiceMode;
+  executionWorkerUrl?: string;
+  durable?: boolean;
 }): Promise<InfraDiagnostics> {
   const orchestratorProbe = await probeService(options.orchestratorUrl);
   const sandboxes = orchestratorProbe.reachable
@@ -266,17 +233,24 @@ export async function collectInfraDiagnostics(options: {
     );
   }
 
+  const serviceMode = options.mode ?? "standalone";
+  const preferredHost = resolvePreferredHost();
+  let executionWorker: ServiceProbe | undefined;
+  if (options.executionWorkerUrl?.trim()) {
+    executionWorker = await probeService(options.executionWorkerUrl.trim());
+  }
+
   return {
     checkedAt: new Date().toISOString(),
+    platform: {
+      serviceMode,
+      durable: options.durable ?? false,
+      defaultAgent: resolveDefaultAgent(),
+      preferredHost: preferredHost || undefined,
+      executionWorker,
+    },
     orchestrator: orchestratorProbe,
     firecrackerHost,
-    agent: {
-      defaultAgent: resolveDefaultAgent(),
-      preferredHost: resolvePreferredHost(),
-      cursorApiKeyConfigured: Boolean(process.env.CURSOR_API_KEY?.trim()),
-      anthropicApiKeyConfigured: Boolean(process.env.ANTHROPIC_API_KEY?.trim()),
-      openaiApiKeyConfigured: Boolean(process.env.OPENAI_API_KEY?.trim()),
-    },
     sandboxes: {
       total: sandboxes.length,
       byPhase,

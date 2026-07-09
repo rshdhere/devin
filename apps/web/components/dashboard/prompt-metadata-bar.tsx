@@ -283,7 +283,7 @@ export function PromptMetadataBar() {
           onClick={() => setShowAgentCapabilities(true)}
           className="cursor-pointer transition-colors hover:text-gray-400"
         >
-          Advanced capabilities →
+          Platform status →
         </MotionButton>
       </div>
 

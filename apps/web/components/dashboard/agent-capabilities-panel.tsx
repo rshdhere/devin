@@ -1,13 +1,14 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { KeyRound, Loader2, X } from "lucide-react";
+import { Activity, Loader2, X } from "lucide-react";
 import { motion } from "motion/react";
 import { MotionButton } from "@/components/dashboard/motion-button";
 import { fetchInfraDiagnostics } from "@/lib/api/tasks";
+import type { PlatformDiagnostics, ServiceProbe } from "@devin/types";
 import { cn } from "@/lib/utils";
 
-interface AgentCapabilitiesPanelProps {
+interface PlatformStatusPanelProps {
   onClose: () => void;
 }
 
@@ -25,14 +26,68 @@ const panelSpring = {
   mass: 0.9,
 };
 
-export function AgentCapabilitiesPanel({
-  onClose,
-}: AgentCapabilitiesPanelProps) {
+function serviceModeLabel(mode: PlatformDiagnostics["serviceMode"]): string {
+  switch (mode) {
+    case "brain":
+      return "Brain (control plane)";
+    case "worker":
+      return "Execution worker";
+    default:
+      return "Standalone scheduler";
+  }
+}
+
+function StatusRow({
+  title,
+  description,
+  probe,
+  okLabel = "Connected",
+  failLabel = "Unreachable",
+}: {
+  title: string;
+  description: string;
+  probe?: ServiceProbe;
+  okLabel?: string;
+  failLabel?: string;
+}) {
+  const reachable = probe?.reachable ?? false;
+
+  return (
+    <div className="rounded-lg border border-[#2a2a2a] bg-[#141414] px-3 py-2.5">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <p className="text-[13px] text-gray-200">{title}</p>
+          <p className="text-[11px] text-gray-600">{description}</p>
+          {probe?.url ? (
+            <p className="mt-1 truncate font-mono text-[10px] text-gray-700">
+              {probe.url}
+            </p>
+          ) : null}
+        </div>
+        <span
+          className={cn(
+            "shrink-0 rounded-full px-2.5 py-1 text-[11px] font-medium",
+            reachable
+              ? "bg-emerald-500/10 text-emerald-400"
+              : "bg-red-500/10 text-red-400",
+          )}
+        >
+          {reachable ? okLabel : failLabel}
+        </span>
+      </div>
+      {probe?.error ? (
+        <p className="mt-2 text-[11px] leading-relaxed text-red-300/90">
+          {probe.error}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+export function AgentCapabilitiesPanel({ onClose }: PlatformStatusPanelProps) {
   const [isLoading, setIsLoading] = useState(true);
-  const [openaiConfigured, setOpenaiConfigured] = useState(false);
-  const [cursorConfigured, setCursorConfigured] = useState(false);
-  const [anthropicConfigured, setAnthropicConfigured] = useState(false);
-  const [defaultAgent, setDefaultAgent] = useState("cursor");
+  const [platform, setPlatform] = useState<PlatformDiagnostics | null>(null);
+  const [orchestrator, setOrchestrator] = useState<ServiceProbe | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -41,21 +96,13 @@ export function AgentCapabilitiesPanel({
     fetchInfraDiagnostics()
       .then((diagnostics) => {
         if (!cancelled) {
-          setOpenaiConfigured(
-            diagnostics.agent?.openaiApiKeyConfigured ?? false,
-          );
-          setCursorConfigured(
-            diagnostics.agent?.cursorApiKeyConfigured ?? false,
-          );
-          setAnthropicConfigured(
-            diagnostics.agent?.anthropicApiKeyConfigured ?? false,
-          );
-          setDefaultAgent(diagnostics.agent?.defaultAgent ?? "cursor");
+          setPlatform(diagnostics.platform);
+          setOrchestrator(diagnostics.orchestrator);
         }
       })
       .catch(() => {
         if (!cancelled) {
-          setError("Could not load agent configuration from the scheduler");
+          setError("Could not load platform status from the control plane");
         }
       })
       .finally(() => {
@@ -81,7 +128,7 @@ export function AgentCapabilitiesPanel({
       <motion.div
         role="dialog"
         aria-modal="true"
-        aria-labelledby="agent-capabilities-title"
+        aria-labelledby="platform-status-title"
         className="w-full max-w-[520px] rounded-xl border border-[#333] bg-[#1e1e1e] p-5 shadow-2xl"
         initial={{ opacity: 0, scale: 0.94, y: 16 }}
         animate={{ opacity: 1, scale: 1, y: 0 }}
@@ -91,17 +138,17 @@ export function AgentCapabilitiesPanel({
       >
         <div className="flex items-start justify-between gap-3">
           <div className="flex items-start gap-3">
-            <KeyRound className="mt-0.5 size-5 shrink-0 text-[#4a90e2]" />
+            <Activity className="mt-0.5 size-5 shrink-0 text-[#4a90e2]" />
             <div>
               <h3
-                id="agent-capabilities-title"
+                id="platform-status-title"
                 className="text-[16px] font-semibold text-white"
               >
-                Agent capabilities
+                Platform status
               </h3>
               <p className="mt-1 text-[13px] text-gray-500">
-                Runtime agents (Cursor / Claude) run inside the devbox. OpenAI
-                is only required for the legacy Template agent.
+                Sessions run through the brain control plane. Agent credentials
+                stay on the execution host — never in the browser.
               </p>
             </div>
           </div>
@@ -119,101 +166,72 @@ export function AgentCapabilitiesPanel({
         {isLoading ? (
           <div className="mt-5 flex items-center gap-2 text-[13px] text-gray-500">
             <Loader2 className="size-4 animate-spin" />
-            Checking scheduler configuration…
+            Checking control plane…
           </div>
         ) : (
           <div className="mt-5 space-y-3">
-            <div className="rounded-lg border border-[#2a2a2a] bg-[#141414] px-3 py-2.5">
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <p className="text-[13px] text-gray-200">Cursor API key</p>
-                  <p className="text-[11px] text-gray-600">
-                    Required for the default Cursor agent in the devbox
-                  </p>
+            {platform ? (
+              <div className="rounded-lg border border-[#2a2a2a] bg-[#141414] px-3 py-2.5">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <p className="text-[13px] text-gray-200">
+                      {serviceModeLabel(platform.serviceMode)}
+                    </p>
+                    <p className="text-[11px] text-gray-600">
+                      Default agent: {platform.defaultAgent}
+                      {platform.preferredHost
+                        ? ` · host ${platform.preferredHost}`
+                        : null}
+                    </p>
+                  </div>
+                  <span
+                    className={cn(
+                      "rounded-full px-2.5 py-1 text-[11px] font-medium",
+                      platform.durable
+                        ? "bg-emerald-500/10 text-emerald-400"
+                        : "bg-amber-500/10 text-amber-400",
+                    )}
+                  >
+                    {platform.durable ? "Durable sessions" : "In-memory"}
+                  </span>
                 </div>
-                <span
-                  className={cn(
-                    "rounded-full px-2.5 py-1 text-[11px] font-medium",
-                    cursorConfigured
-                      ? "bg-emerald-500/10 text-emerald-400"
-                      : "bg-red-500/10 text-red-400",
-                  )}
-                >
-                  {cursorConfigured ? "Configured" : "Missing"}
-                </span>
               </div>
-            </div>
+            ) : null}
 
-            <div className="rounded-lg border border-[#2a2a2a] bg-[#141414] px-3 py-2.5">
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <p className="text-[13px] text-gray-200">Anthropic API key</p>
-                  <p className="text-[11px] text-gray-600">
-                    Required when using the Claude agent
-                  </p>
-                </div>
-                <span
-                  className={cn(
-                    "rounded-full px-2.5 py-1 text-[11px] font-medium",
-                    anthropicConfigured
-                      ? "bg-emerald-500/10 text-emerald-400"
-                      : "bg-amber-500/10 text-amber-400",
-                  )}
-                >
-                  {anthropicConfigured ? "Configured" : "Optional"}
-                </span>
-              </div>
-            </div>
+            {platform?.serviceMode === "brain" ? (
+              <StatusRow
+                title="Execution worker"
+                description="Runs devboxes and agent CLIs on the execution host"
+                probe={platform.executionWorker}
+                okLabel="Ready"
+                failLabel="Not reachable"
+              />
+            ) : null}
 
-            <div className="rounded-lg border border-[#2a2a2a] bg-[#141414] px-3 py-2.5">
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <p className="text-[13px] text-gray-200">OpenAI API key</p>
-                  <p className="text-[11px] text-gray-600">
-                    Legacy Template agent only (platform default: {defaultAgent}
-                    )
-                  </p>
-                </div>
-                <span
-                  className={cn(
-                    "rounded-full px-2.5 py-1 text-[11px] font-medium",
-                    openaiConfigured
-                      ? "bg-emerald-500/10 text-emerald-400"
-                      : "bg-amber-500/10 text-amber-400",
-                  )}
-                >
-                  {openaiConfigured ? "Configured" : "Not needed for Cursor"}
-                </span>
-              </div>
-            </div>
+            <StatusRow
+              title="Orchestrator"
+              description="Provisions Firecracker sandboxes for devbox sessions"
+              probe={orchestrator ?? undefined}
+            />
           </div>
         )}
 
         <div className="mt-5 rounded-lg border border-[#2a2a2a] bg-[#111] p-3">
           <p className="text-[12px] font-medium text-gray-300">
-            Where to set platform API keys (admin)
+            How sessions work
           </p>
           <ol className="mt-2 list-decimal space-y-1.5 pl-4 text-[12px] leading-relaxed text-gray-500">
             <li>
-              Store keys in AWS SSM as SecureStrings, e.g.{" "}
-              <code className="rounded bg-[#1a1a1a] px-1 py-0.5 text-[11px] text-gray-300">
-                /devin-production/platform/cursor_api_key
-              </code>
+              The web UI talks to the API server, which forwards tasks to the
+              brain control plane.
             </li>
             <li>
-              Sync the execution host:{" "}
-              <code className="rounded bg-[#1a1a1a] px-1 py-0.5 text-[11px] text-gray-300">
-                ./infra/scripts/devin-sync-platform-config.sh
-              </code>
+              Brain persists sessions in Postgres and delegates sandbox work to
+              the execution worker.
             </li>
             <li>
-              Runtime agents boot the{" "}
-              <span className="text-gray-400">agent</span> snapshot and call
-              Cursor or Anthropic from inside the microVM.
-            </li>
-            <li>
-              Set <span className="text-gray-400">DEFAULT_AGENT=cursor</span> on
-              the scheduler for Devin-like sessions (no control-plane draft).
+              Cursor or Claude runs inside the devbox microVM — credentials are
+              configured on the execution host only.
             </li>
           </ol>
         </div>

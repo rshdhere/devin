@@ -10,7 +10,9 @@ export type { TaskEvent, TaskEventType } from "./events";
 export type {
   FirecrackerHostStatus,
   InfraDiagnostics,
+  PlatformDiagnostics,
   SandboxSummary,
+  ServiceMode,
   ServiceProbe,
   TaskDiagnostics,
   WarmRuntimeStatus,

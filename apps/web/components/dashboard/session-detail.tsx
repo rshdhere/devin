@@ -351,36 +351,21 @@ function DiagnosticsPanel({
           <p className="rounded-lg bg-[#120d0d] px-3 py-2 font-mono text-[12px] leading-relaxed text-red-300">
             {task.message}
           </p>
-          {task.message.includes("OPENAI_API_KEY") ? (
+          {/agent credentials are not configured/i.test(task.message) ? (
             <p className="text-[12px] leading-relaxed text-amber-200/90">
-              The platform OpenAI key is missing on the scheduler. An admin
-              should store it in AWS SSM at{" "}
-              <span className="font-mono text-amber-100">
-                /devin-production/platform/openai_api_key
-              </span>{" "}
-              (SecureString), then run{" "}
-              <span className="font-mono text-amber-100">
-                devin-sync-platform-config
-              </span>{" "}
-              on the execution host. Open{" "}
-              <span className="text-white">Advanced capabilities</span> on the
-              dashboard for the full checklist.
+              Agent credentials are managed on the execution host, not in the
+              browser. Ask your platform admin to configure secrets, then open{" "}
+              <span className="text-white">Platform status</span> on the
+              dashboard to verify the brain and worker are connected.
             </p>
           ) : null}
-          {task.message.includes("CURSOR_API_KEY") ? (
+          {/EXECUTION_WORKER_URL|worker rejected job|worker unavailable/i.test(
+            task.message,
+          ) ? (
             <p className="text-[12px] leading-relaxed text-amber-200/90">
-              The platform Cursor key is missing on the scheduler. An admin
-              should store it in AWS SSM at{" "}
-              <span className="font-mono text-amber-100">
-                /devin-production/platform/cursor_api_key
-              </span>{" "}
-              (SecureString), then run{" "}
-              <span className="font-mono text-amber-100">
-                devin-sync-platform-config
-              </span>{" "}
-              on the execution host. Open{" "}
-              <span className="text-white">Advanced capabilities</span> on the
-              dashboard for the full checklist.
+              The brain control plane could not reach the execution worker.
+              Check Platform status on the dashboard and confirm the worker
+              scheduler is running on the execution host.
             </p>
           ) : null}
           {/timed out/i.test(task.message) ? (

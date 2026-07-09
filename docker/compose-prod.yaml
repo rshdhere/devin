@@ -24,11 +24,40 @@ services:
     restart: unless-stopped
     env_file:
       - .env.prod
+    environment:
+      SCHEDULER_URL: http://brain:9092
     ports:
       - "${SERVER_PORT:-8080}:8080"
     depends_on:
       postgres:
         condition: service_healthy
+      brain:
+        condition: service_started
+    networks:
+      - internal
+
+  brain:
+    image: ${DOCKERHUB_USERNAME:-rshdhere}/devin-brain:${IMAGE_TAG:-latest}
+    build:
+      context: ..
+      dockerfile: docker/brain/Dockerfile
+    restart: unless-stopped
+    env_file:
+      - .env.prod
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      EXECUTION_WORKER_URL: ${EXECUTION_WORKER_URL:-http://host.docker.internal:9091}
+      ORCHESTRATOR_URL: ${ORCHESTRATOR_URL:-http://host.docker.internal:9090}
+      DEFAULT_AGENT: cursor
+      BRAIN_PORT: "9092"
+      SERVICE_MODE: brain
+    ports:
+      - "${BRAIN_PORT:-9092}:9092"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     networks:
       - internal
 

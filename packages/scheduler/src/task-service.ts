@@ -479,6 +479,9 @@ export class TaskService {
     return collectInfraDiagnostics({
       orchestratorUrl: this.orchestratorUrl,
       firecrackerHostUrl: this.firecrackerHostUrl,
+      mode: this.mode,
+      executionWorkerUrl: this.executionWorkerUrl,
+      durable: this.taskStore.isEnabled(),
     });
   }
 
@@ -1311,13 +1314,13 @@ export class TaskService {
   private validateAgentSecrets(task: Task): void {
     if (task.agent === "cursor" && !process.env.CURSOR_API_KEY?.trim()) {
       throw new Error(
-        "CURSOR_API_KEY is not set on the scheduler. Add it to AWS SSM as a SecureString at /<env>/platform/cursor_api_key, then run devin-sync-platform-config on the execution host.",
+        "Cursor agent credentials are not configured on the execution host. Ask your platform admin to configure agent secrets.",
       );
     }
 
     if (task.agent === "claude" && !process.env.ANTHROPIC_API_KEY?.trim()) {
       throw new Error(
-        "ANTHROPIC_API_KEY is not set on the scheduler. Add it to AWS SSM as a SecureString at /<env>/platform/anthropic_api_key, then run devin-sync-platform-config on the execution host.",
+        "Claude agent credentials are not configured on the execution host. Ask your platform admin to configure agent secrets.",
       );
     }
   }

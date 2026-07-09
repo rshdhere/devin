@@ -35,11 +35,36 @@ services:
       DATABASE_URL: postgres://postgres:postgres@postgres:5432/devin
       BETTER_AUTH_URL: http://localhost:8080
       WEB_APP_URL: http://localhost:3000
+      SCHEDULER_URL: http://brain:9092
       PORT: "8080"
     command: sh -c "bun install --frozen-lockfile && bun run --cwd apps/server dev"
     depends_on:
       postgres:
         condition: service_healthy
+      brain:
+        condition: service_started
+
+  brain:
+    build:
+      context: ..
+      dockerfile: docker/server/Dockerfile
+      target: base
+    volumes: *dev-volumes
+    ports:
+      - "9092:9092"
+    environment:
+      DATABASE_URL: postgres://postgres:postgres@postgres:5432/devin
+      EXECUTION_WORKER_URL: http://host.docker.internal:9091
+      ORCHESTRATOR_URL: http://host.docker.internal:9090
+      DEFAULT_AGENT: cursor
+      BRAIN_PORT: "9092"
+      SERVICE_MODE: brain
+    command: sh -c "bun install --frozen-lockfile && bun run --cwd apps/brain dev"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
 
   web:
     build:
