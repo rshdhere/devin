@@ -240,7 +240,7 @@ func (s *Server) handleGitClone(w http.ResponseWriter, r *http.Request) {
 	targetPath := filepath.Join(s.workspace, filepath.Clean("/"+target))
 	workspace.EnsureDNS()
 	command := fmt.Sprintf(
-		"timeout 45 git clone --depth 1 %s %s",
+		"timeout 120 git clone --depth 1 %s %s",
 		shellQuote(req.URL),
 		shellQuote(targetPath),
 	)
@@ -252,7 +252,11 @@ func (s *Server) handleGitClone(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if result.ExitCode != 0 {
-		writeError(w, http.StatusUnprocessableEntity, executil.CombinedOutput(result))
+		msg := executil.CombinedOutput(result)
+		if result.ExitCode == 124 {
+			msg = "git clone timed out (sandbox may have no outbound network): " + msg
+		}
+		writeError(w, http.StatusUnprocessableEntity, msg)
 		return
 	}
 
