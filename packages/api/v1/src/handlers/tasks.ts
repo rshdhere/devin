@@ -90,7 +90,13 @@ tasksRouter.post("/", async (req, res) => {
 
     const response = await createTask({
       prompt: parsed.data.prompt,
-      agent: parsed.data.agent,
+      agent:
+        parsed.data.agent === "claude"
+          ? "claude"
+          : parsed.data.agent === "mock" &&
+              process.env.ALLOW_TEMPLATE_AGENT === "true"
+            ? "mock"
+            : "cursor",
       runtime: parsed.data.runtime,
       userId,
       repository,

@@ -1430,6 +1430,8 @@ export function SessionDetail({
                 <span>{task.repository}</span>
               </>
             ) : null}
+            <span>•</span>
+            <span className="text-gray-400 capitalize">{task.agent} agent</span>
             {task.branch ? (
               <>
                 <span>•</span>

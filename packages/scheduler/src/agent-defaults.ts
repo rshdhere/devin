@@ -5,14 +5,12 @@ export { usesRuntimeAgent };
 
 export function resolveDefaultAgent(): AgentProvider {
   const raw = process.env.DEFAULT_AGENT?.trim();
-  if (raw === "cursor" || raw === "claude" || raw === "mock") {
+  if (raw === "cursor" || raw === "claude") {
     return raw;
   }
-  if (process.env.CURSOR_API_KEY?.trim()) {
-    return "cursor";
-  }
-  if (process.env.ANTHROPIC_API_KEY?.trim()) {
-    return "claude";
+  // Brain-first architecture: runtime agents only. Template (mock) is opt-in.
+  if (raw === "mock" && process.env.ALLOW_TEMPLATE_AGENT === "true") {
+    return "mock";
   }
   return "cursor";
 }

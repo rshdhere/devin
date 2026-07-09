@@ -187,7 +187,11 @@ export class TaskService {
 
   createTask(input: CreateTaskInput): Task {
     const now = new Date().toISOString();
-    const agent = input.agent ?? this.defaultAgent;
+    const requested = input.agent ?? this.defaultAgent;
+    const agent =
+      requested === "mock" && process.env.ALLOW_TEMPLATE_AGENT !== "true"
+        ? "cursor"
+        : requested;
     const runtime = resolveRuntimeForTask(
       agent,
       input.prompt.trim(),
@@ -826,7 +830,11 @@ export class TaskService {
         if (cloneUrl && repository) {
           await this.ensureSandboxDns(runtime, task.id);
 
-          if (job.greenfieldPushed && job.draftPlan) {
+          if (
+            job.greenfieldPushed &&
+            job.draftPlan &&
+            !usesRuntimeAgent(task.agent)
+          ) {
             this.emit(
               "agent.log",
               task.id,
@@ -853,7 +861,11 @@ export class TaskService {
                 repository,
               );
             } catch (error) {
-              if (job.draftPlan && isNetworkCloneFailure(error)) {
+              if (
+                job.draftPlan &&
+                !usesRuntimeAgent(task.agent) &&
+                isNetworkCloneFailure(error)
+              ) {
                 this.emit(
                   "agent.log",
                   task.id,
@@ -882,7 +894,11 @@ export class TaskService {
               githubToken,
             });
           }
-          if (!job.greenfieldPushed && createdNewRepo) {
+          if (
+            !job.greenfieldPushed &&
+            createdNewRepo &&
+            !usesRuntimeAgent(task.agent)
+          ) {
             const bot = resolveBotAuthor();
             try {
               await bootstrapGreenfieldProject({
@@ -1374,6 +1390,11 @@ export class TaskService {
     task: Task,
     job: ScheduleJob,
   ): Promise<void> {
+    if (usesRuntimeAgent(task.agent)) {
+      await this.provisionGreenfieldRepositoryShell(task, job);
+      return;
+    }
+
     if (job.repository && job.cloneUrl) {
       return;
     }
