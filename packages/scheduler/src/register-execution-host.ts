@@ -12,6 +12,7 @@ export interface RegisterExecutionHostOptions {
   schedulerPort?: number;
   capacityCpu?: number;
   capacityMemory?: string;
+  firecrackerHostUrl?: string;
 }
 
 export async function fetchFirecrackerHostRegistration(
@@ -66,12 +67,13 @@ export async function registerExecutionHost(
     options.firecrackerPort ?? readPort("FIRECRACKER_HOST_PORT", 9092);
   const schedulerPort =
     options.schedulerPort ?? readPort("SCHEDULER_PORT", 9091);
-  const capacityCpu =
-    options.capacityCpu ?? readInt("FIRECRACKER_CAPACITY_CPU", 8);
-  const capacityMemory =
-    options.capacityMemory?.trim() ||
-    process.env.FIRECRACKER_CAPACITY_MEMORY?.trim() ||
-    "16Gi";
+  const liveCapacity = await resolveHostCapacity(
+    privateIp,
+    firecrackerPort,
+    options.firecrackerHostUrl,
+  );
+  const capacityCpu = options.capacityCpu ?? liveCapacity.cpu;
+  const capacityMemory = options.capacityMemory?.trim() || liveCapacity.memory;
 
   const body = {
     spec: {
@@ -188,4 +190,40 @@ function readInt(name: string, fallback: number): number {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function resolveHostCapacity(
+  privateIp: string,
+  firecrackerPort: number,
+  firecrackerHostUrl?: string,
+): Promise<{ cpu: number; memory: string }> {
+  const base =
+    firecrackerHostUrl?.trim() ||
+    process.env.FIRECRACKER_HOST_URL?.trim() ||
+    `http://${privateIp}:${firecrackerPort}`;
+
+  try {
+    const response = await fetch(`${base.replace(/\/$/, "")}/v1/status`, {
+      signal: AbortSignal.timeout(5_000),
+    });
+    if (response.ok) {
+      const status = (await response.json()) as {
+        capacityCPU?: number;
+        capacityMemory?: string;
+      };
+      if (status.capacityCPU && status.capacityCPU > 0) {
+        return {
+          cpu: status.capacityCPU,
+          memory: status.capacityMemory?.trim() || "16Gi",
+        };
+      }
+    }
+  } catch {
+    // fall back to env defaults
+  }
+
+  return {
+    cpu: readInt("FIRECRACKER_CAPACITY_CPU", 8),
+    memory: process.env.FIRECRACKER_CAPACITY_MEMORY?.trim() || "16Gi",
+  };
 }

@@ -18,10 +18,12 @@ type FirecrackerHostSpec struct {
 }
 
 type FirecrackerHostStatus struct {
-	UsedCPU    int32  `json:"usedCPU,omitempty"`
-	UsedMemory string `json:"usedMemory,omitempty"`
-	ReadyVMs   int32  `json:"readyVMs,omitempty"`
-	Message    string `json:"message,omitempty"`
+	CapacityCPU int32  `json:"capacityCPU,omitempty"`
+	UsedCPU     int32  `json:"usedCPU,omitempty"`
+	UsedMemory  string `json:"usedMemory,omitempty"`
+	ReadyVMs    int32  `json:"readyVMs,omitempty"`
+	ActiveVMs   int32  `json:"activeVMs,omitempty"`
+	Message     string `json:"message,omitempty"`
 }
 
 type FirecrackerHost struct {

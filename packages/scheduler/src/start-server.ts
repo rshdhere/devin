@@ -47,6 +47,7 @@ export async function startSchedulerServer(
     await ensureExecutionHostRegistered({
       orchestratorUrl: options.orchestratorUrl,
       hostName: preferredHost,
+      firecrackerHostUrl: options.firecrackerHostUrl,
     });
   } catch (error) {
     console.error(
@@ -60,6 +61,7 @@ export async function startSchedulerServer(
       void ensureExecutionHostRegistered({
         orchestratorUrl: options.orchestratorUrl,
         hostName: preferredHost,
+        firecrackerHostUrl: options.firecrackerHostUrl,
       }).catch((error) => {
         console.error(
           "firecracker host re-registration failed:",

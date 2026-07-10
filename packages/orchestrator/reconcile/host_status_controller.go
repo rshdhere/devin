@@ -44,9 +44,11 @@ func (r *FirecrackerHostReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		return ctrl.Result{RequeueAfter: 15 * time.Second}, nil
 	}
 
+	hostCR.Status.CapacityCPU = status.CapacityCPU
 	hostCR.Status.UsedCPU = status.UsedCPU
 	hostCR.Status.UsedMemory = status.UsedMemory
 	hostCR.Status.ReadyVMs = int32(status.ReadyVMs)
+	hostCR.Status.ActiveVMs = int32(status.ActiveVMs)
 	hostCR.Status.Message = "host status synced"
 
 	if err := r.Status().Update(ctx, &hostCR); err != nil {

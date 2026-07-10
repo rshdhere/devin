@@ -12,6 +12,7 @@ import { resolvePreferredHost } from "./preferred-host.js";
 import {
   collectInfraDiagnostics,
   fetchSandboxByName,
+  listSandboxes,
   validateFirecrackerHostForRuntime,
   type InfraDiagnostics,
   type TaskDiagnostics,
@@ -718,13 +719,13 @@ export class TaskService {
 
         sandboxName = `sbx-${task.id.slice(0, 8)}`;
         task.sandboxName = sandboxName;
-        task.sessionActive = true;
         this.updateTask(task.id, "sandbox_starting", "Creating devbox");
 
         const runtimeImage =
           task.runtime ??
           job.runtime ??
           resolveRuntimeForTask(task.agent, task.prompt);
+        const sandboxCpu = resolveSandboxCpu(task);
 
         if (this.firecrackerHostUrl) {
           const hostIssue = await validateFirecrackerHostForRuntime(
@@ -746,7 +747,13 @@ export class TaskService {
           await ensureExecutionHostRegistered({
             orchestratorUrl: this.orchestratorUrl,
             hostName: this.preferredHost,
+            firecrackerHostUrl: this.firecrackerHostUrl,
           });
+        }
+
+        const reclaimed = await this.reclaimFailedSandboxes(task.id);
+        if (reclaimed > 0) {
+          await sleep(2_000);
         }
 
         this.emit(
@@ -757,19 +764,21 @@ export class TaskService {
             sandboxName,
             runtime: runtimeImage,
             orchestratorUrl: this.orchestratorUrl,
+            cpu: sandboxCpu,
           },
         );
 
         await this.ensureSandbox(sandboxName, task.id, {
           taskId: task.id,
           runtime: runtimeImage,
-          cpu: 2,
+          cpu: sandboxCpu,
           memory: "4Gi",
           ...(this.preferredHost ? { preferredHost: this.preferredHost } : {}),
         });
 
         const sandbox = await this.waitForSandbox(sandboxName, task.id);
         this.assertSandboxOnLocalHost(sandbox, task.id);
+        task.sessionActive = true;
         this.emit("sandbox.started", task.id, "Devbox microVM is running", {
           sandboxName,
           vmId: sandbox.status?.vmId,
@@ -1255,6 +1264,7 @@ export class TaskService {
         });
       }
       this.updateTask(task.id, "failed", message);
+      task.sessionActive = false;
       this.emit("task.failed", task.id, message);
       throw error;
     } finally {
@@ -2796,6 +2806,30 @@ export class TaskService {
     }
   }
 
+  private async reclaimFailedSandboxes(taskId: string): Promise<number> {
+    const sandboxes = await listSandboxes(this.orchestratorUrl);
+    let reclaimed = 0;
+
+    for (const sandbox of sandboxes) {
+      if (sandbox.phase !== "Failed") {
+        continue;
+      }
+      await this.deleteSandbox(sandbox.name);
+      reclaimed += 1;
+      this.emit(
+        "agent.log",
+        taskId,
+        `Reclaimed failed sandbox ${sandbox.name}`,
+        {
+          sandboxName: sandbox.name,
+          reclaimed: true,
+        },
+      );
+    }
+
+    return reclaimed;
+  }
+
   private async deleteSandbox(sandboxName: string): Promise<void> {
     try {
       await fetch(
@@ -2915,9 +2949,12 @@ export class TaskService {
             remediation: hostRegistryHint,
           });
           throw new Error(
-            /preferred firecracker host/i.test(lastMessage)
-              ? `${failureMessage}. Ensure FirecrackerHost ${this.preferredHost ?? "registration"} is registered with the orchestrator.`
-              : failureMessage,
+            /preferred firecracker host/i.test(lastMessage) &&
+              /lacks capacity/i.test(lastMessage)
+              ? `${failureMessage}. End idle devbox sessions on this host or wait for capacity to free up.`
+              : /preferred firecracker host/i.test(lastMessage)
+                ? `${failureMessage}. Ensure FirecrackerHost ${this.preferredHost ?? "registration"} is registered with the orchestrator.`
+                : failureMessage,
           );
         }
       } else if (Date.now() - lastProgressAt >= 3_000) {
@@ -3472,6 +3509,10 @@ function resolveTimeoutMs(envKey: string, defaultSeconds: number): number {
     return defaultSeconds * 1000;
   }
   return seconds * 1000;
+}
+
+function resolveSandboxCpu(task: Task): number {
+  return usesRuntimeAgent(task.agent) ? 1 : 2;
 }
 
 function sleep(ms: number): Promise<void> {
