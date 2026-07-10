@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"strings"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -15,6 +16,8 @@ const externalHostFinalizer = "firecracker.devin.baby/external-host"
 
 type HostStore interface {
 	Upsert(ctx context.Context, host *devinv1.FirecrackerHost) error
+	Get(ctx context.Context, name string) (*devinv1.FirecrackerHost, error)
+	List(ctx context.Context) ([]devinv1.FirecrackerHost, error)
 }
 
 type KubernetesHostStore struct {
@@ -24,6 +27,34 @@ type KubernetesHostStore struct {
 
 func NewKubernetesHostStore(c client.Client, namespace string) *KubernetesHostStore {
 	return &KubernetesHostStore{client: c, namespace: namespace}
+}
+
+func (s *KubernetesHostStore) Get(ctx context.Context, name string) (*devinv1.FirecrackerHost, error) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return nil, ErrInvalidHost
+	}
+
+	hostCR := &devinv1.FirecrackerHost{}
+	err := s.client.Get(ctx, client.ObjectKey{
+		Namespace: s.namespace,
+		Name:      name,
+	}, hostCR)
+	if apierrors.IsNotFound(err) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	return hostCR, nil
+}
+
+func (s *KubernetesHostStore) List(ctx context.Context) ([]devinv1.FirecrackerHost, error) {
+	list := &devinv1.FirecrackerHostList{}
+	if err := s.client.List(ctx, list, client.InNamespace(s.namespace)); err != nil {
+		return nil, err
+	}
+	return list.Items, nil
 }
 
 func (s *KubernetesHostStore) Upsert(ctx context.Context, host *devinv1.FirecrackerHost) error {

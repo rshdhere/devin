@@ -14,6 +14,26 @@ export interface RegisterExecutionHostOptions {
   capacityMemory?: string;
 }
 
+export async function fetchFirecrackerHostRegistration(
+  orchestratorUrl: string,
+  hostName: string,
+): Promise<boolean> {
+  const base = orchestratorUrl.trim().replace(/\/$/, "");
+  if (!base || !hostName.trim()) {
+    return false;
+  }
+
+  try {
+    const response = await fetch(
+      `${base}/internal/v1/firecracker-hosts/${encodeURIComponent(hostName)}`,
+      { signal: AbortSignal.timeout(5_000) },
+    );
+    return response.ok;
+  } catch {
+    return false;
+  }
+}
+
 export async function registerExecutionHost(
   options: RegisterExecutionHostOptions,
 ): Promise<void> {
@@ -85,6 +105,32 @@ export async function registerExecutionHost(
   );
 }
 
+export async function ensureExecutionHostRegistered(
+  options: RegisterExecutionHostOptions,
+): Promise<void> {
+  const orchestratorUrl = options.orchestratorUrl.trim().replace(/\/$/, "");
+  const hostName =
+    options.hostName?.trim() || resolvePreferredHost() || undefined;
+  if (!orchestratorUrl || !hostName) {
+    return;
+  }
+
+  await registerExecutionHost(options);
+
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    if (await fetchFirecrackerHostRegistration(orchestratorUrl, hostName)) {
+      return;
+    }
+    await sleep(500 * (attempt + 1));
+  }
+
+  throw new Error(
+    `FirecrackerHost ${hostName} is not visible to orchestrator after registration. ` +
+      "Apply infra/generated/firecracker-hosts.yaml, verify devin-firecracker namespace RBAC, " +
+      "and confirm ORCHESTRATOR_URL reaches the control-plane orchestrator.",
+  );
+}
+
 async function resolvePrivateIp(): Promise<string | undefined> {
   const metadataIp = await fetchEc2Metadata(
     "http://169.254.169.254/latest/meta-data/local-ipv4",
@@ -138,4 +184,8 @@ function readInt(name: string, fallback: number): number {
   }
   const value = Number.parseInt(raw, 10);
   return Number.isFinite(value) && value > 0 ? value : fallback;
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }

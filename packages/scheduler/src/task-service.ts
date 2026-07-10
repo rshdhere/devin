@@ -29,6 +29,7 @@ import {
 import { generateProjectMetadata } from "./project-metadata.js";
 import { bootstrapGreenfieldProject } from "./greenfield-bootstrap.js";
 import { greenfieldShellScaffoldFiles } from "./greenfield-shell-scaffold.js";
+import { ensureExecutionHostRegistered } from "./register-execution-host.js";
 import { generateDraftPlan, type DraftPlan } from "./draft-planner.js";
 import { scaffoldFilesFromDraft } from "./scaffold-from-draft.js";
 import { deployProductionPreview } from "./preview-deploy.js";
@@ -733,6 +734,19 @@ export class TaskService {
           if (hostIssue) {
             throw new Error(hostIssue);
           }
+        }
+
+        if (this.preferredHost) {
+          this.emit(
+            "agent.log",
+            task.id,
+            `Ensuring FirecrackerHost ${this.preferredHost} is registered`,
+            { preferredHost: this.preferredHost },
+          );
+          await ensureExecutionHostRegistered({
+            orchestratorUrl: this.orchestratorUrl,
+            hostName: this.preferredHost,
+          });
         }
 
         this.emit(
@@ -2888,12 +2902,23 @@ export class TaskService {
           const failureMessage = lastMessage
             ? `sandbox ${sandboxName} failed: ${lastMessage}`
             : `sandbox ${sandboxName} failed for task ${taskId}`;
+          const hostRegistryHint =
+            /preferred firecracker host/i.test(lastMessage) &&
+            this.preferredHost
+              ? ` Re-register with: curl -X PUT -H 'Content-Type: application/json' -d '{"spec":{"address":"http://<host-ip>:9092","schedulerAddress":"http://<host-ip>:9091","capacity":{"cpu":8,"memory":"16Gi"}}}' ${this.orchestratorUrl}/internal/v1/firecracker-hosts/${this.preferredHost}`
+              : undefined;
           this.emit("sandbox.failed", taskId, failureMessage, {
             sandboxName,
             phase,
             message: lastMessage || undefined,
+            preferredHost: this.preferredHost,
+            remediation: hostRegistryHint,
           });
-          throw new Error(failureMessage);
+          throw new Error(
+            /preferred firecracker host/i.test(lastMessage)
+              ? `${failureMessage}. Ensure FirecrackerHost ${this.preferredHost ?? "registration"} is registered with the orchestrator.`
+              : failureMessage,
+          );
         }
       } else if (Date.now() - lastProgressAt >= 3_000) {
         lastProgressAt = Date.now();

@@ -6,7 +6,7 @@ import {
 import {
   formatSSE,
   handlePreviewProxy,
-  registerExecutionHost,
+  ensureExecutionHostRegistered,
   resolvePreferredHost,
   shouldHandlePreviewHost,
   TaskService,
@@ -26,7 +26,7 @@ export interface StartSchedulerServerOptions {
 export async function startSchedulerServer(
   options: StartSchedulerServerOptions,
 ): Promise<void> {
-  const preferredHost = await resolvePreferredHost();
+  const preferredHost = resolvePreferredHost();
   if (preferredHost) {
     console.log(`service pinned to execution host ${preferredHost}`);
   }
@@ -44,7 +44,7 @@ export async function startSchedulerServer(
   await tasks.initialize();
 
   try {
-    await registerExecutionHost({
+    await ensureExecutionHostRegistered({
       orchestratorUrl: options.orchestratorUrl,
       hostName: preferredHost,
     });
@@ -53,6 +53,21 @@ export async function startSchedulerServer(
       "firecracker host registration failed:",
       error instanceof Error ? error.message : error,
     );
+  }
+
+  if (preferredHost) {
+    const registerHost = () => {
+      void ensureExecutionHostRegistered({
+        orchestratorUrl: options.orchestratorUrl,
+        hostName: preferredHost,
+      }).catch((error) => {
+        console.error(
+          "firecracker host re-registration failed:",
+          error instanceof Error ? error.message : error,
+        );
+      });
+    };
+    setInterval(registerHost, 60_000).unref();
   }
 
   tasks.startWorker();

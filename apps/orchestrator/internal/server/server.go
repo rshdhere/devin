@@ -33,6 +33,8 @@ func (s *InternalServer) Handler() http.Handler {
 	mux.HandleFunc("DELETE /internal/v1/sandboxes/{name}", s.handleDeleteSandbox)
 	mux.HandleFunc("POST /internal/v1/sandboxes/{name}/suspend", s.handleSuspendSandbox)
 	mux.HandleFunc("POST /internal/v1/sandboxes/{name}/wake", s.handleWakeSandbox)
+	mux.HandleFunc("GET /internal/v1/firecracker-hosts", s.handleListFirecrackerHosts)
+	mux.HandleFunc("GET /internal/v1/firecracker-hosts/{name}", s.handleGetFirecrackerHost)
 	mux.HandleFunc("PUT /internal/v1/firecracker-hosts/{name}", s.handleUpsertFirecrackerHost)
 	return mux
 }
@@ -258,6 +260,61 @@ func (s *InternalServer) handleUpsertFirecrackerHost(w http.ResponseWriter, r *h
 	writeJSON(w, http.StatusOK, map[string]any{
 		"name": name,
 		"spec": host.Spec,
+	})
+}
+
+func (s *InternalServer) handleGetFirecrackerHost(w http.ResponseWriter, r *http.Request) {
+	if s.hostStore == nil {
+		writeError(w, http.StatusServiceUnavailable, "firecracker host registry is unavailable")
+		return
+	}
+
+	name := strings.TrimSpace(r.PathValue("name"))
+	if name == "" {
+		writeError(w, http.StatusBadRequest, "name is required")
+		return
+	}
+
+	host, err := s.hostStore.Get(r.Context(), name)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "firecracker host not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"name": host.Name,
+		"spec": host.Spec,
+		"status": host.Status,
+	})
+}
+
+func (s *InternalServer) handleListFirecrackerHosts(w http.ResponseWriter, r *http.Request) {
+	if s.hostStore == nil {
+		writeError(w, http.StatusServiceUnavailable, "firecracker host registry is unavailable")
+		return
+	}
+
+	hosts, err := s.hostStore.List(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	items := make([]map[string]any, 0, len(hosts))
+	for _, host := range hosts {
+		items = append(items, map[string]any{
+			"name":   host.Name,
+			"spec":   host.Spec,
+			"status": host.Status,
+		})
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"items": items,
 	})
 }
 

@@ -3,6 +3,7 @@ package reconcile
 import (
 	"context"
 	"fmt"
+	"log/slog"
 
 	devinv1 "github.com/rshdhere/devin/packages/sandbox/api/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -26,6 +27,21 @@ func selectFirecrackerHost(ctx context.Context, c client.Client, namespace strin
 			if host.Spec.Capacity.CPU-host.Status.UsedCPU < cpu {
 				return nil, fmt.Errorf("preferred firecracker host %q lacks capacity for %d cpu", preferredHost, cpu)
 			}
+			return host, nil
+		}
+		if len(list.Items) == 1 {
+			host := &list.Items[0]
+			if host.Spec.Address == "" {
+				return nil, fmt.Errorf("preferred firecracker host %q not found", preferredHost)
+			}
+			if host.Spec.Capacity.CPU-host.Status.UsedCPU < cpu {
+				return nil, fmt.Errorf("preferred firecracker host %q not found", preferredHost)
+			}
+			slog.Warn(
+				"preferred firecracker host not found; using sole registered host",
+				"preferredHost", preferredHost,
+				"selectedHost", host.Name,
+			)
 			return host, nil
 		}
 		return nil, fmt.Errorf("preferred firecracker host %q not found", preferredHost)
