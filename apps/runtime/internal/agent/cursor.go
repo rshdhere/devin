@@ -38,6 +38,24 @@ func (r *CursorRunner) Run(
 		}, nil
 	}
 
+	workDir := resolveWorkDir(r.cfg, req)
+
+	whichResult, whichErr := executil.Run(ctx, workDir, "command -v "+shellQuote(r.cfg.CursorBin), mergeEnv(req))
+	if whichErr != nil || whichResult.ExitCode != 0 {
+		message := executil.CombinedOutput(whichResult)
+		if message == "" {
+			message = fmt.Sprintf(
+				"cursor agent CLI not found (%s). Rebuild the agent Firecracker snapshot.",
+				r.cfg.CursorBin,
+			)
+		}
+		return &RunResult{
+			Status:  "failed",
+			Message: message,
+			Agent:   r.Name(),
+		}, nil
+	}
+
 	args := []string{
 		"-p",
 		"--force",
@@ -53,7 +71,6 @@ func (r *CursorRunner) Run(
 	}
 	args = append(args, "--model", model)
 
-	workDir := resolveWorkDir(r.cfg, req)
 	args = append(args, "--workspace", workDir)
 	args = append(args, req.Prompt)
 
@@ -66,8 +83,9 @@ func (r *CursorRunner) Run(
 
 	var lastPublish time.Time
 	var resultText string
+	var gotResult bool
 
-	_, err := executil.RunStreamingUntil(ctx, workDir, command, mergeEnv(req), func(line executil.OutputLine) (bool, error) {
+	result, err := executil.RunStreamingUntil(ctx, workDir, command, mergeEnv(req), func(line executil.OutputLine) (bool, error) {
 		if time.Since(lastPublish) >= 100*time.Millisecond || len(line.Line) >= 200 {
 			lastPublish = time.Now()
 			publish("agent.output", line.Line, map[string]any{
@@ -81,6 +99,7 @@ func (r *CursorRunner) Run(
 		}
 
 		resultText = strings.TrimSpace(evt.Result)
+		gotResult = true
 		if evt.IsError {
 			message := resultText
 			if message == "" {
@@ -93,6 +112,32 @@ func (r *CursorRunner) Run(
 	})
 	if err != nil {
 		return nil, err
+	}
+
+	output := executil.CombinedOutput(result)
+	if result.ExitCode != 0 {
+		message := strings.TrimSpace(output)
+		if message == "" {
+			message = fmt.Sprintf("cursor agent exited with code %d", result.ExitCode)
+		}
+		return &RunResult{
+			Status:  "failed",
+			Message: message,
+			Output:  output,
+			Agent:   r.Name(),
+		}, nil
+	}
+	if !gotResult {
+		message := strings.TrimSpace(output)
+		if message == "" {
+			message = "cursor agent finished without a result event"
+		}
+		return &RunResult{
+			Status:  "failed",
+			Message: message,
+			Output:  output,
+			Agent:   r.Name(),
+		}, nil
 	}
 
 	publish("agent.log", "cursor agent finished", map[string]any{

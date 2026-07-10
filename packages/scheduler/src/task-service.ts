@@ -28,6 +28,7 @@ import {
 } from "./github.js";
 import { generateProjectMetadata } from "./project-metadata.js";
 import { bootstrapGreenfieldProject } from "./greenfield-bootstrap.js";
+import { greenfieldShellScaffoldFiles } from "./greenfield-shell-scaffold.js";
 import { generateDraftPlan, type DraftPlan } from "./draft-planner.js";
 import { scaffoldFilesFromDraft } from "./scaffold-from-draft.js";
 import { deployProductionPreview } from "./preview-deploy.js";
@@ -919,6 +920,14 @@ export class TaskService {
               githubToken,
             });
           }
+          if (usesRuntimeAgent(task.agent) && createdNewRepo) {
+            await this.assertGreenfieldDeliverable(
+              runtime,
+              task,
+              repoCwd,
+              resolveStackRuntime(task, job),
+            );
+          }
           if (
             !job.greenfieldPushed &&
             createdNewRepo &&
@@ -1576,7 +1585,12 @@ export class TaskService {
       throw new Error(`invalid repository name: ${repository}`);
     }
 
-    const readme = this.buildGreenfieldShellReadme(task);
+    const stackRuntime = resolveStackRuntime(task, job);
+    const scaffoldFiles = greenfieldShellScaffoldFiles({
+      title: task.title ?? metadata.title,
+      prompt: task.prompt,
+      stackRuntime,
+    });
     const commitMessage = buildCommitMessage(
       `devin: initialize ${task.title ?? metadata.title}`,
     );
@@ -1584,11 +1598,12 @@ export class TaskService {
     this.emit(
       "git.commit",
       task.id,
-      "Creating empty repository shell on GitHub",
+      "Creating greenfield repository scaffold on GitHub",
       {
         repository,
         controlPlane: true,
         runtimeAgent: true,
+        files: scaffoldFiles.map((file) => file.path),
       },
     );
 
@@ -1596,7 +1611,7 @@ export class TaskService {
       githubToken,
       owner,
       repo,
-      [{ path: "README.md", content: readme }],
+      scaffoldFiles,
       commitMessage,
       created.defaultBranch,
     );
@@ -1604,12 +1619,41 @@ export class TaskService {
     job.greenfieldPushed = true;
     this.pendingJobs.set(task.id, job);
 
-    this.emit("git.push", task.id, "Repository shell pushed to GitHub", {
+    this.emit("git.push", task.id, "Repository scaffold pushed to GitHub", {
       repository,
       branch: created.defaultBranch,
       controlPlane: true,
       runtimeAgent: true,
+      files: scaffoldFiles.map((file) => file.path),
     });
+  }
+
+  private async assertGreenfieldDeliverable(
+    runtime: RuntimeClient,
+    task: Task,
+    repoCwd: string,
+    stackRuntime: StackRuntime,
+  ): Promise<void> {
+    const marker =
+      stackRuntime === "go"
+        ? "go.mod"
+        : stackRuntime === "rust"
+          ? "Cargo.toml"
+          : stackRuntime === "python"
+            ? "requirements.txt"
+            : "package.json";
+
+    const check = await runtime.terminal({
+      taskId: task.id,
+      cwd: repoCwd,
+      command: `test -f '${escapeShell(marker)}' && echo yes || echo no`,
+    });
+
+    if (check.stdout.trim() !== "yes") {
+      throw new Error(
+        `Agent did not leave a runnable ${stackRuntime} project (${marker} missing)`,
+      );
+    }
   }
 
   private assertSandboxOnLocalHost(
@@ -1723,13 +1767,18 @@ export class TaskService {
     cloneUrl: string,
     githubToken?: string,
   ): Promise<void> {
-    const readme = this.buildGreenfieldShellReadme(task);
+    const stackRuntime = resolveStackRuntime(task, job);
+    const scaffoldFiles = greenfieldShellScaffoldFiles({
+      title: task.title ?? "project",
+      prompt: task.prompt,
+      stackRuntime,
+    });
 
     this.emit("git.clone", task.id, `Hydrating ${task.repository} in sandbox`, {
       repository: task.repository,
       hydrated: true,
       runtimeAgent: true,
-      files: ["README.md"],
+      files: scaffoldFiles.map((file) => file.path),
     });
 
     const gitEnv = this.gitRuntimeEnv(githubToken);
@@ -1739,10 +1788,22 @@ export class TaskService {
       command: `rm -rf '${escapeShell(repoCwd)}' && mkdir -p '${escapeShell(repoCwd)}'`,
     });
 
-    await runtime.writeFile({
-      path: `${repoCwd}/README.md`,
-      content: readme,
-    });
+    for (const file of scaffoldFiles) {
+      const fullPath = `${repoCwd}/${file.path}`;
+      const parentDir = fullPath.includes("/")
+        ? fullPath.slice(0, fullPath.lastIndexOf("/"))
+        : repoCwd;
+      if (parentDir !== repoCwd) {
+        await runtime.terminal({
+          taskId: task.id,
+          command: `mkdir -p '${escapeShell(parentDir)}'`,
+        });
+      }
+      await runtime.writeFile({
+        path: fullPath,
+        content: file.content,
+      });
+    }
 
     await runtime.terminal({
       taskId: task.id,
