@@ -1202,6 +1202,8 @@ export class TaskService {
               previewUrl: preview.previewUrl,
               deployStatus: "live",
             });
+          } else {
+            this.patchTask(task.id, { deployStatus: "failed" });
           }
         }
 
@@ -1343,6 +1345,8 @@ export class TaskService {
             previewUrl: preview.previewUrl,
             deployStatus: "live",
           });
+        } else {
+          this.patchTask(task.id, { deployStatus: "failed" });
         }
       }
 

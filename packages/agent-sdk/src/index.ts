@@ -96,23 +96,31 @@ async function resolveRuntimeFetchDispatcher(
   }
   try {
     const undici = await import("undici");
+    // Keep headers/body timeouts aligned with AbortSignal so long /terminal
+    // calls (npm install, builds) are not killed by undici's 300s default.
     runtimeFetchDispatcher = new undici.Agent({
       headersTimeout: timeoutMs,
       bodyTimeout: timeoutMs,
       connectTimeout: 30_000,
     }) as RequestInit["dispatcher"];
     return runtimeFetchDispatcher;
-  } catch {
+  } catch (error) {
+    console.warn(
+      "undici Agent unavailable; runtime fetch may hit the 300s default headersTimeout",
+      error,
+    );
     return undefined;
   }
 }
 
 export class RuntimeClient {
   private readonly fetchTimeoutMs: number;
+  private readonly options: RuntimeClientOptions;
 
-  constructor(private readonly options: RuntimeClientOptions) {
+  constructor(options: RuntimeClientOptions | string) {
+    this.options = typeof options === "string" ? { baseUrl: options } : options;
     this.fetchTimeoutMs =
-      options.fetchTimeoutMs ?? DEFAULT_RUNTIME_FETCH_TIMEOUT_MS;
+      this.options.fetchTimeoutMs ?? DEFAULT_RUNTIME_FETCH_TIMEOUT_MS;
   }
 
   private base(path: string): string {
