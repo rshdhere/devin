@@ -227,14 +227,60 @@ func (m *Manager) Create(name, runtime, taskID string, cpu int32, memory string)
 		return nil, err
 	}
 
+	// Idempotent create: concurrent machine reconciles must not launch duplicate VMs.
+	if existing := m.findByName(name); existing != nil {
+		return existing, nil
+	}
+
 	if warm, ok := m.takeWarm(runtime, name); ok {
+		// Warm snapshots are pinned to WarmVCPU; charge that instead of the
+		// caller-requested CPU so capacity matches real vCPU usage.
+		chargeCPU := m.cfg.WarmVCPU
+		if chargeCPU < 1 {
+			chargeCPU = 1
+		}
 		m.mu.Lock()
+		if existing := m.findByNameLocked(name); existing != nil {
+			// Lost the race to another create; return the warm VM to the pool.
+			if queue := m.ready[runtime]; queue != nil {
+				select {
+				case queue <- warm:
+					m.readyCount++
+				default:
+					go func() { _ = warm.Shutdown(context.Background()) }()
+				}
+			} else {
+				go func() { _ = warm.Shutdown(context.Background()) }()
+			}
+			m.mu.Unlock()
+			return existing, nil
+		}
+		if err := m.reserveCPULocked(chargeCPU); err != nil {
+			// Put the warm VM back so the pool stays populated.
+			if queue := m.ready[runtime]; queue != nil {
+				select {
+				case queue <- warm:
+					m.readyCount++
+				default:
+					go func() { _ = warm.Shutdown(context.Background()) }()
+				}
+			} else {
+				go func() { _ = warm.Shutdown(context.Background()) }()
+			}
+			m.mu.Unlock()
+			return nil, err
+		}
 		m.assigned[warm.ID] = warm
 		m.vms[warm.ID] = warm
-		m.vmCPU[warm.ID] = cpu
-		m.usedCPU += cpu
+		m.vmCPU[warm.ID] = chargeCPU
+		m.usedCPU += chargeCPU
 		m.mu.Unlock()
 		return m.recordFromInstance(warm), nil
+	}
+
+	chargeCPU := cpu
+	if chargeCPU < 1 {
+		chargeCPU = 1
 	}
 
 	vmID := xid.New().String()
@@ -247,12 +293,69 @@ func (m *Manager) Create(name, runtime, taskID string, cpu int32, memory string)
 	}
 
 	m.mu.Lock()
+	if existing := m.findByNameLocked(name); existing != nil {
+		m.mu.Unlock()
+		return existing, nil
+	}
+	if err := m.reserveCPULocked(chargeCPU); err != nil {
+		m.mu.Unlock()
+		return nil, err
+	}
 	m.vms[vmID] = pending
+	m.vmCPU[vmID] = chargeCPU
+	m.usedCPU += chargeCPU
 	m.mu.Unlock()
 
-	go m.provisionCold(vmID, name, runtime, cpu, memory)
+	go m.provisionCold(vmID, name, runtime, chargeCPU, memory)
 
 	return m.recordFromInstance(pending), nil
+}
+
+func (m *Manager) findByName(name string) *VMRecord {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.findByNameLocked(name)
+}
+
+func (m *Manager) findByNameLocked(name string) *VMRecord {
+	if name == "" {
+		return nil
+	}
+	for _, instance := range m.vms {
+		if instance.Name == name {
+			return m.recordFromInstance(instance)
+		}
+	}
+	return nil
+}
+
+func (m *Manager) reserveCPULocked(cpu int32) error {
+	if m.usedCPU+cpu > m.cfg.CapacityCPU {
+		available := m.cfg.CapacityCPU - m.usedCPU
+		if available < 0 {
+			available = 0
+		}
+		return fmt.Errorf(
+			"host lacks capacity for %d cpu (capacity=%d used=%d available=%d activeVMs=%d)",
+			cpu,
+			m.cfg.CapacityCPU,
+			m.usedCPU,
+			available,
+			len(m.assigned),
+		)
+	}
+	return nil
+}
+
+func (m *Manager) List() []*VMRecord {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	records := make([]*VMRecord, 0, len(m.assigned))
+	for _, instance := range m.assigned {
+		records = append(records, m.recordFromInstance(instance))
+	}
+	return records
 }
 
 func (m *Manager) createDryRun(name, runtime string) (*VMRecord, error) {
@@ -344,21 +447,29 @@ func (m *Manager) provisionCold(vmID, name, runtime string, cpu int32, memory st
 		if err == nil {
 			_ = instance.Shutdown(ctx)
 		}
+		// Reservation was already released by Delete; nothing else to do.
 		return
 	}
 
 	if err != nil {
 		pending.Phase = "Failed"
 		pending.Message = err.Error()
+		if reserved := m.vmCPU[vmID]; reserved > 0 && m.usedCPU >= reserved {
+			m.usedCPU -= reserved
+		}
+		delete(m.vmCPU, vmID)
 		return
 	}
 
+	// CPU was reserved when Create queued this cold provision.
 	m.assigned[instance.ID] = instance
 	m.vms[instance.ID] = instance
-	m.vmCPU[instance.ID] = cpu
-	m.usedCPU += cpu
 	if instance.ID != vmID {
+		m.vmCPU[instance.ID] = m.vmCPU[vmID]
 		delete(m.vms, vmID)
+		delete(m.vmCPU, vmID)
+	} else {
+		m.vmCPU[instance.ID] = cpu
 	}
 }
 

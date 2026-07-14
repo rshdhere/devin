@@ -23,6 +23,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /health", s.handleHealth)
 	mux.HandleFunc("GET /v1/pool", s.handlePool)
 	mux.HandleFunc("GET /v1/status", s.handleStatus)
+	mux.HandleFunc("GET /v1/vms", s.handleListVMs)
 	mux.HandleFunc("POST /v1/vms", s.handleCreateVM)
 	mux.HandleFunc("GET /v1/vms/{id}", s.handleGetVM)
 	mux.HandleFunc("DELETE /v1/vms/{id}", s.handleDeleteVM)
@@ -44,6 +45,12 @@ func (s *Server) handlePool(w http.ResponseWriter, _ *http.Request) {
 
 func (s *Server) handleStatus(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, s.pool.Status())
+}
+
+func (s *Server) handleListVMs(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{
+		"items": s.pool.List(),
+	})
 }
 
 type createVMRequest struct {

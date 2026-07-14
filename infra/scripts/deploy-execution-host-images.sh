@@ -98,8 +98,8 @@ ExecStart=/usr/bin/docker run --rm --name scheduler \\\\
   -e SCHEDULER_PORT=9091 \\\\
   -e ORCHESTRATOR_URL=\\\${ORCHESTRATOR_URL} \\\\
   -e FIRECRACKER_HOST_URL=http://127.0.0.1:9092 \\\\
-  -e SCHEDULER_HOST_NAME=${host_name} \\\\
-  -e FIRECRACKER_HOST_NAME=${host_name} \\\\
+  -e SCHEDULER_HOST_NAME=\${host_name} \\\\
+  -e FIRECRACKER_HOST_NAME=\${host_name} \\\\
   -e QUEUE_DRIVER=\\\${QUEUE_DRIVER} \\\\
   -e SQS_QUEUE_URL=\\\${SQS_QUEUE_URL} \\\\
   -e AWS_REGION=\${AWS_REGION} \\\\
@@ -135,10 +135,10 @@ log "Clearing legacy CNI host-local IPAM state"
 rm -rf /var/lib/cni/networks/fcnet 2>/dev/null || true
 if [[ -d /var/run/netns ]]; then
   for netns_path in /var/run/netns/*; do
-    [[ -e "$netns_path" ]] || continue
-    id=$(basename "$netns_path")
-    ip netns del "$id" 2>/dev/null || rm -f "$netns_path"
-    rm -rf "/var/lib/cni/$id"
+    [[ -e "\$netns_path" ]] || continue
+    id=\$(basename "\$netns_path")
+    ip netns del "\$id" 2>/dev/null || rm -f "\$netns_path"
+    rm -rf "/var/lib/cni/\$id"
   done
 fi
 if [[ -f /etc/cni/conf.d/fcnet.conflist ]] && grep -q '"host-local"' /etc/cni/conf.d/fcnet.conflist; then
@@ -264,6 +264,9 @@ wait_for_command() {
         echo "SSM deploy failed on ${instance_id}: ${status}" >&2
         return 1
         ;;
+      InProgress|Pending|Delayed)
+        sleep 10
+        ;;
       *)
         sleep 10
         ;;
@@ -277,7 +280,19 @@ wait_for_command() {
 deploy_instance() {
   local instance_id="$1"
   local remote_script
-  remote_script="$(remote_deploy_script)"
+  # Fail hard if the remote script template cannot be rendered (e.g. unbound vars).
+  if ! remote_script="$(remote_deploy_script)"; then
+    echo "Failed to render remote deploy script" >&2
+    return 1
+  fi
+  if [[ -z "${remote_script}" ]]; then
+    echo "Remote deploy script is empty" >&2
+    return 1
+  fi
+  if ! grep -q 'Deployed tag' <<<"${remote_script}"; then
+    echo "Remote deploy script looks incomplete" >&2
+    return 1
+  fi
   local params
   params="$(jq -n --arg cmd "$remote_script" '{commands: [$cmd]}')"
 

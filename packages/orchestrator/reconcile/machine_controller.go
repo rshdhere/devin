@@ -56,6 +56,16 @@ func (r *FirecrackerMachineReconciler) Reconcile(ctx context.Context, req ctrl.R
 }
 
 func (r *FirecrackerMachineReconciler) provisionVM(ctx context.Context, machine *devinv1.FirecrackerMachine) (ctrl.Result, error) {
+	// Claim the machine before calling CreateVM so concurrent reconciles do not
+	// launch duplicate microVMs while Status.VMID is still empty.
+	if machine.Status.Phase == "" || machine.Status.Phase == devinv1.MachinePhasePending {
+		machine.Status.Phase = devinv1.MachinePhaseProvisioning
+		machine.Status.Message = "requesting firecracker microVM"
+		if err := r.Status().Update(ctx, machine); err != nil {
+			return ctrl.Result{}, err
+		}
+	}
+
 	selectedHost, err := selectFirecrackerHost(ctx, r.Client, r.Config.FirecrackerNamespace, machine.Spec.CPU, firstNonEmpty(machine.Spec.PreferredHost, machine.Spec.Host))
 	if err != nil {
 		if isRetryableProvisionError(err) {

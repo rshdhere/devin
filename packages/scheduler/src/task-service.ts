@@ -2866,13 +2866,40 @@ export class TaskService {
       const owner =
         this.tasks.get(ownerTaskId) ??
         (await this.taskStore.getTask(ownerTaskId));
-      if (!owner || owner.status !== "failed") {
+      const abandoned =
+        !owner ||
+        owner.status === "failed" ||
+        owner.status === "cancelled" ||
+        owner.status === "completed";
+      if (!abandoned) {
         continue;
       }
 
       await this.forceTerminateDevbox(ownerTaskId, sandbox.name, taskId);
       reclaimed += 1;
       protectedTaskIds.add(ownerTaskId);
+    }
+
+    if (reclaimed === 0 && requiredCpu > 0) {
+      // Last resort: delete an unprotected Running sandbox so a new task can
+      // start even when completed-session tracking is incomplete.
+      const candidate = sandboxes.find((entry) => {
+        const ownerTaskId = entry.taskId?.trim();
+        return (
+          !!ownerTaskId &&
+          !protectedTaskIds.has(ownerTaskId) &&
+          (entry.phase === "Running" || entry.phase === "Provisioning")
+        );
+      });
+      if (candidate?.taskId) {
+        await this.forceTerminateDevbox(
+          candidate.taskId,
+          candidate.name,
+          taskId,
+        );
+        reclaimed += 1;
+        protectedTaskIds.add(candidate.taskId);
+      }
     }
 
     if (reclaimed === 0 && requiredCpu > 0) {
