@@ -3,6 +3,7 @@ package reconcile
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"k8s.io/apimachinery/pkg/runtime"
@@ -57,6 +58,12 @@ func (r *FirecrackerMachineReconciler) Reconcile(ctx context.Context, req ctrl.R
 func (r *FirecrackerMachineReconciler) provisionVM(ctx context.Context, machine *devinv1.FirecrackerMachine) (ctrl.Result, error) {
 	selectedHost, err := selectFirecrackerHost(ctx, r.Client, r.Config.FirecrackerNamespace, machine.Spec.CPU, firstNonEmpty(machine.Spec.PreferredHost, machine.Spec.Host))
 	if err != nil {
+		if isRetryableProvisionError(err) {
+			if syncErr := r.syncSandboxCapacityWait(ctx, machine, err.Error()); syncErr != nil {
+				return ctrl.Result{}, syncErr
+			}
+			return ctrl.Result{RequeueAfter: 15 * time.Second}, nil
+		}
 		return r.fail(ctx, machine, err)
 	}
 
@@ -213,6 +220,26 @@ func (r *FirecrackerMachineReconciler) syncSandboxFailed(ctx context.Context, ma
 	sandbox.Status.Phase = devinv1.SandboxPhaseFailed
 	sandbox.Status.Message = message
 	return r.Status().Update(ctx, sandbox)
+}
+
+func (r *FirecrackerMachineReconciler) syncSandboxCapacityWait(ctx context.Context, machine *devinv1.FirecrackerMachine, message string) error {
+	sandbox := &devinv1.Sandbox{}
+	if err := r.Get(ctx, client.ObjectKey{Namespace: machine.Namespace, Name: machine.Spec.SandboxName}, sandbox); err != nil {
+		return client.IgnoreNotFound(err)
+	}
+	sandbox.Status.Phase = devinv1.SandboxPhaseProvisioning
+	sandbox.Status.MachineName = machine.Name
+	sandbox.Status.Message = message
+	return r.Status().Update(ctx, sandbox)
+}
+
+func isRetryableProvisionError(err error) bool {
+	if err == nil {
+		return false
+	}
+	message := strings.ToLower(err.Error())
+	return strings.Contains(message, "lacks capacity") ||
+		strings.Contains(message, "not found") && strings.Contains(message, "firecracker host")
 }
 
 func (r *FirecrackerMachineReconciler) writeMachineStatus(

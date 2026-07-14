@@ -428,8 +428,13 @@ export class TaskService {
 
     const session =
       this.activeSessions.get(taskId) ?? this.reviewSessions.get(taskId);
+    const sandboxName =
+      session?.sandboxName ?? task.sandboxName ?? `sbx-${taskId.slice(0, 8)}`;
+
+    if (sandboxName) {
+      await this.deleteSandbox(sandboxName);
+    }
     if (session) {
-      await this.deleteSandbox(session.sandboxName);
       this.activeSessions.delete(taskId);
       this.reviewSessions.delete(taskId);
       await this.taskStore.deleteSession(taskId);
@@ -751,9 +756,9 @@ export class TaskService {
           });
         }
 
-        const reclaimed = await this.reclaimFailedSandboxes(task.id);
+        const reclaimed = await this.reclaimDevboxCapacity(task.id, sandboxCpu);
         if (reclaimed > 0) {
-          await sleep(2_000);
+          await sleep(3_000);
         }
 
         this.emit(
@@ -765,16 +770,24 @@ export class TaskService {
             runtime: runtimeImage,
             orchestratorUrl: this.orchestratorUrl,
             cpu: sandboxCpu,
+            reclaimedSandboxes: reclaimed,
           },
         );
 
-        await this.ensureSandbox(sandboxName, task.id, {
-          taskId: task.id,
-          runtime: runtimeImage,
-          cpu: sandboxCpu,
-          memory: "4Gi",
-          ...(this.preferredHost ? { preferredHost: this.preferredHost } : {}),
-        });
+        await this.provisionSandboxWithCapacityRetry(
+          sandboxName,
+          task.id,
+          {
+            taskId: task.id,
+            runtime: runtimeImage,
+            cpu: sandboxCpu,
+            memory: resolveSandboxMemory(task),
+            ...(this.preferredHost
+              ? { preferredHost: this.preferredHost }
+              : {}),
+          },
+          sandboxCpu,
+        );
 
         const sandbox = await this.waitForSandbox(sandboxName, task.id);
         this.assertSandboxOnLocalHost(sandbox, task.id);
@@ -2806,28 +2819,145 @@ export class TaskService {
     }
   }
 
-  private async reclaimFailedSandboxes(taskId: string): Promise<number> {
+  private async provisionSandboxWithCapacityRetry(
+    sandboxName: string,
+    taskId: string,
+    spec: Record<string, unknown>,
+    _requiredCpu: number,
+  ): Promise<void> {
+    await this.ensureSandbox(sandboxName, taskId, spec);
+  }
+
+  private async reclaimDevboxCapacity(
+    taskId: string,
+    requiredCpu: number,
+  ): Promise<number> {
     const sandboxes = await listSandboxes(this.orchestratorUrl);
     let reclaimed = 0;
+    const protectedTaskIds = new Set<string>([
+      taskId,
+      ...this.activeSessions.keys(),
+      ...this.reviewSessions.keys(),
+      ...this.processingTasks,
+    ]);
 
     for (const sandbox of sandboxes) {
-      if (sandbox.phase !== "Failed") {
+      if (sandbox.phase === "Failed") {
+        await this.deleteSandbox(sandbox.name);
+        reclaimed += 1;
+        this.emit(
+          "agent.log",
+          taskId,
+          `Reclaimed failed sandbox ${sandbox.name}`,
+          { sandboxName: sandbox.name, reclaimed: true },
+        );
+      }
+    }
+
+    for (const sandbox of sandboxes) {
+      const ownerTaskId = sandbox.taskId?.trim();
+      if (!ownerTaskId || protectedTaskIds.has(ownerTaskId)) {
         continue;
       }
-      await this.deleteSandbox(sandbox.name);
+      if (sandbox.phase !== "Running" && sandbox.phase !== "Provisioning") {
+        continue;
+      }
+
+      const owner =
+        this.tasks.get(ownerTaskId) ??
+        (await this.taskStore.getTask(ownerTaskId));
+      if (!owner || owner.status !== "failed") {
+        continue;
+      }
+
+      await this.forceTerminateDevbox(ownerTaskId, sandbox.name, taskId);
       reclaimed += 1;
-      this.emit(
-        "agent.log",
-        taskId,
-        `Reclaimed failed sandbox ${sandbox.name}`,
-        {
-          sandboxName: sandbox.name,
-          reclaimed: true,
-        },
-      );
+      protectedTaskIds.add(ownerTaskId);
+    }
+
+    if (reclaimed === 0 && requiredCpu > 0) {
+      const staleTaskId = await this.findStaleDevboxSessionTaskId();
+      if (staleTaskId && !protectedTaskIds.has(staleTaskId)) {
+        const staleSandbox = sandboxes.find(
+          (entry) => entry.taskId === staleTaskId,
+        );
+        if (staleSandbox) {
+          await this.forceTerminateDevbox(
+            staleTaskId,
+            staleSandbox.name,
+            taskId,
+          );
+          reclaimed += 1;
+        }
+      }
+    }
+
+    if (reclaimed > 0) {
+      this.emit("agent.log", taskId, `Reclaimed ${reclaimed} devbox(es)`, {
+        reclaimed,
+        requiredCpu,
+      });
     }
 
     return reclaimed;
+  }
+
+  private async findStaleDevboxSessionTaskId(): Promise<string | undefined> {
+    const cutoff = Date.now() - 20 * 60 * 1000;
+    let oldestTaskId: string | undefined;
+    let oldestActiveAt = Number.POSITIVE_INFINITY;
+
+    for (const [taskId] of this.activeSessions) {
+      const persisted = await this.taskStore.getSession(taskId);
+      const task =
+        this.tasks.get(taskId) ?? (await this.taskStore.getTask(taskId));
+      if (!task || task.status !== "completed") {
+        continue;
+      }
+      const lastActive = persisted
+        ? new Date(persisted.lastActiveAt).getTime()
+        : new Date(task.updatedAt ?? task.createdAt).getTime();
+      if (lastActive < cutoff && lastActive < oldestActiveAt) {
+        oldestActiveAt = lastActive;
+        oldestTaskId = taskId;
+      }
+    }
+
+    return oldestTaskId;
+  }
+
+  private async forceTerminateDevbox(
+    ownerTaskId: string,
+    sandboxName: string,
+    requestingTaskId: string,
+  ): Promise<void> {
+    await this.deleteSandbox(sandboxName);
+    this.activeSessions.delete(ownerTaskId);
+    this.reviewSessions.delete(ownerTaskId);
+    await this.taskStore.deleteSession(ownerTaskId);
+
+    const owner = this.tasks.get(ownerTaskId);
+    if (owner) {
+      owner.sessionActive = false;
+      owner.sessionSleeping = false;
+      owner.sandboxName = undefined;
+      await this.taskStore.upsertTask(owner);
+    }
+
+    this.emit(
+      "agent.log",
+      requestingTaskId,
+      `Reclaimed devbox ${sandboxName} from task ${ownerTaskId}`,
+      {
+        reclaimedFrom: ownerTaskId,
+        sandboxName,
+        reason: "capacity",
+      },
+    );
+  }
+
+  private async reclaimFailedSandboxes(taskId: string): Promise<number> {
+    return this.reclaimDevboxCapacity(taskId, 1);
   }
 
   private async deleteSandbox(sandboxName: string): Promise<void> {
@@ -2936,6 +3066,35 @@ export class TaskService {
           const failureMessage = lastMessage
             ? `sandbox ${sandboxName} failed: ${lastMessage}`
             : `sandbox ${sandboxName} failed for task ${taskId}`;
+          const retryableCapacity =
+            /lacks capacity/i.test(lastMessage) ||
+            (/not found/i.test(lastMessage) &&
+              /firecracker host/i.test(lastMessage));
+          if (retryableCapacity && Date.now() < deadline - 30_000) {
+            const reclaimed = await this.reclaimDevboxCapacity(taskId, 1);
+            if (reclaimed > 0) {
+              await this.deleteSandbox(sandboxName);
+              await this.waitForSandboxDeleted(sandboxName);
+              await sleep(3_000);
+              lastPhase = "unknown";
+              lastMessage = "";
+              pendingSince = null;
+              continue;
+            }
+            this.emit(
+              "sandbox.provisioning",
+              taskId,
+              `Waiting for execution host capacity (${lastMessage})`,
+              {
+                sandboxName,
+                phase,
+                message: lastMessage,
+                waitingForCapacity: true,
+              },
+            );
+            await sleep(5_000);
+            continue;
+          }
           const hostRegistryHint =
             /preferred firecracker host/i.test(lastMessage) &&
             this.preferredHost
@@ -3513,6 +3672,10 @@ function resolveTimeoutMs(envKey: string, defaultSeconds: number): number {
 
 function resolveSandboxCpu(task: Task): number {
   return usesRuntimeAgent(task.agent) ? 1 : 2;
+}
+
+function resolveSandboxMemory(task: Task): string {
+  return usesRuntimeAgent(task.agent) ? "2Gi" : "4Gi";
 }
 
 function sleep(ms: number): Promise<void> {
