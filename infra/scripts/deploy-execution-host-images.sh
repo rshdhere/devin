@@ -202,6 +202,26 @@ if [[ -x /usr/local/bin/devin-sync-platform-config.sh ]]; then
   AWS_REGION="\${AWS_REGION}" SSM_PREFIX="\${SSM_PREFIX}" /usr/local/bin/devin-sync-platform-config.sh
 fi
 
+# Ensure scheduler can register the FirecrackerHost without relying on IMDSv1.
+if [[ -f /etc/devin/scheduler-secrets.env ]]; then
+  if ! grep -q '^EXECUTION_HOST_PRIVATE_IP=' /etc/devin/scheduler-secrets.env; then
+    host_ip="\$(curl -sf --connect-timeout 2 http://169.254.169.254/latest/meta-data/local-ipv4 2>/dev/null || true)"
+    if [[ -z "\$host_ip" ]]; then
+      token="\$(curl -sf -X PUT -H 'X-aws-ec2-metadata-token-ttl-seconds: 60' --connect-timeout 2 http://169.254.169.254/latest/api/token 2>/dev/null || true)"
+      if [[ -n "\$token" ]]; then
+        host_ip="\$(curl -sf -H "X-aws-ec2-metadata-token: \$token" --connect-timeout 2 http://169.254.169.254/latest/meta-data/local-ipv4 2>/dev/null || true)"
+      fi
+    fi
+    if [[ -z "\$host_ip" ]]; then
+      host_ip="\$(hostname -I 2>/dev/null | awk '{print \$1}')"
+    fi
+    if [[ -n "\$host_ip" ]]; then
+      echo "EXECUTION_HOST_PRIVATE_IP=\$host_ip" >> /etc/devin/scheduler-secrets.env
+      log "Set EXECUTION_HOST_PRIVATE_IP=\$host_ip in scheduler-secrets.env"
+    fi
+  fi
+fi
+
 if systemctl list-unit-files | grep -q devin-scheduler.service; then
   log "Restarting devin-scheduler"
   if ! systemctl restart devin-scheduler.service; then

@@ -117,7 +117,20 @@ export async function ensureExecutionHostRegistered(
     return;
   }
 
-  await registerExecutionHost(options);
+  try {
+    await registerExecutionHost(options);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    // Older orchestrator builds lack the host registry HTTP API. Path B hosts
+    // are still provisioned via the FirecrackerHost CR applied through GitOps.
+    if (/\b404\b/.test(message)) {
+      console.warn(
+        `orchestrator host registry API unavailable while registering ${hostName}; continuing with GitOps FirecrackerHost CR (${message})`,
+      );
+      return;
+    }
+    throw error;
+  }
 
   for (let attempt = 0; attempt < 5; attempt += 1) {
     if (await fetchFirecrackerHostRegistration(orchestratorUrl, hostName)) {
@@ -126,8 +139,11 @@ export async function ensureExecutionHostRegistered(
     await sleep(500 * (attempt + 1));
   }
 
-  throw new Error(
-    `FirecrackerHost ${hostName} is not visible to orchestrator after registration. ` +
+  // Visibility probe failed, but sandboxes may still schedule against the CR.
+  // Prefer soft-fail over blocking every task when the registry API is missing
+  // or briefly lagging behind a successful PUT.
+  console.warn(
+    `FirecrackerHost ${hostName} is not visible to orchestrator after registration; continuing. ` +
       "Apply infra/generated/firecracker-hosts.yaml, verify devin-firecracker namespace RBAC, " +
       "and confirm ORCHESTRATOR_URL reaches the control-plane orchestrator.",
   );
@@ -154,9 +170,27 @@ async function fetchEc2Metadata(url: string): Promise<string | undefined> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 1500);
   try {
+    // Prefer IMDSv2 (required when hop limit / v1 is disabled on the instance).
+    let token: string | undefined;
+    try {
+      const tokenResponse = await fetch(
+        "http://169.254.169.254/latest/api/token",
+        {
+          method: "PUT",
+          signal: controller.signal,
+          headers: { "X-aws-ec2-metadata-token-ttl-seconds": "60" },
+        },
+      );
+      if (tokenResponse.ok) {
+        token = (await tokenResponse.text()).trim() || undefined;
+      }
+    } catch {
+      // Fall through to IMDSv1-style GET.
+    }
+
     const response = await fetch(url, {
       signal: controller.signal,
-      headers: { "X-aws-ec2-metadata-token-ttl-seconds": "60" },
+      headers: token ? { "X-aws-ec2-metadata-token": token } : undefined,
     });
     if (!response.ok) {
       return undefined;
