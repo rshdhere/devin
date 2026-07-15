@@ -33,7 +33,10 @@ import { greenfieldShellScaffoldFiles } from "./greenfield-shell-scaffold.js";
 import { ensureExecutionHostRegistered } from "./register-execution-host.js";
 import { generateDraftPlan, type DraftPlan } from "./draft-planner.js";
 import { scaffoldFilesFromDraft } from "./scaffold-from-draft.js";
-import { deployProductionPreview } from "./preview-deploy.js";
+import {
+  deployProductionPreview,
+  ensureNpmDependencies,
+} from "./preview-deploy.js";
 import type {
   AgentProvider,
   CreateTaskInput,
@@ -1868,6 +1871,8 @@ export class TaskService {
       ),
       paths: ["."],
     });
+
+    await this.preinstallHydratedNodeModules(runtime, task.id, repoCwd);
   }
 
   private async hydrateGreenfieldInSandbox(
@@ -1973,6 +1978,48 @@ export class TaskService {
         );
       }
     }
+
+    await this.preinstallHydratedNodeModules(runtime, task.id, repoCwd);
+  }
+
+  private async preinstallHydratedNodeModules(
+    runtime: RuntimeClient,
+    taskId: string,
+    repoCwd: string,
+  ): Promise<void> {
+    const hasPackageJson = await runtime.terminalAllowFailure({
+      taskId,
+      cwd: repoCwd,
+      command: "test -f package.json && echo yes || echo no",
+    });
+    if (hasPackageJson.stdout.trim() !== "yes") {
+      return;
+    }
+
+    this.emit(
+      "agent.log",
+      taskId,
+      "Preinstalling npm dependencies for preview",
+      { cwd: repoCwd },
+    );
+    const install = await ensureNpmDependencies({
+      runtime,
+      taskId,
+      repoCwd,
+    });
+    if (install.ok) {
+      this.emit("agent.log", taskId, "npm dependencies ready", {
+        detail: install.detail.slice(0, 200),
+      });
+      return;
+    }
+
+    this.emit(
+      "agent.log",
+      taskId,
+      "npm preinstall failed — preview will retry after the agent finishes",
+      { detail: install.detail.slice(0, 400) },
+    );
   }
 
   private async ensureSandboxConnectivity(
