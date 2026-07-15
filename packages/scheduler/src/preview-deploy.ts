@@ -75,55 +75,38 @@ NODE`;
  * Kill orphaned `npm install` processes left behind when the Cursor agent is
  * SIGKILL'd after streaming a result (children are not always reaped). Those
  * orphans hold npm flock locks and make the next install hang until timeout.
- * Bookworm-slim guests often lack `ps`/`pkill`, so scan /proc cmdlines.
+ * Avoid /proc/[0-9]* globs (dash leaves them literal when unmatched) and keep
+ * this a single `sh` script — compositing `if` with heredocs via `;` breaks.
  */
-const CLEAR_STALE_NPM = `
-for cmdline in /proc/[0-9]*/cmdline; do
-  pid=$(echo "$cmdline" | cut -d/ -f3)
-  case "$pid" in
-    1|$$) continue ;;
+export const ENSURE_NPM_DEPENDENCIES_COMMAND = `sh <<'ENSURE_NPM'
+set +e
+for dir in /proc/*; do
+  [ -d "$dir" ] || continue
+  pid=\${dir#/proc/}
+  case "\$pid" in
+    *[!0-9]*|1|\$\$) continue ;;
   esac
-  if tr '\\0' ' ' < "$cmdline" 2>/dev/null | grep -Eq 'npm.*(install|ci)|node.*npm'; then
-    kill -9 "$pid" 2>/dev/null || true
+  [ -r "\$dir/cmdline" ] || continue
+  if tr '\\0' ' ' < "\$dir/cmdline" 2>/dev/null | grep -Eq 'npm.*(install|ci)|node.*npm'; then
+    kill -9 "\$pid" 2>/dev/null || true
   fi
 done
-rm -rf "$HOME/.npm/_locks" node_modules/.package-lock.json 2>/dev/null || true
-`.trim();
+rm -rf "\$HOME/.npm/_locks" node_modules/.package-lock.json 2>/dev/null || true
 
-/**
- * Reuse an intact install when package.json deps already resolve. Avoids a
- * network install on every preview; refuses broken/partial node_modules dirs.
- */
-const DEPS_RESOLVE_OK = `node <<'NODE'
-const fs = require('fs');
-try {
-  const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
-  const deps = Object.keys(pkg.dependencies || {});
-  if (deps.length === 0) process.exit(0);
-  for (const dep of deps) require.resolve(dep);
-  process.exit(0);
-} catch {
-  process.exit(1);
-}
-NODE`;
+if node -e "try{const p=require('./package.json');const d=Object.keys(p.dependencies||{});for (const x of d) require.resolve(x); process.exit(0)}catch{process.exit(1)}"; then
+  echo 'reusing resolved node_modules'
+  exit 0
+fi
 
-const NPM_INSTALL_ENV =
-  'export NODE_OPTIONS="${NODE_OPTIONS:+$NODE_OPTIONS }--dns-result-order=ipv4first"; ' +
-  "export npm_config_fetch_retries=2; " +
-  "export npm_config_fetch_retry_mintimeout=2000; " +
-  "export npm_config_fetch_retry_maxtimeout=15000; " +
-  "export npm_config_fetch_timeout=60000; " +
-  "export npm_config_network_timeout=60000; ";
-
-/** Single bounded install used by hydrate + preview deploy. */
-export const ENSURE_NPM_DEPENDENCIES_COMMAND = [
-  CLEAR_STALE_NPM,
-  `if ${DEPS_RESOLVE_OK}; then echo 'reusing resolved node_modules'; exit 0; fi`,
-  "rm -rf node_modules",
-  NPM_INSTALL_ENV,
-  // GNU timeout: SIGTERM then SIGKILL after 15s so stuck npm cannot outlive us.
-  "timeout -k 15 90 npm install --omit=dev --no-audit --no-fund --progress=false --loglevel error",
-].join("; ");
+rm -rf node_modules
+export NODE_OPTIONS="\${NODE_OPTIONS:+\$NODE_OPTIONS }--dns-result-order=ipv4first"
+export npm_config_fetch_retries=2
+export npm_config_fetch_retry_mintimeout=2000
+export npm_config_fetch_retry_maxtimeout=15000
+export npm_config_fetch_timeout=60000
+export npm_config_network_timeout=60000
+timeout -k 15 90 npm install --omit=dev --no-audit --no-fund --progress=false --loglevel error
+ENSURE_NPM`;
 
 function resolveStartCommand(
   scripts: Record<string, string> | null,
