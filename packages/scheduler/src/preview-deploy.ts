@@ -39,9 +39,11 @@ function parsePackageScripts(stdout: string): Record<string, string> | null {
  * Agents often write CommonJS sources as `.ts`. Node cannot run those with
  * `npm start` (`node src/index.ts`). Materialize sibling `.js` files and rewrite
  * package.json scripts before starting the preview process.
+ *
+ * Embedded as a nested heredoc inside PREVIEW_START — never chain with
+ * `NODE && ...` on the terminator line (that feeds shell text into node).
  */
-const MATERIALIZE_JS_FROM_TS = `node <<'NODE'
-const fs = require('fs');
+const MATERIALIZE_JS_BODY = `const fs = require('fs');
 const path = require('path');
 function walk(dir) {
   for (const ent of fs.readdirSync(dir, { withFileTypes: true })) {
@@ -68,8 +70,7 @@ if (fs.existsSync('package.json')) {
     pkg.main = pkg.main.replace(/\\.ts\\b/g, '.js');
   }
   fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\\n');
-}
-NODE`;
+}`;
 
 /**
  * Kill orphaned `npm install` processes left behind when the Cursor agent is
@@ -125,11 +126,23 @@ function resolveStartCommand(
     return `env PORT=${port} HOST=0.0.0.0 NODE_ENV=production node src/index.js`;
   })();
 
-  return (
-    `if [ -f /workspace/preview.pid ]; then kill "$(cat /workspace/preview.pid)" 2>/dev/null || true; fi; ` +
-    `${MATERIALIZE_JS_FROM_TS} && ` +
-    `nohup ${launch} > /workspace/preview.log 2>&1 & echo $! > /workspace/preview.pid`
-  );
+  // One quoted outer heredoc. Nested NODE heredoc terminator is alone on its
+  // line so node never sees `NODE && nohup ...` as source.
+  return `sh <<'PREVIEW_START'
+set +e
+if [ -f /workspace/preview.pid ]; then
+  kill "$(cat /workspace/preview.pid)" 2>/dev/null || true
+fi
+node <<'NODE'
+${MATERIALIZE_JS_BODY}
+NODE
+if command -v nohup >/dev/null 2>&1; then
+  nohup ${launch} >/workspace/preview.log 2>&1 &
+else
+  ${launch} >/workspace/preview.log 2>&1 &
+fi
+echo $! >/workspace/preview.pid
+PREVIEW_START`;
 }
 
 async function waitForPreviewReady(
