@@ -73,40 +73,22 @@ if (fs.existsSync('package.json')) {
 }`;
 
 /**
- * Kill orphaned `npm install` processes left behind when the Cursor agent is
- * SIGKILL'd after streaming a result (children are not always reaped). Those
- * orphans hold npm flock locks and make the next install hang until timeout.
- * Avoid /proc/[0-9]* globs (dash leaves them literal when unmatched) and keep
- * this a single `sh` script — compositing `if` with heredocs via `;` breaks.
+ * Clear stale npm locks and install deps for preview. Keep this short — the
+ * prior /proc walk + long preinstall blocked greenfield tasks for 10+ minutes.
  */
 export const ENSURE_NPM_DEPENDENCIES_COMMAND = `sh <<'ENSURE_NPM'
 set +e
-for dir in /proc/*; do
-  [ -d "$dir" ] || continue
-  pid=\${dir#/proc/}
-  case "\$pid" in
-    *[!0-9]*|1|\$\$) continue ;;
-  esac
-  [ -r "\$dir/cmdline" ] || continue
-  if tr '\\0' ' ' < "\$dir/cmdline" 2>/dev/null | grep -Eq 'npm.*(install|ci)|node.*npm'; then
-    kill -9 "\$pid" 2>/dev/null || true
-  fi
-done
 rm -rf "\$HOME/.npm/_locks" node_modules/.package-lock.json 2>/dev/null || true
-
 if node -e "try{const p=require('./package.json');const d=Object.keys(p.dependencies||{});for (const x of d) require.resolve(x); process.exit(0)}catch{process.exit(1)}"; then
   echo 'reusing resolved node_modules'
   exit 0
 fi
-
 rm -rf node_modules
 export NODE_OPTIONS="\${NODE_OPTIONS:+\$NODE_OPTIONS }--dns-result-order=ipv4first"
 export npm_config_fetch_retries=2
-export npm_config_fetch_retry_mintimeout=2000
-export npm_config_fetch_retry_maxtimeout=15000
-export npm_config_fetch_timeout=60000
-export npm_config_network_timeout=60000
-timeout -k 15 90 npm install --omit=dev --no-audit --no-fund --progress=false --loglevel error
+export npm_config_fetch_timeout=30000
+export npm_config_network_timeout=30000
+timeout -k 10 60 npm install --omit=dev --no-audit --no-fund --progress=false --loglevel error
 ENSURE_NPM`;
 
 function resolveStartCommand(
@@ -203,7 +185,7 @@ export async function ensureNpmDependencies(input: {
       ok: false,
       detail:
         detail ||
-        "npm install timed out after 90s (cleared stale locks; check sandbox egress to registry.npmjs.org)",
+        "npm install timed out after 60s (check sandbox egress to registry.npmjs.org)",
     };
   }
   return {

@@ -1,0 +1,19 @@
+# Lovable-style preview edge: on-demand per-slug TLS → scheduler Host router → microVM.
+#
+# Do NOT put `*.preview-base` as the site address — that requests a wildcard
+# certificate (DNS-01). Use catch-all :443 with on_demand; the scheduler ask
+# endpoint gates which domains may mint certs. Caddy auto-binds :80 for ACME
+# HTTP-01 and HTTPS redirects.
+{
+	email ops@devin.baby
+	on_demand_tls {
+		ask http://127.0.0.1:9091/internal/v1/preview/tls-allowed
+	}
+}
+
+:443 {
+	tls {
+		on_demand
+	}
+	reverse_proxy 127.0.0.1:9091
+}

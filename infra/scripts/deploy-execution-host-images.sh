@@ -243,6 +243,15 @@ else
   log "devin-scheduler.service not installed — skipping"
 fi
 
+# Keep Lovable-style Caddy preview edge installed/reloaded when present.
+if [[ -x /usr/local/bin/install-preview-caddy.sh ]]; then
+  log "Refreshing preview Caddy edge"
+  /usr/local/bin/install-preview-caddy.sh /etc/caddy/Caddyfile || log "Caddy refresh skipped"
+elif [[ -f /etc/caddy/Caddyfile ]] && command -v caddy >/dev/null 2>&1; then
+  log "Reloading existing Caddy"
+  systemctl reload caddy 2>/dev/null || systemctl restart caddy || true
+fi
+
 log "Deployed tag \${IMAGE_TAG} successfully"
 EOS
 }

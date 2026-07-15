@@ -28,6 +28,8 @@ export {
   buildPreviewUrl,
   previewBaseDomain,
   previewDeployEnabled,
+  isPreviewTlsDomainAllowed,
+  matchPreviewSlug,
 } from "./preview-registry.js";
 export {
   handlePreviewProxy,

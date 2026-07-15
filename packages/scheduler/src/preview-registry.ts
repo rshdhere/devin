@@ -52,6 +52,19 @@ export function matchPreviewSlug(host: string): string | null {
   return slug;
 }
 
+/** True when Caddy may mint an on-demand cert for this domain. */
+export function isPreviewTlsDomainAllowed(domain: string): boolean {
+  const host = domain.trim().toLowerCase().split(":")[0] ?? "";
+  if (!host) {
+    return false;
+  }
+  // Registered live preview slug, or syntactically valid future slug on base.
+  if (matchPreviewSlug(host)) {
+    return true;
+  }
+  return false;
+}
+
 export function registerPreviewRoute(route: PreviewRoute): void {
   routes.set(route.slug, route);
 }

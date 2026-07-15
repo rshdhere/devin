@@ -9,6 +9,7 @@ import {
   ensureExecutionHostRegistered,
   resolvePreferredHost,
   shouldHandlePreviewHost,
+  isPreviewTlsDomainAllowed,
   TaskService,
   type ScheduleJob,
 } from "@devin/scheduler";
@@ -89,6 +90,22 @@ export async function startSchedulerServer(
         preferredHost,
         durable: tasks.getTaskStore().isEnabled(),
       });
+      return;
+    }
+
+    // Caddy on_demand_tls ask endpoint — only mint certs for preview subdomains.
+    if (
+      req.method === "GET" &&
+      url.pathname === "/internal/v1/preview/tls-allowed"
+    ) {
+      const domain = url.searchParams.get("domain") ?? "";
+      if (isPreviewTlsDomainAllowed(domain)) {
+        res.writeHead(200, { "Content-Type": "text/plain" });
+        res.end("ok");
+      } else {
+        res.writeHead(400, { "Content-Type": "text/plain" });
+        res.end("forbidden");
+      }
       return;
     }
 
