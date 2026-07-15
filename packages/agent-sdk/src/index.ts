@@ -85,12 +85,20 @@ export interface RuntimeClientOptions {
 
 const DEFAULT_RUNTIME_FETCH_TIMEOUT_MS = 35 * 60 * 1000;
 
+function isBunRuntime(): boolean {
+  return typeof (globalThis as { Bun?: unknown }).Bun !== "undefined";
+}
+
 /** Node's fetch uses undici with a 300s default headersTimeout — too short for blocking /terminal calls. */
 let runtimeFetchDispatcher: RequestInit["dispatcher"];
 
 async function resolveRuntimeFetchDispatcher(
   timeoutMs: number,
 ): Promise<RequestInit["dispatcher"]> {
+  // Bun's native fetch ignores undici's Agent/dispatcher; skip the import.
+  if (isBunRuntime()) {
+    return undefined;
+  }
   if (runtimeFetchDispatcher) {
     return runtimeFetchDispatcher;
   }
@@ -132,11 +140,19 @@ export class RuntimeClient {
     init?: RequestInit,
   ): Promise<Response> {
     const dispatcher = await resolveRuntimeFetchDispatcher(this.fetchTimeoutMs);
-    return fetch(this.base(path), {
+    // Bun hardcodes a ~5 minute fetch idle timeout and does not honor a longer
+    // AbortSignal alone (oven-sh/bun#16682). `timeout: false` disables that
+    // ceiling so npm install / builds can finish; AbortSignal still bounds the
+    // overall request. Node ignores the unknown option and uses undici above.
+    const requestInit: RequestInit & { timeout?: false | number } = {
       ...init,
       signal: AbortSignal.timeout(this.fetchTimeoutMs),
       ...(dispatcher ? { dispatcher } : {}),
-    });
+    };
+    if (isBunRuntime()) {
+      requestInit.timeout = false;
+    }
+    return fetch(this.base(path), requestInit);
   }
 
   private envHeaders(env?: Record<string, string>): Record<string, string> {

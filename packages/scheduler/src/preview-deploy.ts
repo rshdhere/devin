@@ -77,18 +77,19 @@ function resolveStartCommand(
 ): string {
   const launch = (() => {
     if (scripts?.start) {
-      return `env PORT=${port} NODE_ENV=production npm start`;
+      return `env PORT=${port} HOST=0.0.0.0 NODE_ENV=production npm start`;
     }
     if (scripts?.["start:prod"]) {
-      return `env PORT=${port} NODE_ENV=production npm run start:prod`;
+      return `env PORT=${port} HOST=0.0.0.0 NODE_ENV=production npm run start:prod`;
     }
     if (scripts?.build) {
-      return `npx --yes serve@14 dist -l ${port}`;
+      return `npx --yes serve@14 dist -l tcp://0.0.0.0:${port}`;
     }
-    return `env PORT=${port} NODE_ENV=production node src/index.js`;
+    return `env PORT=${port} HOST=0.0.0.0 NODE_ENV=production node src/index.js`;
   })();
 
   return (
+    `if [ -f /workspace/preview.pid ]; then kill "$(cat /workspace/preview.pid)" 2>/dev/null || true; fi; ` +
     `${MATERIALIZE_JS_FROM_TS} && ` +
     `nohup ${launch} > /workspace/preview.log 2>&1 & echo $! > /workspace/preview.pid`
   );
@@ -167,26 +168,32 @@ export async function deployProductionPreview(input: {
   });
 
   try {
+    // Reuse agent-installed node_modules when present. Avoid a 3-stage
+    // install chain that can stall a single HTTP /terminal past Bun's old
+    // 5-minute fetch ceiling.
     const install = await runtime.terminalAllowFailure({
       taskId,
       command:
-        "timeout 180 npm ci --omit=dev 2>/dev/null " +
-        "|| timeout 180 npm install --omit=dev 2>/dev/null " +
-        "|| timeout 180 npm install",
+        "if [ -d node_modules ]; then " +
+        "echo 'reusing existing node_modules'; " +
+        "else " +
+        "timeout 240 npm install --omit=dev --no-audit --no-fund " +
+        "|| timeout 240 npm install --no-audit --no-fund; " +
+        "fi",
       cwd: repoCwd,
     });
     if (install.exitCode !== 0) {
       throw new Error(
         install.stderr.trim() ||
           install.stdout.trim() ||
-          "npm install failed (or timed out after 180s)",
+          "npm install failed (or timed out after 240s)",
       );
     }
 
     if (scripts.build) {
       const buildResult = await runtime.terminalAllowFailure({
         taskId,
-        command: "timeout 300 npm run build",
+        command: "timeout 240 npm run build",
         cwd: repoCwd,
       });
       if (buildResult.exitCode !== 0) {
@@ -198,8 +205,6 @@ export async function deployProductionPreview(input: {
       }
     }
 
-    // Refresh scripts after materialization rewrite may not have run yet;
-    // resolveStartCommand embeds materialization itself.
     const startCommand = resolveStartCommand(scripts, port);
     await runtime.terminal({
       taskId,
@@ -212,12 +217,12 @@ export async function deployProductionPreview(input: {
       taskId,
       repoCwd,
       port,
-      90_000,
+      120_000,
     );
     if (!ready) {
       const previewLog = await readPreviewLog(runtime, taskId, repoCwd);
       throw new Error(
-        `preview app did not become ready on port ${port} within 90s` +
+        `preview app did not become ready on port ${port} within 120s` +
           (previewLog ? `: ${previewLog}` : ""),
       );
     }
