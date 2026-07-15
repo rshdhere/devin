@@ -873,49 +873,30 @@ export class TaskService {
             createdNewRepo &&
             job.greenfieldPushed
           ) {
+            // Hydrate first — same files the control plane just pushed. Avoids
+            // multi-minute git clone DNS failures that dominate greenfield latency.
             this.emit(
               "agent.log",
               task.id,
-              "Cloning greenfield scaffold from GitHub (shared history with main)",
-              { repository, runtimeAgent: true },
+              "Hydrating greenfield scaffold in sandbox (skip slow remote clone)",
+              { repository, runtimeAgent: true, hydrateFirst: true },
             );
-            try {
-              await this.cloneRepositoryInSandbox(
-                runtime,
-                task.id,
-                cloneUrl,
-                repoCwd,
-                repository,
-              );
-            } catch (error) {
-              this.emit(
-                "agent.log",
-                task.id,
-                "Git clone failed; falling back to local hydrate",
-                {
-                  repository,
-                  fallback: "hydrate",
-                  detail:
-                    error instanceof Error ? error.message : String(error),
-                },
-              );
-              await this.hydrateRepositoryShellInSandbox(
-                runtime,
-                task,
-                job,
-                repoCwd,
-                gitOwner,
-                cloneUrl,
-                githubToken,
-              );
-              await this.rebaseHydratedRepoOntoOriginMain(
-                runtime,
-                task.id,
-                repoCwd,
-                githubToken,
-              );
-              repoHydratedLocally = true;
-            }
+            await this.hydrateRepositoryShellInSandbox(
+              runtime,
+              task,
+              job,
+              repoCwd,
+              gitOwner,
+              cloneUrl,
+              githubToken,
+            );
+            await this.rebaseHydratedRepoOntoOriginMain(
+              runtime,
+              task.id,
+              repoCwd,
+              githubToken,
+            );
+            repoHydratedLocally = true;
           } else if (
             job.greenfieldPushed &&
             job.draftPlan &&
@@ -1898,8 +1879,8 @@ export class TaskService {
   }
 
   /**
-   * When local hydrate created an orphan history, re-parent the working tree
-   * onto origin/main so PRs against main are valid.
+   * When local hydrate created an orphan history, soft-reset onto origin/main
+   * via a short fetch (not a second full clone).
    */
   private async rebaseHydratedRepoOntoOriginMain(
     runtime: RuntimeClient,
@@ -1914,12 +1895,8 @@ export class TaskService {
       env: gitEnv,
       command: [
         "set -e",
-        "tmpdir=$(mktemp -d)",
-        "origin_url=$(git remote get-url origin)",
-        'timeout 60 git clone --depth 1 "$origin_url" "$tmpdir"',
-        "rm -rf .git",
-        'mv "$tmpdir/.git" .',
-        'rm -rf "$tmpdir"',
+        "timeout 25 git fetch --depth 1 origin main",
+        "git reset --soft FETCH_HEAD",
         "git add -A",
         "if git diff --cached --quiet; then",
         "  echo 'working tree matches origin/main'",
@@ -1932,7 +1909,7 @@ export class TaskService {
       this.emit(
         "agent.log",
         taskId,
-        "Could not reparent hydrated repo onto origin/main — PR may fail",
+        "Could not reparent hydrated repo onto origin/main — continuing on local history",
         {
           detail: (result.stderr || result.stdout || "").trim().slice(0, 400),
         },
@@ -3706,15 +3683,23 @@ function buildAgentPrompt(
     `Repository ${repository} is cloned at /workspace/${repoCwd}. Work in that directory.`,
     ownerLine,
     "",
-    "The repository already contains a Devin scaffold. Complete the user's request on top of it.",
-    "Implement the full requested functionality, run npm install when needed, verify the app starts, then commit and push.",
+    "The repository only has a thin Devin scaffold (health + placeholders). You must implement the user's request.",
+    "Requirements:",
+    "- Build the full product the user asked for (not just stubs)",
+    "- GET / must be user-facing (HTML UI or redirect to it) — never leave Express 'Cannot GET /'",
+    "- Keep /health returning JSON { ok: true }",
+    "- Run npm install when needed, start the app, and smoke-check GET / and /health before finishing",
+    "- Prefer .js entrypoints for Node (node can run package.json start scripts)",
+    "",
+    "Git / commits:",
+    "- Commit incrementally after meaningful steps (API, UI, wiring, polish) — at least 2–4 focused commits for a greenfield app",
+    "- Push to the working branch as you go when possible",
+    `- Every commit MUST include this trailer on a new line in the commit message body: Co-authored-by: ${bot.name} <${bot.email}>`,
     "",
     "Sandbox tooling:",
     "- GITHUB_TOKEN is available for gh and git",
     "- Run tests before finishing when applicable",
     "- You may commit, push, open pull requests, and create issues with gh",
-    `- Every commit MUST include this trailer on a new line in the commit message body: Co-authored-by: ${bot.name} <${bot.email}>`,
-    "- Commit incrementally when meaningful progress is made",
     "",
     prompt,
   ].join("\n");

@@ -22,10 +22,6 @@ export interface PreviewDeployEmitter {
   ): void;
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
 function parsePackageScripts(stdout: string): Record<string, string> | null {
   try {
     const pkg = JSON.parse(stdout) as { scripts?: Record<string, string> };
@@ -134,22 +130,23 @@ async function waitForPreviewReady(
   port: number,
   timeoutMs: number,
 ): Promise<boolean> {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    const probe = await runtime.terminalAllowFailure({
-      taskId,
-      cwd: repoCwd,
-      command:
-        `curl -sf --max-time 2 http://127.0.0.1:${port}/health ` +
-        `|| curl -sf --max-time 2 http://127.0.0.1:${port}/ ` +
-        `|| exit 1`,
-    });
-    if (probe.exitCode === 0) {
-      return true;
-    }
-    await sleep(2_000);
-  }
-  return false;
+  // One in-guest loop — not N scheduler↔runtime RPCs (each cost seconds and
+  // previously stretched a 90s ready wait into ~9 minutes).
+  const seconds = Math.max(5, Math.ceil(timeoutMs / 1000));
+  const probe = await runtime.terminalAllowFailure({
+    taskId,
+    cwd: repoCwd,
+    command: [
+      "set +e",
+      `for i in $(seq 1 ${seconds}); do`,
+      `  if curl -sf --max-time 2 http://127.0.0.1:${port}/health >/dev/null; then exit 0; fi`,
+      `  if curl -sf --max-time 2 http://127.0.0.1:${port}/ >/dev/null; then exit 0; fi`,
+      "  sleep 1",
+      "done",
+      "exit 1",
+    ].join("\n"),
+  });
+  return probe.exitCode === 0;
 }
 
 async function readPreviewLog(
