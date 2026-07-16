@@ -29,6 +29,11 @@ import {
 } from "./github.js";
 import { generateProjectMetadata } from "./project-metadata.js";
 import { bootstrapGreenfieldProject } from "./greenfield-bootstrap.js";
+import {
+  buildAlignHydratedRepoScript,
+  buildPushGreenfieldMainScript,
+  isAgentTimeoutMessage,
+} from "./greenfield-git-sync.js";
 import { greenfieldShellScaffoldFiles } from "./greenfield-shell-scaffold.js";
 import { ensureExecutionHostRegistered } from "./register-execution-host.js";
 import { generateDraftPlan, type DraftPlan } from "./draft-planner.js";
@@ -890,12 +895,6 @@ export class TaskService {
               cloneUrl,
               githubToken,
             );
-            await this.rebaseHydratedRepoOntoOriginMain(
-              runtime,
-              task.id,
-              repoCwd,
-              githubToken,
-            );
             repoHydratedLocally = true;
           } else if (
             job.greenfieldPushed &&
@@ -1036,8 +1035,10 @@ export class TaskService {
         task.agent === "mock" && Boolean(job.greenfieldPushed);
       const runtimeAgentTask = usesRuntimeAgent(task.agent);
 
+      // Runtime agents own git history; auto-checkpoints fight them and cause
+      // divergent main + repeated push rejections during long cursor runs.
       const stopAutoCommit =
-        repository && cloneUrl && !isTemplateGreenfield
+        repository && cloneUrl && !isTemplateGreenfield && !runtimeAgentTask
           ? this.startAutoCommitWatcher(
               runtime,
               task,
@@ -1110,13 +1111,44 @@ export class TaskService {
       } catch (error) {
         const message =
           error instanceof Error ? error.message : "Agent run failed";
-        if (/did not finish within/i.test(message)) {
+        if (isAgentTimeoutMessage(message)) {
           this.emit("agent.failed", task.id, message, {
             timeout: true,
             maxWaitMs: resolveAgentMaxWaitMs(),
           });
+          if (
+            createdNewRepo &&
+            runtimeAgentTask &&
+            runtime &&
+            repository &&
+            cloneUrl
+          ) {
+            const recovered =
+              await this.recoverGreenfieldAfterAgentInterruption(
+                runtime,
+                task,
+                job,
+                repoCwd,
+                githubToken,
+                preAgentHead,
+              );
+            if (recovered) {
+              runResult = {
+                status: "completed",
+                taskId: task.id,
+                message:
+                  "Agent timed out; control plane finalized greenfield commits",
+                agent: task.agent,
+              };
+            } else {
+              throw error;
+            }
+          } else {
+            throw error;
+          }
+        } else {
+          throw error;
         }
-        throw error;
       } finally {
         stopAutoCommit();
         stopEvents();
@@ -1211,7 +1243,9 @@ export class TaskService {
         if (job.permissions) {
           await this.finalizeGitWork(runtime, task, job, repoCwd, githubToken, {
             greenfield: createdNewRepo,
-            createPullRequest: true,
+            createPullRequest:
+              job.requireReviewBeforePush === true ||
+              !(createdNewRepo && runtimeAgentTask),
           });
         }
 
@@ -1294,6 +1328,7 @@ export class TaskService {
             job,
             repoCwd,
             githubToken,
+            { greenfield: createdNewRepo },
           );
         } catch {
           // Best-effort recovery push; original failure still wins.
@@ -1887,54 +1922,78 @@ export class TaskService {
       githubToken,
     });
 
-    await runtime.gitCommit({
-      taskId: task.id,
-      cwd: repoCwd,
-      env: gitEnv,
-      message: buildCommitMessage(
-        `devin: initialize ${task.title ?? "project"}`,
-      ),
-      paths: ["."],
-    });
+    const aligned = await this.alignHydratedRepoWithOriginMain(
+      runtime,
+      task.id,
+      repoCwd,
+      githubToken,
+      { hardReset: true },
+    );
+    if (!aligned) {
+      await runtime.gitCommit({
+        taskId: task.id,
+        cwd: repoCwd,
+        env: gitEnv,
+        message: buildCommitMessage(
+          `devin: initialize ${task.title ?? "project"}`,
+        ),
+        paths: ["."],
+      });
+    }
   }
 
   /**
-   * When local hydrate created an orphan history, soft-reset onto origin/main
-   * via a short fetch (not a second full clone).
+   * When local hydrate created an orphan history, fetch origin/main and reset.
+   * Hard reset is used for greenfield hydrate (files match control-plane push).
    */
+  private async alignHydratedRepoWithOriginMain(
+    runtime: RuntimeClient,
+    taskId: string,
+    repoCwd: string,
+    githubToken?: string,
+    opts?: { hardReset?: boolean },
+  ): Promise<boolean> {
+    const gitEnv = this.gitRuntimeEnv(githubToken);
+    const alignScript = buildAlignHydratedRepoScript({
+      hardReset: opts?.hardReset !== false,
+    });
+    const result = await runtime.terminalAllowFailure({
+      taskId,
+      cwd: repoCwd,
+      env: gitEnv,
+      command: alignScript,
+    });
+    if (result.exitCode !== 0) {
+      this.emit(
+        "agent.log",
+        taskId,
+        "Could not align hydrated repo with origin/main",
+        {
+          detail: (result.stderr || result.stdout || "").trim().slice(0, 400),
+        },
+      );
+      return false;
+    }
+    this.emit("agent.log", taskId, "Aligned hydrated repo with origin/main", {
+      hardReset: opts?.hardReset !== false,
+    });
+    return true;
+  }
+
+  /** @deprecated Use alignHydratedRepoWithOriginMain */
   private async rebaseHydratedRepoOntoOriginMain(
     runtime: RuntimeClient,
     taskId: string,
     repoCwd: string,
     githubToken?: string,
   ): Promise<void> {
-    const gitEnv = this.gitRuntimeEnv(githubToken);
-    const result = await runtime.terminalAllowFailure({
+    await this.alignHydratedRepoWithOriginMain(
+      runtime,
       taskId,
-      cwd: repoCwd,
-      env: gitEnv,
-      command: [
-        "set -e",
-        "timeout 8 git fetch --depth 1 origin main",
-        "git reset --soft FETCH_HEAD",
-        "git add -A",
-        "if git diff --cached --quiet; then",
-        "  echo 'working tree matches origin/main'",
-        "else",
-        `  git -c user.name='${escapeShell(resolveBotAuthor().name)}' -c user.email='${escapeShell(resolveBotAuthor().email)}' commit -m '${escapeShell(buildCommitMessage("devin: sync hydrated scaffold onto main"))}'`,
-        "fi",
-      ].join("\n"),
-    });
-    if (result.exitCode !== 0) {
-      this.emit(
-        "agent.log",
-        taskId,
-        "Could not reparent hydrated repo onto origin/main — continuing on local history",
-        {
-          detail: (result.stderr || result.stdout || "").trim().slice(0, 400),
-        },
-      );
-    }
+      repoCwd,
+      githubToken,
+      { hardReset: false },
+    );
   }
 
   private async hydrateGreenfieldInSandbox(
@@ -1999,6 +2058,28 @@ export class TaskService {
       githubToken,
     });
 
+    if (job.greenfieldPushed) {
+      const aligned = await this.alignHydratedRepoWithOriginMain(
+        runtime,
+        task.id,
+        repoCwd,
+        githubToken,
+        { hardReset: true },
+      );
+      if (!aligned) {
+        await runtime.gitCommit({
+          taskId: task.id,
+          cwd: repoCwd,
+          env: gitEnv,
+          message: buildCommitMessage(
+            `devin: scaffold ${task.title ?? "project"}`,
+          ),
+          paths: ["."],
+        });
+      }
+      return;
+    }
+
     await runtime.gitCommit({
       taskId: task.id,
       cwd: repoCwd,
@@ -2007,15 +2088,13 @@ export class TaskService {
       paths: ["."],
     });
 
-    // Scaffold was already pushed from the control plane — no GitHub sync needed.
-    if (githubToken && !job.greenfieldPushed) {
+    if (githubToken) {
       await this.ensureSandboxDns(runtime, task.id);
       const syncResult = await runtime.terminalAllowFailure({
         taskId: task.id,
         cwd: repoCwd,
         env: gitEnv,
-        command:
-          "timeout 20 git fetch --depth 1 origin main && git reset --soft FETCH_HEAD",
+        command: buildAlignHydratedRepoScript({ hardReset: false }),
       });
       if (syncResult.exitCode === 0) {
         this.emit(
@@ -2180,6 +2259,7 @@ export class TaskService {
     job: ScheduleJob,
     repoCwd: string,
     githubToken?: string,
+    opts?: { greenfield?: boolean },
   ): Promise<void> {
     const gitEnv = this.gitRuntimeEnv(githubToken);
     const status = await runtime.terminal({
@@ -2202,6 +2282,28 @@ export class TaskService {
       cwd: repoCwd,
       env: gitEnv,
     });
+
+    if (opts?.greenfield) {
+      const pushed = await this.pushGreenfieldMain(
+        runtime,
+        task.id,
+        repoCwd,
+        githubToken,
+        job.cloneUrl,
+      );
+      if (pushed) {
+        this.emit(
+          "git.push",
+          task.id,
+          "Pushed partial agent work after failure",
+          {
+            branch: "main",
+            recovery: true,
+          },
+        );
+      }
+      return;
+    }
 
     await this.ensureGitPushAuth(
       runtime,
@@ -2229,6 +2331,118 @@ export class TaskService {
         },
       );
     }
+  }
+
+  /**
+   * When a runtime agent times out, commit dirty work and push to main with
+   * fetch + force-with-lease so divergent hydrate/checkpoint history still lands.
+   */
+  private async recoverGreenfieldAfterAgentInterruption(
+    runtime: RuntimeClient,
+    task: Task,
+    job: ScheduleJob,
+    repoCwd: string,
+    githubToken?: string,
+    preAgentHead?: string,
+  ): Promise<boolean> {
+    try {
+      const gitEnv = this.gitRuntimeEnv(githubToken);
+      const status = await runtime.terminalAllowFailure({
+        taskId: task.id,
+        cwd: repoCwd,
+        env: gitEnv,
+        command: "git status --porcelain",
+      });
+      const dirty = status.stdout.trim();
+      const head = await this.readGitHead(
+        runtime,
+        task.id,
+        repoCwd,
+        githubToken,
+      );
+      const movedHead =
+        Boolean(preAgentHead) && Boolean(head) && head !== preAgentHead;
+
+      if (!dirty && !movedHead) {
+        this.emit(
+          "agent.log",
+          task.id,
+          "Agent timeout with no recoverable git work",
+        );
+        return false;
+      }
+
+      if (dirty && job.permissions?.canCommit) {
+        await runtime.gitCommit({
+          taskId: task.id,
+          message: buildCommitMessage(
+            `devin: agent timeout recovery — ${task.title ?? "partial work"}`,
+          ),
+          paths: ["."],
+          cwd: repoCwd,
+          env: gitEnv,
+        });
+      }
+
+      if (!job.permissions?.canPush) {
+        return Boolean(dirty || movedHead);
+      }
+
+      const pushed = await this.pushGreenfieldMain(
+        runtime,
+        task.id,
+        repoCwd,
+        githubToken,
+        job.cloneUrl,
+      );
+      if (!pushed) {
+        this.emit("git.push", task.id, "Timeout recovery push failed", {
+          branch: "main",
+          recovery: true,
+          timeout: true,
+        });
+        return false;
+      }
+
+      this.emit("git.push", task.id, "Pushed agent work after timeout", {
+        branch: "main",
+        recovery: true,
+        timeout: true,
+      });
+      return true;
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Recovery failed";
+      this.emit(
+        "agent.log",
+        task.id,
+        `Greenfield timeout recovery failed: ${message}`,
+      );
+      return false;
+    }
+  }
+
+  private async pushGreenfieldMain(
+    runtime: RuntimeClient,
+    taskId: string,
+    repoCwd: string,
+    githubToken?: string,
+    cloneUrl?: string,
+  ): Promise<boolean> {
+    await this.ensureGitPushAuth(
+      runtime,
+      taskId,
+      repoCwd,
+      githubToken,
+      cloneUrl,
+    );
+    const result = await runtime.terminalAllowFailure({
+      taskId,
+      cwd: repoCwd,
+      env: this.gitRuntimeEnv(githubToken),
+      command: buildPushGreenfieldMainScript(),
+    });
+    return result.exitCode === 0;
   }
 
   private forwardRuntimeEvents(
@@ -2369,18 +2583,34 @@ export class TaskService {
       job.cloneUrl,
     );
 
-    const pushResult = await runtime.gitPush({
-      taskId: task.id,
-      branch: branchName,
-      cwd: repoCwd,
-      env: gitEnv,
-    });
-
-    if (pushResult.status !== "completed") {
-      this.emit("git.push", task.id, "Push skipped or failed", {
+    if (useMainBranch) {
+      const pushed = await this.pushGreenfieldMain(
+        runtime,
+        task.id,
+        repoCwd,
+        githubToken,
+        job.cloneUrl,
+      );
+      if (!pushed) {
+        this.emit("git.push", task.id, "Push skipped or failed", {
+          branch: branchName,
+        });
+        return;
+      }
+    } else {
+      const pushResult = await runtime.gitPush({
+        taskId: task.id,
         branch: branchName,
+        cwd: repoCwd,
+        env: gitEnv,
       });
-      return;
+
+      if (pushResult.status !== "completed") {
+        this.emit("git.push", task.id, "Push skipped or failed", {
+          branch: branchName,
+        });
+        return;
+      }
     }
 
     this.emit("git.push", task.id, `Pushed branch ${branchName}`, {
@@ -2568,20 +2798,14 @@ export class TaskService {
         });
 
         if (job.permissions?.canPush && greenfield) {
-          await this.ensureGitPushAuth(
+          const pushed = await this.pushGreenfieldMain(
             runtime,
             task.id,
             repoCwd,
             githubToken,
             job.cloneUrl,
           );
-          const pushResult = await runtime.gitPush({
-            taskId: task.id,
-            branch: "main",
-            cwd: repoCwd,
-            env: gitEnv,
-          });
-          if (pushResult.status === "completed") {
+          if (pushed) {
             this.emit("git.push", task.id, "Pushed checkpoint to main", {
               branch: "main",
               auto: true,
@@ -3985,6 +4209,13 @@ function buildAgentPrompt(
     "- Make at least 3 focused commits beyond the scaffold — multiple commits are required",
     "- Push to the working branch as you go when possible",
     `- Every commit MUST include this trailer on a new line in the commit message body: Co-authored-by: ${bot.name} <${bot.email}>`,
+    "- If git push is rejected, stop retrying — the control plane finalizes and pushes on completion or timeout",
+    "",
+    "Sandbox resilience:",
+    "- If shell/npm commands fail (ENOMEM, spawn errors), keep writing files with edit tools",
+    "- Do not launch subagents or long retry loops for shell — finish the product on disk",
+    "- Prefer zero-dependency Node.js (built-in http + SSE) when npm install cannot run",
+    "- The control plane runs tests, commits, and push after you finish or on timeout",
     "",
     "Sandbox tooling:",
     "- GITHUB_TOKEN is available for gh and git",
@@ -4050,8 +4281,8 @@ function resolveSandboxCpu(task: Task): number {
   return usesRuntimeAgent(task.agent) ? 1 : 2;
 }
 
-function resolveSandboxMemory(task: Task): string {
-  return usesRuntimeAgent(task.agent) ? "2Gi" : "4Gi";
+function resolveSandboxMemory(_task: Task): string {
+  return "4Gi";
 }
 
 function sleep(ms: number): Promise<void> {
