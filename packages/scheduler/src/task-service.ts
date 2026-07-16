@@ -25,6 +25,7 @@ import {
   createGitHubRepositoryUnique,
   fetchDefaultBranch,
   fetchGitHubUserIdentity,
+  setRepositoryHomepage,
   type GitHubUserIdentity,
 } from "./github.js";
 import { generateProjectMetadata } from "./project-metadata.js";
@@ -1264,6 +1265,14 @@ export class TaskService {
               previewUrl: preview.previewUrl,
               deployStatus: "live",
             });
+            if (githubToken && repository) {
+              await this.attachPreviewHomepage(
+                task.id,
+                repository,
+                preview.previewUrl,
+                githubToken,
+              );
+            }
           } else {
             this.patchTask(task.id, { deployStatus: "failed" });
           }
@@ -1408,6 +1417,14 @@ export class TaskService {
             previewUrl: preview.previewUrl,
             deployStatus: "live",
           });
+          if (githubToken && job.repository) {
+            await this.attachPreviewHomepage(
+              task.id,
+              job.repository,
+              preview.previewUrl,
+              githubToken,
+            );
+          }
         } else {
           this.patchTask(task.id, { deployStatus: "failed" });
         }
@@ -3262,6 +3279,33 @@ export class TaskService {
       command: testCommand,
       exitCode: result.exitCode,
     });
+  }
+
+  private async attachPreviewHomepage(
+    taskId: string,
+    repository: string,
+    previewUrl: string,
+    token: string,
+  ): Promise<void> {
+    try {
+      await setRepositoryHomepage(token, repository, previewUrl);
+      this.emit(
+        "deploy.ready",
+        taskId,
+        "Attached preview URL to GitHub repository website",
+        { repository, previewUrl, homepage: previewUrl },
+      );
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Failed to set repository homepage";
+      this.emit("deploy.ready", taskId, message, {
+        repository,
+        previewUrl,
+        error: message,
+      });
+    }
   }
 
   private async createTaskIssue(

@@ -438,6 +438,24 @@ export async function createGitHubRepositoryUnique(
   throw new Error("Could not create a uniquely named repository");
 }
 
+/** Sets the GitHub About → Website field to the live preview URL. */
+export async function setRepositoryHomepage(
+  token: string,
+  repository: string,
+  homepage: string,
+): Promise<void> {
+  const [owner, repo] = repository.split("/");
+  if (!owner || !repo) {
+    throw new Error(`Invalid repository: ${repository}`);
+  }
+
+  await githubApiRequest(token, `/repos/${owner}/${repo}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ homepage }),
+  });
+}
+
 export async function fetchRepository(
   token: string,
   owner: string,
