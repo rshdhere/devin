@@ -152,8 +152,8 @@ build_runtime() {
     export PATH="/usr/local/bin:${PATH}"
     export FIRECRACKER_BIN=/usr/local/bin/firecracker
     export FIRECRACKER_RUNTIME_PORT=8081
-    export FIRECRACKER_SNAPSHOT_VCPU=1
-    export FIRECRACKER_SNAPSHOT_MEM_MIB=512
+    export FIRECRACKER_SNAPSHOT_VCPU=2
+    export FIRECRACKER_SNAPSHOT_MEM_MIB=8192
     export DEVIN_FORCE_SNAPSHOT_REBUILD="${DEVIN_FORCE_SNAPSHOT_REBUILD:-false}"
     mkdir -p "${GOCACHE}" "${GOPATH}"
     (cd apps/firecracker && go build -o /usr/local/bin/snapshot-cni ./cmd/snapshot-cni)

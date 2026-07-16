@@ -46,10 +46,12 @@ func LoadFromEnv() Config {
 		CNIConfDir:      envString("FIRECRACKER_CNI_CONF_DIR", "/etc/cni/conf.d"),
 		CNIBinPath:      envString("FIRECRACKER_CNI_BIN_PATH", "/opt/cni/bin"),
 		RuntimePort:     envInt("FIRECRACKER_RUNTIME_PORT", 8081),
-		WarmVCPU:        int32(envInt("FIRECRACKER_WARM_VCPU", 1)),
-		WarmMemoryMiB:   int64(envInt("FIRECRACKER_WARM_MEMORY_MIB", 512)),
-		CapacityCPU:     int32(envInt("FIRECRACKER_CAPACITY_CPU", 32)),
-		CapacityMemory:  envString("FIRECRACKER_CAPACITY_MEMORY", "64Gi"),
+		// Agent sandboxes (cursor CLI + cargo/npm) OOM at 512MiB; keep warm
+		// pool / golden snapshots at 8Gi so restores match scheduler requests.
+		WarmVCPU:       int32(envInt("FIRECRACKER_WARM_VCPU", 2)),
+		WarmMemoryMiB:  int64(envInt("FIRECRACKER_WARM_MEMORY_MIB", 8192)),
+		CapacityCPU:    int32(envInt("FIRECRACKER_CAPACITY_CPU", 32)),
+		CapacityMemory: envString("FIRECRACKER_CAPACITY_MEMORY", "64Gi"),
 	}
 }
 
@@ -72,7 +74,7 @@ func (c Config) ValidateProduction() error {
 func ParseMemoryMiB(raw string) (int64, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
-		return 512, nil
+		return 8192, nil
 	}
 
 	lower := strings.ToLower(raw)

@@ -400,10 +400,14 @@ docker run -d --name firecracker --restart unless-stopped \
   -e FIRECRACKER_CNI_NETWORK=fcnet \
   -e FIRECRACKER_CNI_CONF_DIR=/etc/cni/conf.d \
   -e FIRECRACKER_CNI_BIN_PATH=/opt/cni/bin \
-  -e FIRECRACKER_CAPACITY_CPU=8 \
+  -e FIRECRACKER_WARM_VCPU=2 \
+  -e FIRECRACKER_WARM_MEMORY_MIB=8192 \
+  -e FIRECRACKER_CAPACITY_CPU=2 \
   -e FIRECRACKER_CAPACITY_MEMORY=16Gi \
   $REGISTRY/devin-firecracker:$TAG
 ```
+
+> Default execution hosts (`c7i.2xlarge`, 16 GiB) can run **one** 8 GiB guest safely. Raise `FIRECRACKER_CAPACITY_CPU` and use `c7i.4xlarge` (32 GiB) or larger when you need concurrent sandboxes.
 
 Install CNI config on the host before starting (from repo):
 
@@ -491,7 +495,7 @@ metadata:
 spec:
   address: http://10.0.12.45:9092    # execution host private IP
   capacity:
-    cpu: 8
+    cpu: 2
     memory: 16Gi
 ---
 apiVersion: devin.baby/v1
@@ -502,7 +506,7 @@ metadata:
 spec:
   address: http://10.0.12.46:9092
   capacity:
-    cpu: 8
+    cpu: 2
     memory: 16Gi
 ```
 
@@ -805,6 +809,9 @@ docker logs -f scheduler
 | `FIRECRACKER_POOL_SIZE` | Warm microVM pool per host |
 | `FIRECRACKER_SNAPSHOT_DIR` | `/var/lib/devin/snapshots` |
 | `FIRECRACKER_HOST_PORT` | `9092` (must match `FirecrackerHost` CR) |
+| `FIRECRACKER_WARM_VCPU` | Warm / snapshot vCPUs (default `2`) |
+| `FIRECRACKER_WARM_MEMORY_MIB` | Warm / snapshot RAM in MiB (default `8192`) |
+| `FIRECRACKER_CAPACITY_MEMORY` | Host capacity advertisement (default `16Gi` on 2xlarge hosts) |
 
 ### FirecrackerHost CR
 
@@ -814,7 +821,7 @@ docker logs -f scheduler
 | `spec.schedulerAddress` | `http://<host-ip>:9091` — co-located scheduler (auto-set on Path A) |
 | `spec.nodeName` | Kubernetes node name (Path A, auto-set) |
 | `spec.capacity.cpu` | Max vCPUs this host advertises |
-| `spec.capacity.memory` | Max memory (e.g. `16Gi`) |
+| `spec.capacity.memory` | Max memory (e.g. `16Gi` on c7i.2xlarge) |
 
 ---
 
@@ -829,11 +836,13 @@ docker logs -f scheduler
    DEVIN_IMAGE_TAG=<git-sha> ./infra/scripts/deploy-execution-host-images.sh --discover
    ```
 
-3. **Runtime snapshots** (when `apps/runtime/` or `runtime/*` change): run **Deploy execution hosts** manually with `rebuild_runtime_snapshots=true`, or on the host:
+3. **Runtime snapshots** (when `apps/runtime/`, `runtime/*`, or guest size envs change — e.g. `FIRECRACKER_WARM_MEMORY_MIB`): run **Deploy execution hosts** manually with `rebuild_runtime_snapshots=true`, or on the host:
 
    ```sh
-   ./infra/scripts/run-ssm-bootstrap-snapshots.sh <instance-id> ap-south-1
+   DEVIN_FORCE_SNAPSHOT_REBUILD=true ./infra/scripts/run-ssm-bootstrap-snapshots.sh <instance-id> ap-south-1
    ```
+
+   Firecracker cannot resize RAM on restore; old 512 MiB golden snapshots will keep OOMing until rebuilt at 8192 MiB.
 
 4. Roll in-cluster: `kubectl -n devin-app rollout restart deploy/devin-server deploy/devin-web`
 5. Roll orchestrator: `kubectl -n devin-system rollout restart deploy/devin-orchestrator`

@@ -9,5 +9,5 @@ spec:
   address: http://10.0.4.73:9092
   schedulerAddress: http://10.0.4.73:9091
   capacity:
-    cpu: 8
+    cpu: 2
     memory: 16Gi

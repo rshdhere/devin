@@ -85,10 +85,10 @@ Sandboxes reference a **runtime** (not a Pod image):
 spec:
   runtime: nextjs
   cpu: 2
-  memory: 4Gi
+  memory: 8Gi
 ```
 
-The orchestrator selects a `FirecrackerHost`, and `firecracker` restores the matching snapshot. The runtime supervisor listens on port **8081** inside the microVM.
+The orchestrator selects a `FirecrackerHost`, and `firecracker` restores the matching snapshot. Guest RAM/vCPU are fixed by the golden snapshot (`FIRECRACKER_SNAPSHOT_MEM_MIB=8192`, `FIRECRACKER_SNAPSHOT_VCPU=2` by default) — Firecracker cannot resize memory on restore, so scheduler `memory`/`cpu` must match the snapshot. The runtime supervisor listens on port **8081** inside the microVM.
 
 Greenfield template tasks use the **`nextjs`** snapshot only (no `agent` snapshot rebuild required). Rebuild `nextjs` after changing `runtime/nextjs/` or shared supervisor code under `apps/runtime/`.
 

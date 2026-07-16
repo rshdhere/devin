@@ -3687,7 +3687,7 @@ export class TaskService {
           const hostRegistryHint =
             /preferred firecracker host/i.test(lastMessage) &&
             this.preferredHost
-              ? ` Re-register with: curl -X PUT -H 'Content-Type: application/json' -d '{"spec":{"address":"http://<host-ip>:9092","schedulerAddress":"http://<host-ip>:9091","capacity":{"cpu":8,"memory":"16Gi"}}}' ${this.orchestratorUrl}/internal/v1/firecracker-hosts/${this.preferredHost}`
+              ? ` Re-register with: curl -X PUT -H 'Content-Type: application/json' -d '{"spec":{"address":"http://<host-ip>:9092","schedulerAddress":"http://<host-ip>:9091","capacity":{"cpu":2,"memory":"16Gi"}}}' ${this.orchestratorUrl}/internal/v1/firecracker-hosts/${this.preferredHost}`
               : undefined;
           this.emit("sandbox.failed", taskId, failureMessage, {
             sandboxName,
@@ -4277,12 +4277,23 @@ function resolveTimeoutMs(envKey: string, defaultSeconds: number): number {
   return seconds * 1000;
 }
 
-function resolveSandboxCpu(task: Task): number {
-  return usesRuntimeAgent(task.agent) ? 1 : 2;
+function resolveSandboxCpu(_task: Task): number {
+  const fromEnv = Number(process.env.SANDBOX_CPU?.trim());
+  if (Number.isFinite(fromEnv) && fromEnv > 0) {
+    return Math.floor(fromEnv);
+  }
+  // Match FIRECRACKER_WARM_VCPU — warm restores charge snapshot vCPUs.
+  return 2;
 }
 
 function resolveSandboxMemory(_task: Task): string {
-  return "4Gi";
+  const fromEnv = process.env.SANDBOX_MEMORY?.trim();
+  if (fromEnv) {
+    return fromEnv;
+  }
+  // Must match FIRECRACKER_WARM_MEMORY_MIB / snapshot memSizeMib. Firecracker
+  // restores cannot resize RAM, so requesting more than the snapshot is a no-op.
+  return "8Gi";
 }
 
 function sleep(ms: number): Promise<void> {

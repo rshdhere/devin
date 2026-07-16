@@ -121,12 +121,12 @@ ExecStart=/usr/bin/docker run --rm --name firecracker \\
   -e FIRECRACKER_KERNEL_PATH=/var/lib/devin/linux/vmlinux \\
   -e FIRECRACKER_VMM_DIR=/var/lib/devin/vms \\
   -e FIRECRACKER_RUNTIME_PORT=8081 \\
-  -e FIRECRACKER_WARM_VCPU=1 \\
-  -e FIRECRACKER_WARM_MEMORY_MIB=512 \\
+  -e FIRECRACKER_WARM_VCPU=2 \\
+  -e FIRECRACKER_WARM_MEMORY_MIB=8192 \\
   -e FIRECRACKER_CNI_NETWORK=fcnet \\
   -e FIRECRACKER_CNI_CONF_DIR=/etc/cni/conf.d \\
   -e FIRECRACKER_CNI_BIN_PATH=/opt/cni/bin \\
-  -e FIRECRACKER_CAPACITY_CPU=8 \\
+  -e FIRECRACKER_CAPACITY_CPU=2 \\
   -e FIRECRACKER_CAPACITY_MEMORY=16Gi \\
   ${container_registry}/devin-firecracker:${image_tag}
 ExecStop=/usr/bin/docker stop firecracker

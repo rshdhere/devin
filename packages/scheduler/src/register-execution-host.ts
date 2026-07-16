@@ -257,7 +257,7 @@ async function resolveHostCapacity(
   }
 
   return {
-    cpu: readInt("FIRECRACKER_CAPACITY_CPU", 8),
+    cpu: readInt("FIRECRACKER_CAPACITY_CPU", 2),
     memory: process.env.FIRECRACKER_CAPACITY_MEMORY?.trim() || "16Gi",
   };
 }

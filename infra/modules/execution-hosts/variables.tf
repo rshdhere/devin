@@ -30,7 +30,7 @@ variable "host_count" {
 }
 
 variable "instance_type" {
-  description = "EC2 instance type (c7i.2xlarge with nested virt, or c5.metal bare metal)."
+  description = "EC2 instance type with nested virt. c7i.2xlarge (16Gi) fits one 8Gi guest; use c7i.4xlarge+ for concurrent sandboxes."
   type        = string
   default     = "c7i.2xlarge"
 }

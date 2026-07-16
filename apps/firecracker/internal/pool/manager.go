@@ -545,7 +545,7 @@ func (m *Manager) Status() HostStatus {
 		CapacityCPU:       m.cfg.CapacityCPU,
 		CapacityMem:       m.cfg.CapacityMemory,
 		UsedCPU:           m.usedCPU,
-		UsedMemory:        formatUsedMemoryMiB(m.usedCPU * 512),
+		UsedMemory:        formatUsedMemoryMiB(m.estimatedUsedMemoryMiB()),
 		ReadyVMs:          m.readyCount,
 		ActiveVMs:         len(m.assigned),
 		DefaultRun:        m.cfg.DefaultRuntime,
@@ -565,6 +565,20 @@ func (m *Manager) recordFromInstance(instance *vm.Instance) *VMRecord {
 		Phase:      instance.Phase,
 		Message:    instance.Message,
 	}
+}
+
+// estimatedUsedMemoryMiB approximates guest RAM from charged vCPUs using the
+// warm-pool shape (WarmMemoryMiB / WarmVCPU). Capacity is still CPU-gated.
+func (m *Manager) estimatedUsedMemoryMiB() int32 {
+	vcpu := m.cfg.WarmVCPU
+	if vcpu < 1 {
+		vcpu = 1
+	}
+	perCPU := m.cfg.WarmMemoryMiB / int64(vcpu)
+	if perCPU < 1 {
+		perCPU = 1
+	}
+	return int32(int64(m.usedCPU) * perCPU)
 }
 
 func formatUsedMemoryMiB(mib int32) string {
