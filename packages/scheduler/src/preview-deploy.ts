@@ -75,23 +75,81 @@ if (fs.existsSync('package.json')) {
 export const ENSURE_NPM_DEPENDENCIES_COMMAND = `sh <<'ENSURE_NPM'
 set +e
 rm -rf "\$HOME/.npm/_locks" node_modules/.package-lock.json 2>/dev/null || true
-if node -e "try{const p=require('./package.json');const d=Object.keys(p.dependencies||{});for (const x of d) require.resolve(x); process.exit(0)}catch{process.exit(1)}"; then
+# Skip registry entirely when package.json has no installable deps.
+if node -e "const p=require('./package.json'); const d={...(p.dependencies||{}),...(p.devDependencies||{})}; process.exit(Object.keys(d).length?1:0)"; then
+  echo 'no dependencies — skipping npm install'
+  exit 0
+fi
+if node -e "try{const p=require('./package.json');const d=Object.keys({...(p.dependencies||{}),...(p.devDependencies||{})});for (const x of d) require.resolve(x); process.exit(0)}catch{process.exit(1)}"; then
   echo 'reusing resolved node_modules'
   exit 0
 fi
 rm -rf node_modules
 export NODE_OPTIONS="\${NODE_OPTIONS:+\$NODE_OPTIONS }--dns-result-order=ipv4first"
-export npm_config_fetch_retries=2
-export npm_config_fetch_timeout=30000
-export npm_config_network_timeout=30000
-timeout -k 10 60 npm install --omit=dev --no-audit --no-fund --progress=false --loglevel error
+export npm_config_fetch_retries=1
+export npm_config_fetch_timeout=15000
+export npm_config_network_timeout=15000
+# Process-group kill so orphan npm children cannot outlive the deadline.
+if command -v timeout >/dev/null 2>&1; then
+  timeout -k 5 45 npm install --omit=dev --no-audit --no-fund --progress=false --loglevel error
+else
+  npm install --omit=dev --no-audit --no-fund --progress=false --loglevel error &
+  npid=\$!
+  (
+    sleep 45
+    kill -TERM -\$npid 2>/dev/null || kill -TERM \$npid 2>/dev/null || true
+    sleep 5
+    kill -KILL -\$npid 2>/dev/null || kill -KILL \$npid 2>/dev/null || true
+  ) &
+  waiter=\$!
+  wait \$npid
+  ec=\$?
+  kill \$waiter 2>/dev/null || true
+  exit \$ec
+fi
 ENSURE_NPM`;
+
+function packageHasInstallableDeps(pkgStdout: string): boolean {
+  try {
+    const pkg = JSON.parse(pkgStdout) as {
+      dependencies?: Record<string, string>;
+      devDependencies?: Record<string, string>;
+    };
+    const deps = {
+      ...(pkg.dependencies ?? {}),
+      ...(pkg.devDependencies ?? {}),
+    };
+    return Object.keys(deps).length > 0;
+  } catch {
+    return true;
+  }
+}
 
 function resolveStartCommand(
   scripts: Record<string, string> | null,
   port: number,
+  pkgStdout: string,
 ): string {
   const launch = (() => {
+    // Prefer direct node for zero-dep / simple apps — npm start adds overhead
+    // and can hang if npm itself is broken in the guest.
+    try {
+      const pkg = JSON.parse(pkgStdout) as {
+        main?: string;
+        scripts?: Record<string, string>;
+      };
+      const deps = packageHasInstallableDeps(pkgStdout);
+      const main = typeof pkg.main === "string" ? pkg.main : "";
+      if (!deps && main) {
+        return `env PORT=${port} HOST=0.0.0.0 NODE_ENV=production node ${main}`;
+      }
+      const start = pkg.scripts?.start ?? scripts?.start;
+      if (typeof start === "string" && /^node\s+\S+/.test(start.trim())) {
+        return `env PORT=${port} HOST=0.0.0.0 NODE_ENV=production ${start.trim()}`;
+      }
+    } catch {
+      // fall through
+    }
     if (scripts?.start) {
       return `env PORT=${port} HOST=0.0.0.0 NODE_ENV=production npm start`;
     }
@@ -182,7 +240,7 @@ export async function ensureNpmDependencies(input: {
       ok: false,
       detail:
         detail ||
-        "npm install timed out after 60s (check sandbox egress to registry.npmjs.org)",
+        "npm install timed out after 45s (check sandbox egress to registry.npmjs.org)",
     };
   }
   return {
@@ -219,21 +277,34 @@ export async function deployProductionPreview(input: {
     return null;
   }
 
-  emit("deploy.building", "Running production build for preview deploy", {
+  const needsNpm = packageHasInstallableDeps(pkgResult.stdout);
+  emit("deploy.building", "Starting preview process", {
     guestHost,
     port,
+    needsNpm,
   });
 
   try {
-    const install = await ensureNpmDependencies({ runtime, taskId, repoCwd });
-    if (!install.ok) {
-      throw new Error(install.detail);
+    if (needsNpm) {
+      const install = await ensureNpmDependencies({ runtime, taskId, repoCwd });
+      if (!install.ok) {
+        throw new Error(install.detail);
+      }
+    } else {
+      emit(
+        "deploy.building",
+        "Skipping npm install (no package dependencies)",
+        {
+          guestHost,
+          port,
+        },
+      );
     }
 
-    if (scripts.build) {
+    if (scripts.build && needsNpm) {
       const buildResult = await runtime.terminalAllowFailure({
         taskId,
-        command: "timeout -k 15 120 npm run build",
+        command: "timeout -k 10 90 npm run build",
         cwd: repoCwd,
       });
       if (buildResult.exitCode !== 0) {
@@ -245,24 +316,25 @@ export async function deployProductionPreview(input: {
       }
     }
 
-    const startCommand = resolveStartCommand(scripts, port);
+    const startCommand = resolveStartCommand(scripts, port, pkgResult.stdout);
     await runtime.terminal({
       taskId,
       command: startCommand,
       cwd: repoCwd,
     });
 
+    const readyTimeoutMs = needsNpm ? 45_000 : 20_000;
     const ready = await waitForPreviewReady(
       runtime,
       taskId,
       repoCwd,
       port,
-      90_000,
+      readyTimeoutMs,
     );
     if (!ready) {
       const previewLog = await readPreviewLog(runtime, taskId, repoCwd);
       throw new Error(
-        `preview app did not become ready on port ${port} within 90s` +
+        `preview app did not become ready on port ${port} within ${readyTimeoutMs / 1000}s` +
           (previewLog ? `: ${previewLog}` : ""),
       );
     }

@@ -25,7 +25,7 @@ func LoadConfig(workspace string) Config {
 
 	return Config{
 		Provider:      strings.TrimSpace(os.Getenv("AGENT_PROVIDER")),
-		CursorBin:     envOr("CURSOR_AGENT_BIN", "agent"),
+		CursorBin:     envOr("CURSOR_AGENT_BIN", "/usr/local/bin/agent"),
 		ClaudeBin:     envOr("CLAUDE_CODE_BIN", "claude"),
 		Workspace:     workspace,
 		DefaultModel:  os.Getenv("AGENT_MODEL"),

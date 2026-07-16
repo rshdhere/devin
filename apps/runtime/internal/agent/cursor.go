@@ -40,13 +40,19 @@ func (r *CursorRunner) Run(
 
 	workDir := resolveWorkDir(r.cfg, req)
 
-	whichResult, whichErr := executil.Run(ctx, workDir, "command -v "+shellQuote(r.cfg.CursorBin), mergeEnv(req))
+	bin := resolveCursorBin(r.cfg, req)
+	whichResult, whichErr := executil.Run(
+		ctx,
+		workDir,
+		"export PATH=\"/usr/local/bin:/root/.local/bin:$PATH\"; command -v "+shellQuote(bin)+" || test -x "+shellQuote(bin),
+		mergeEnv(req),
+	)
 	if whichErr != nil || whichResult.ExitCode != 0 {
 		message := executil.CombinedOutput(whichResult)
 		if message == "" {
 			message = fmt.Sprintf(
-				"cursor agent CLI not found (%s). Rebuild the agent Firecracker snapshot.",
-				r.cfg.CursorBin,
+				"cursor agent CLI not found (%s). Rebuild the agent Firecracker snapshot so /usr/local/bin/agent exists.",
+				bin,
 			)
 		}
 		return &RunResult{
@@ -74,7 +80,7 @@ func (r *CursorRunner) Run(
 	args = append(args, "--workspace", workDir)
 	args = append(args, req.Prompt)
 
-	command := shellQuote(r.cfg.CursorBin) + " " + joinShellArgs(args)
+	command := shellQuote(bin) + " " + joinShellArgs(args)
 	publish("agent.log", "running cursor agent", map[string]any{
 		"command":   command,
 		"workDir":   workDir,

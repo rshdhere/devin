@@ -24,6 +24,12 @@ describe("inferStackFromPrompt", () => {
     );
   });
 
+  test("detects Node for chat-app prompts", () => {
+    expect(inferStackFromPrompt("make me a chat-app using nodejs")).toBe(
+      "node",
+    );
+  });
+
   test("defaults to node", () => {
     expect(inferStackFromPrompt("build something cool")).toBe("node");
   });

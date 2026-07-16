@@ -128,7 +128,7 @@ function readmeForShell(
         ? "cargo run"
         : stack === "python"
           ? "pip install -r requirements.txt && python app.py"
-          : "npm install && npm start";
+          : "npm start";
 
   return `# ${title}
 

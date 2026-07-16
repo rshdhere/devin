@@ -6,9 +6,8 @@ export type ScaffoldFile = {
 };
 
 /**
- * Control-plane scaffold must stay thin: a runnable shell the agent builds on.
- * Shipping a full todo app here left agents with nothing to commit and browsers
- * hitting Express "Cannot GET /" when only /todos + /health existed.
+ * Thin runnable shell only. The runtime agent (brain) implements the product.
+ * Prefer zero npm dependencies so greenfield preview can skip registry installs.
  */
 export function scaffoldFilesFromDraft(
   plan: DraftPlan,
@@ -17,7 +16,6 @@ export function scaffoldFilesFromDraft(
   const paths = new Set(plan.files.map((file) => file.path));
   const files: ScaffoldFile[] = [];
   const lower = opts.prompt.toLowerCase();
-  const isTodo = lower.includes("todo");
   const title = opts.title.trim() || "Devin app";
 
   if (paths.has("README.md")) {
@@ -30,11 +28,10 @@ ${opts.prompt}
 ## Getting started
 
 \`\`\`bash
-npm install
 npm start
 \`\`\`
 
-_Scaffold only — implement the product in the sandbox, commit as you go._
+_Scaffold only — the sandbox agent implements the product and commits as it goes._
 `,
     });
   }
@@ -52,7 +49,9 @@ _Scaffold only — implement the product in the sandbox, commit as you go._
     lower.includes("node") ||
     lower.includes("express") ||
     lower.includes("api") ||
-    isTodo;
+    lower.includes("todo") ||
+    lower.includes("chat") ||
+    lower.includes("app");
 
   if (wantsNode) {
     const slug = opts.title
@@ -73,97 +72,27 @@ _Scaffold only — implement the product in the sandbox, commit as you go._
             start: `node ${entry}`,
             dev: `node --watch ${entry}`,
           },
-          dependencies: {
-            express: "^4.21.2",
-          },
         },
         null,
         2,
       )}\n`,
     });
 
-    const mountTodos =
-      paths.has("src/routes/todos.ts") ||
-      paths.has("src/routes/todos.js") ||
-      isTodo;
-
     files.push({
       path: entry,
-      content: `const express = require("express");
-${mountTodos ? 'const todosRouter = require("./routes/todos");\n' : ""}
-const app = express();
-app.use(express.json());
-
-app.get("/health", (_req, res) => {
-  res.json({ ok: true });
-});
-
-app.get("/", (_req, res) => {
-  res.type("html").send(\`<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>${escapeHtml(title)}</title>
-  <style>
-    :root { color-scheme: light; font-family: ui-sans-serif, system-ui, sans-serif; }
-    body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: #f4f6f8; color: #111; }
-    main { width: min(28rem, 92vw); }
-    h1 { font-size: 1.35rem; margin: 0 0 0.5rem; }
-    p { margin: 0 0 1rem; color: #444; line-height: 1.45; }
-    a { color: #0b57d0; }
-  </style>
-</head>
-<body>
-  <main>
-    <h1>${escapeHtml(title)}</h1>
-    <p>Scaffold is running. Implement the full app (UI + API), then keep <code>GET /</code> user-facing.</p>
-    <p><a href="/health">/health</a>${mountTodos ? ' · <a href="/todos">/todos</a>' : ""}</p>
-  </main>
-</body>
-</html>\`);
-});
-${
-  mountTodos
-    ? `
-app.use("/todos", todosRouter);
-`
-    : ""
-}
-const port = Number(process.env.PORT || 3000);
-app.listen(port, "0.0.0.0", () => {
-  console.log(\`Server listening on http://0.0.0.0:\${port}\`);
-});
-`,
+      content: thinNodeServerSource(title),
     });
-
-    if (mountTodos) {
-      files.push({
-        path: "src/routes/todos.js",
-        content: `const express = require("express");
-
-const router = express.Router();
-
-// TODO: implement todo CRUD (list/create/update/delete) for the user prompt.
-router.get("/", (_req, res) => {
-  res.json([]);
-});
-
-module.exports = router;
-`,
-      });
-    }
   }
 
   const generatedPaths = new Set(files.map((file) => file.path));
   for (const planned of plan.files) {
-    // Prefer .js entry points we already emitted over draft .ts stubs.
     if (planned.path === "src/index.ts" && generatedPaths.has("src/index.js")) {
       continue;
     }
+    // Never ship product stubs from the control plane — the agent owns those paths.
     if (
-      planned.path === "src/routes/todos.ts" &&
-      generatedPaths.has("src/routes/todos.js")
+      planned.path.startsWith("src/routes/") ||
+      planned.path === "src/index.ts"
     ) {
       continue;
     }
@@ -193,7 +122,6 @@ ${opts.prompt}
 ## Getting started
 
 \`\`\`bash
-npm install
 npm start
 \`\`\`
 `,
@@ -216,6 +144,49 @@ function escapeHtml(value: string): string {
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;");
+}
+
+function thinNodeServerSource(title: string): string {
+  const safe = escapeHtml(title);
+  return `const http = require("http");
+
+const port = Number(process.env.PORT || 3000);
+
+const server = http.createServer((req, res) => {
+  const url = new URL(req.url || "/", "http://127.0.0.1");
+  if (url.pathname === "/health") {
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ ok: true }));
+    return;
+  }
+  res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+  res.end(\`<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>${safe}</title>
+  <style>
+    :root { color-scheme: light; font-family: ui-sans-serif, system-ui, sans-serif; }
+    body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: #f4f6f8; color: #111; }
+    main { width: min(28rem, 92vw); }
+    h1 { font-size: 1.35rem; margin: 0 0 0.5rem; }
+    p { margin: 0; color: #444; line-height: 1.45; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>${safe}</h1>
+    <p>Scaffold is running. Implement the full app (UI + API), then keep <code>GET /</code> user-facing.</p>
+  </main>
+</body>
+</html>\`);
+});
+
+server.listen(port, "0.0.0.0", () => {
+  console.log("listening on :" + port);
+});
+`;
 }
 
 function stubContentForPath(path: string, summary: string): string {

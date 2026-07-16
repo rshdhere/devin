@@ -1055,6 +1055,11 @@ export class TaskService {
         await this.ensureSandboxConnectivity(runtime, task.id);
       }
 
+      const preAgentHead =
+        createdNewRepo && runtimeAgentTask && runtime
+          ? await this.readGitHead(runtime, task.id, repoCwd, githubToken)
+          : "";
+
       this.updateTask(
         task.id,
         "running",
@@ -1114,6 +1119,16 @@ export class TaskService {
 
       if (runResult.status === "failed") {
         throw new Error(runResult.message);
+      }
+
+      if (createdNewRepo && runtimeAgentTask && runtime) {
+        await this.assertGreenfieldAgentProgress(
+          runtime,
+          task,
+          repoCwd,
+          githubToken,
+          preAgentHead,
+        );
       }
 
       if (
@@ -1895,7 +1910,7 @@ export class TaskService {
       env: gitEnv,
       command: [
         "set -e",
-        "timeout 25 git fetch --depth 1 origin main",
+        "timeout 8 git fetch --depth 1 origin main",
         "git reset --soft FETCH_HEAD",
         "git add -A",
         "if git diff --cached --quiet; then",
@@ -2571,6 +2586,98 @@ export class TaskService {
       clearInterval(interval);
       clearTimeout(initial);
     };
+  }
+
+  private async readGitHead(
+    runtime: RuntimeClient,
+    taskId: string,
+    repoCwd: string,
+    githubToken?: string,
+  ): Promise<string> {
+    const result = await runtime.terminalAllowFailure({
+      taskId,
+      cwd: repoCwd,
+      env: this.gitRuntimeEnv(githubToken),
+      command: "git rev-parse HEAD 2>/dev/null || true",
+    });
+    return result.stdout.trim();
+  }
+
+  /**
+   * Greenfield agents must leave commits or a dirty tree. Completing with only
+   * the control-plane scaffold made chat apps look "done" while still stubs.
+   * Compare against the pre-agent HEAD so pushes to origin/main mid-run do not
+   * look like "zero progress".
+   */
+  private async assertGreenfieldAgentProgress(
+    runtime: RuntimeClient,
+    task: Task,
+    repoCwd: string,
+    githubToken: string | undefined,
+    preAgentHead: string,
+  ): Promise<void> {
+    const gitEnv = this.gitRuntimeEnv(githubToken);
+    const probe = await runtime.terminalAllowFailure({
+      taskId: task.id,
+      cwd: repoCwd,
+      env: gitEnv,
+      command: [
+        "set +e",
+        "head=$(git rev-parse HEAD 2>/dev/null || true)",
+        "dirty=$(git status --porcelain 2>/dev/null | wc -l | tr -d ' ')",
+        "new_commits=0",
+        `base='${preAgentHead.replace(/'/g, "")}'`,
+        'if [ -n "$base" ] && git cat-file -e "$base^{commit}" 2>/dev/null; then',
+        '  new_commits=$(git rev-list --count "$base"..HEAD 2>/dev/null || echo 0)',
+        "fi",
+        'echo "head=$head dirty=$dirty new_commits=$new_commits base=$base"',
+        "grep -RIl -E 'Scaffold ready|Scaffold is running|Implement the full app' --include='*.js' --include='*.ts' --include='*.html' --include='*.tsx' --include='*.jsx' . 2>/dev/null | head -8",
+      ].join("\n"),
+    });
+
+    const output = `${probe.stdout}\n${probe.stderr}`.trim();
+    const headMatch = output.match(/^head=(\S+)/m);
+    const dirtyMatch = output.match(/dirty=(\d+)/);
+    const newCommitsMatch = output.match(/new_commits=(\d+)/);
+    const head = headMatch?.[1] ?? "";
+    const dirty = Number(dirtyMatch?.[1] ?? 0);
+    const newCommits = Number(newCommitsMatch?.[1] ?? 0);
+    const movedHead =
+      Boolean(preAgentHead) && Boolean(head) && head !== preAgentHead;
+    const leakLines = output
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(
+        (line) =>
+          line &&
+          !line.startsWith("head=") &&
+          (line.endsWith(".js") ||
+            line.endsWith(".ts") ||
+            line.endsWith(".tsx") ||
+            line.endsWith(".jsx") ||
+            line.endsWith(".html")),
+      );
+
+    this.emit("agent.log", task.id, "Checking greenfield agent progress", {
+      preAgentHead: preAgentHead || null,
+      head: head || null,
+      dirty,
+      newCommits,
+      movedHead,
+      scaffoldLeakFiles: leakLines,
+    });
+
+    if (!movedHead && newCommits < 1 && dirty < 1) {
+      throw new Error(
+        "Agent finished without product commits — scaffold was left unchanged. Re-run and implement the full app with multiple commits.",
+      );
+    }
+
+    if (leakLines.length > 0 && newCommits < 2 && dirty < 1) {
+      throw new Error(
+        `Agent left scaffold placeholders in place (${leakLines.slice(0, 3).join(", ")}). Implement the full product with multiple focused commits.`,
+      );
+    }
   }
 
   private async runTemplateGreenfieldVerify(
@@ -3683,16 +3790,19 @@ function buildAgentPrompt(
     `Repository ${repository} is cloned at /workspace/${repoCwd}. Work in that directory.`,
     ownerLine,
     "",
-    "The repository only has a thin Devin scaffold (health + placeholders). You must implement the user's request.",
+    "The repository only has a thin runnable scaffold (health + placeholder UI).",
+    "You are the implementer — build the full product the user asked for. Do not leave the scaffold untouched.",
     "Requirements:",
-    "- Build the full product the user asked for (not just stubs)",
-    "- GET / must be user-facing (HTML UI or redirect to it) — never leave Express 'Cannot GET /'",
+    "- Replace the placeholder with a real UI + API for the user's request",
+    "- GET / must be user-facing — never leave Express 'Cannot GET /' or a scaffold-only page",
     "- Keep /health returning JSON { ok: true }",
-    "- Run npm install when needed, start the app, and smoke-check GET / and /health before finishing",
-    "- Prefer .js entrypoints for Node (node can run package.json start scripts)",
+    "- Do not finish while the page still says 'Scaffold is running'",
+    "- Add dependencies only when needed; if you do, run npm install and verify start still works",
+    "- Smoke-check GET / and /health before finishing",
     "",
     "Git / commits:",
-    "- Commit incrementally after meaningful steps (API, UI, wiring, polish) — at least 2–4 focused commits for a greenfield app",
+    "- Commit incrementally after meaningful steps (API, UI, features, polish)",
+    "- Make at least 3 focused commits beyond the scaffold — multiple commits are required",
     "- Push to the working branch as you go when possible",
     `- Every commit MUST include this trailer on a new line in the commit message body: Co-authored-by: ${bot.name} <${bot.email}>`,
     "",

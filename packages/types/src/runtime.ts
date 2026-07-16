@@ -47,7 +47,7 @@ const PROMPT_RULES: Array<{ runtime: StackRuntime; pattern: RegExp }> = [
   {
     runtime: "node",
     pattern:
-      /\b(node\.?js|nodejs|express|nestjs|npm|bun\b|todo[\s-]?app|javascript|typescript|mongoose|mongodb|koa|hono)\b/i,
+      /\b(node\.?js|nodejs|express|nestjs|npm|bun\b|todo[\s-]?app|chat[\s-]?app|javascript|typescript|mongoose|mongodb|koa|hono)\b/i,
   },
 ];
 
