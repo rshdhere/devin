@@ -20,9 +20,11 @@ RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
     && apt-get install -y --no-install-recommends gh \
     && rm -rf /var/lib/apt/lists/*
 
-# Cursor Agent CLI
+# Cursor Agent CLI — fail the image build if install does not produce a binary
 RUN curl -fsSL https://cursor.com/install | bash \
-    && ln -sf /root/.local/bin/agent /usr/local/bin/agent
+    && test -x /root/.local/bin/agent \
+    && ln -sfn /root/.local/bin/agent /usr/local/bin/agent \
+    && /usr/local/bin/agent --version
 
 # Claude Code CLI
 RUN npm install -g @anthropic-ai/claude-code@latest \

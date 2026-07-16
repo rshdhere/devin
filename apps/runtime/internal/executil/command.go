@@ -34,7 +34,7 @@ func Run(ctx context.Context, cwd, command string, env []string) (*Result, error
 		return nil, err
 	}
 
-	cmd := exec.CommandContext(ctx, "/bin/sh", "-lc", command)
+	cmd := exec.CommandContext(ctx, "/bin/sh", "-c", command)
 	cmd.Dir = filepath.Clean(cwd)
 	cmd.Env = append(os.Environ(), env...)
 
@@ -107,7 +107,7 @@ func RunStreamingUntil(
 		return nil, err
 	}
 
-	cmd := exec.CommandContext(ctx, "/bin/sh", "-lc", command)
+	cmd := exec.CommandContext(ctx, "/bin/sh", "-c", command)
 	cmd.Dir = filepath.Clean(cwd)
 	cmd.Env = append(os.Environ(), env...)
 
@@ -186,6 +186,11 @@ stderrPipe, err := cmd.StderrPipe()
 		return nil, stopErr
 	}
 
+	// Early stop after a successful stream handler must not look like a crash.
+	if stopRequested && exitCode != 0 {
+		exitCode = 0
+	}
+
 	return &Result{
 		Stdout:   strings.TrimSpace(stdout.String()),
 		Stderr:   strings.TrimSpace(stderr.String()),
@@ -201,7 +206,7 @@ func RunStreaming(ctx context.Context, cwd, command string, env []string, onOutp
 		return nil, err
 	}
 
-	cmd := exec.CommandContext(ctx, "/bin/sh", "-lc", command)
+	cmd := exec.CommandContext(ctx, "/bin/sh", "-c", command)
 	cmd.Dir = filepath.Clean(cwd)
 	cmd.Env = append(os.Environ(), env...)
 

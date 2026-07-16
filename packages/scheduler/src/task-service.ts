@@ -1091,6 +1091,9 @@ export class TaskService {
             resolveStackRuntime(task, job),
           );
         } else {
+          if (task.agent === "cursor" && runtime) {
+            await this.ensureCursorAgentInSandbox(runtime, task.id);
+          }
           runResult = await runtime.runAndWait(
             {
               taskId: task.id,
@@ -2604,6 +2607,62 @@ export class TaskService {
   }
 
   /**
+   * Guests sometimes boot from snapshots where `agent` is missing or off PATH
+   * (`/bin/sh: 1: agent: not found`). Install into /usr/local/bin before the
+   * runtime supervisor invokes the CLI so older snapshots still work.
+   */
+  private async ensureCursorAgentInSandbox(
+    runtime: RuntimeClient,
+    taskId: string,
+  ): Promise<void> {
+    const probe = await runtime.terminalAllowFailure({
+      taskId,
+      command:
+        'export PATH="/usr/local/bin:/root/.local/bin:$PATH"; if command -v agent >/dev/null && agent --version >/dev/null 2>&1; then command -v agent; agent --version; else exit 1; fi',
+    });
+    if (probe.exitCode === 0) {
+      this.emit("agent.log", taskId, "cursor agent CLI ready in sandbox", {
+        detail: (probe.stdout || "").trim().slice(0, 200),
+      });
+      return;
+    }
+
+    this.emit(
+      "agent.log",
+      taskId,
+      "cursor agent CLI missing — installing in sandbox",
+      {
+        detail: (probe.stderr || probe.stdout || "").trim().slice(0, 300),
+      },
+    );
+
+    const install = await runtime.terminalAllowFailure({
+      taskId,
+      command: [
+        "set -e",
+        'export PATH="/usr/local/bin:/root/.local/bin:$PATH"',
+        "curl -fsSL https://cursor.com/install | bash",
+        "test -x /root/.local/bin/agent",
+        "ln -sfn /root/.local/bin/agent /usr/local/bin/agent",
+        "command -v agent",
+        "agent --version",
+      ].join("\n"),
+    });
+    if (install.exitCode !== 0) {
+      const detail = (install.stderr || install.stdout || "").trim();
+      throw new Error(
+        "cursor agent CLI is not available in the sandbox and install failed" +
+          (detail ? `: ${detail.slice(0, 400)}` : "") +
+          ". Rebuild the agent Firecracker snapshot.",
+      );
+    }
+
+    this.emit("agent.log", taskId, "cursor agent CLI installed in sandbox", {
+      detail: (install.stdout || "").trim().slice(0, 200),
+    });
+  }
+
+  /**
    * Greenfield agents must leave commits or a dirty tree. Completing with only
    * the control-plane scaffold made chat apps look "done" while still stubs.
    * Compare against the pre-agent HEAD so pushes to origin/main mid-run do not
@@ -2669,7 +2728,8 @@ export class TaskService {
 
     if (!movedHead && newCommits < 1 && dirty < 1) {
       throw new Error(
-        "Agent finished without product commits — scaffold was left unchanged. Re-run and implement the full app with multiple commits.",
+        "Agent finished without product commits — scaffold was left unchanged. " +
+          "The cursor agent must edit files and commit (CLI missing, sandbox, or no-op run).",
       );
     }
 
