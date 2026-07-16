@@ -1051,7 +1051,9 @@ export class TaskService {
 
       const stopEvents = this.forwardRuntimeEvents(runtimeBaseUrl, task.id);
 
-      if (task.agent === "cursor" && !repoHydratedLocally) {
+      // Always verify egress for cursor — hydrate-first greenfield still needs
+      // api2.cursor.sh, and must not skip DNS just because clone was skipped.
+      if (task.agent === "cursor") {
         await this.ensureSandboxConnectivity(runtime, task.id);
       }
 
@@ -2060,8 +2062,25 @@ export class TaskService {
         taskId,
         "https://api2.cursor.sh/",
       );
+      const installCheck = await this.probeSandboxHttps(
+        runtime,
+        taskId,
+        "https://cursor.com/",
+      );
 
       if (dnsCheck.ok && cursorCheck.ok) {
+        this.emit(
+          "agent.log",
+          taskId,
+          "Sandbox outbound connectivity verified",
+          {
+            cursorApi: cursorCheck.detail,
+            cursorCom: installCheck.ok
+              ? installCheck.detail
+              : `unreachable (${installCheck.detail})`,
+            githubPending: true,
+          },
+        );
         break;
       }
 
@@ -2072,18 +2091,20 @@ export class TaskService {
         {
           dns: dnsCheck,
           cursor: cursorCheck,
+          cursorCom: installCheck,
           attempt: attempt + 1,
         },
       );
 
       if (attempt === 2) {
         const message =
-          "Sandbox has no outbound DNS (cannot reach GitHub or Cursor API). " +
+          "Sandbox has no outbound DNS/HTTPS to the Cursor API (api2.cursor.sh). " +
           "On the execution host run fix-sandbox-dns.sh and fix-cni-and-redeploy-firecracker.sh, then rebuild the agent snapshot.";
         this.emit("agent.log", taskId, message, {
           cursorReachable: false,
           dns: dnsCheck,
           cursor: cursorCheck,
+          cursorCom: installCheck,
         });
         throw new Error(message);
       }
@@ -2607,32 +2628,75 @@ export class TaskService {
   }
 
   /**
-   * Guests sometimes boot from snapshots where `agent` is missing or off PATH
-   * (`/bin/sh: 1: agent: not found`). Install into /usr/local/bin before the
-   * runtime supervisor invokes the CLI so older snapshots still work.
+   * Guests sometimes boot from snapshots where `agent` is missing or off PATH.
+   * Prefer locating a baked-in binary. Only attempt a short online install if
+   * cursor.com is reachable — never hang for minutes on SSL timeouts.
    */
   private async ensureCursorAgentInSandbox(
     runtime: RuntimeClient,
     taskId: string,
   ): Promise<void> {
+    const findCmd = [
+      "set +e",
+      'export PATH="/usr/local/bin:/root/.local/bin:$PATH"',
+      "for candidate in \\",
+      "  /usr/local/bin/agent \\",
+      "  /root/.local/bin/agent \\",
+      "  $(command -v agent 2>/dev/null) \\",
+      "  $(command -v cursor-agent 2>/dev/null) \\",
+      "  $(ls -1 /root/.local/share/cursor-agent/versions/*/cursor-agent 2>/dev/null | sort | tail -1)",
+      "do",
+      '  [ -n "$candidate" ] || continue',
+      '  [ -x "$candidate" ] || continue',
+      '  if "$candidate" --version >/dev/null 2>&1; then',
+      '    printf "%s\\n" "$candidate"',
+      '    "$candidate" --version 2>&1 | head -1',
+      "    exit 0",
+      "  fi",
+      "done",
+      "exit 1",
+    ].join("\n");
+
     const probe = await runtime.terminalAllowFailure({
       taskId,
-      command:
-        'export PATH="/usr/local/bin:/root/.local/bin:$PATH"; if command -v agent >/dev/null && agent --version >/dev/null 2>&1; then command -v agent; agent --version; else exit 1; fi',
+      command: findCmd,
     });
     if (probe.exitCode === 0) {
+      const detail = (probe.stdout || "").trim();
       this.emit("agent.log", taskId, "cursor agent CLI ready in sandbox", {
-        detail: (probe.stdout || "").trim().slice(0, 200),
+        detail: detail.slice(0, 240),
       });
+      // Ensure /usr/local/bin/agent exists for older runtime supervisors.
+      const binLine = detail.split("\n")[0]?.trim();
+      if (binLine && binLine !== "/usr/local/bin/agent") {
+        await runtime.terminalAllowFailure({
+          taskId,
+          command: `ln -sfn '${escapeShell(binLine)}' /usr/local/bin/agent`,
+        });
+      }
       return;
+    }
+
+    const installHost = await this.probeSandboxHttps(
+      runtime,
+      taskId,
+      "https://cursor.com/",
+    );
+    if (!installHost.ok) {
+      throw new Error(
+        "cursor agent CLI is missing from the agent Firecracker snapshot, and the sandbox cannot reach cursor.com to install it" +
+          ` (${installHost.detail}). Rebuild the agent snapshot on the execution host` +
+          " (./infra/scripts/rebuild-agent-snapshot.sh <instance-id>).",
+      );
     }
 
     this.emit(
       "agent.log",
       taskId,
-      "cursor agent CLI missing — installing in sandbox",
+      "cursor agent CLI missing — attempting short online install",
       {
-        detail: (probe.stderr || probe.stdout || "").trim().slice(0, 300),
+        probe: (probe.stderr || probe.stdout || "").trim().slice(0, 300),
+        cursorCom: installHost.detail,
       },
     );
 
@@ -2641,7 +2705,7 @@ export class TaskService {
       command: [
         "set -e",
         'export PATH="/usr/local/bin:/root/.local/bin:$PATH"',
-        "curl -fsSL https://cursor.com/install | bash",
+        "curl https://cursor.com/install -fsS --connect-timeout 10 --max-time 45 | bash",
         "test -x /root/.local/bin/agent",
         "ln -sfn /root/.local/bin/agent /usr/local/bin/agent",
         "command -v agent",
@@ -2653,7 +2717,8 @@ export class TaskService {
       throw new Error(
         "cursor agent CLI is not available in the sandbox and install failed" +
           (detail ? `: ${detail.slice(0, 400)}` : "") +
-          ". Rebuild the agent Firecracker snapshot.",
+          ". Rebuild the agent Firecracker snapshot" +
+          " (./infra/scripts/rebuild-agent-snapshot.sh <instance-id>).",
       );
     }
 

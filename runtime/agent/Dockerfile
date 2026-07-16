@@ -20,8 +20,8 @@ RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
     && apt-get install -y --no-install-recommends gh \
     && rm -rf /var/lib/apt/lists/*
 
-# Cursor Agent CLI — fail the image build if install does not produce a binary
-RUN curl -fsSL https://cursor.com/install | bash \
+# Cursor Agent CLI — must be baked into the snapshot; in-guest install is unreliable.
+RUN curl https://cursor.com/install -fsS | bash \
     && test -x /root/.local/bin/agent \
     && ln -sfn /root/.local/bin/agent /usr/local/bin/agent \
     && /usr/local/bin/agent --version

@@ -1,10 +1,16 @@
 #!/usr/bin/env bash
-# Rebuild only the agent Firecracker snapshot (picks up runtime supervisor changes).
+# Rebuild only the agent Firecracker snapshot (picks up runtime supervisor + Cursor CLI).
 #
 # Usage:
 #   ./rebuild-agent-snapshot.sh <instance-id> [aws-region]
 #
-# Required when runtime/agent code changes (e.g. per-run env injection for CURSOR_API_KEY).
+# Required when:
+#   - runtime/agent code changes
+#   - sandboxes report `agent: not found` or in-guest curl install SSL timeouts
+#   - CURSOR_API_KEY / agent env injection changes
+#
+# The Cursor CLI must be baked into the snapshot. Guests often cannot download
+# from cursor.com (SSL timeouts), so do not rely on runtime install.
 set -euo pipefail
 
 if [[ $# -lt 1 ]]; then

@@ -54,6 +54,36 @@ CID="$(docker create "${IMAGE}")"
 docker export "${CID}" | tar -x -C "${MOUNT_DIR}"
 docker rm "${CID}" >/dev/null
 
+if [[ "${RUNTIME}" == "agent" ]]; then
+  echo "verifying cursor agent CLI is present in rootfs..."
+  AGENT_BIN=""
+  for candidate in \
+    "${MOUNT_DIR}/usr/local/bin/agent" \
+    "${MOUNT_DIR}/root/.local/bin/agent"
+  do
+    if [[ -e "${candidate}" ]]; then
+      AGENT_BIN="${candidate}"
+      break
+    fi
+  done
+  if [[ -z "${AGENT_BIN}" ]]; then
+    AGENT_BIN="$(find "${MOUNT_DIR}/root/.local/share/cursor-agent" -name cursor-agent -type f 2>/dev/null | sort | tail -1 || true)"
+  fi
+  if [[ -z "${AGENT_BIN}" || ! -e "${AGENT_BIN}" ]]; then
+    echo "ERROR: cursor agent CLI missing from ${IMAGE}." >&2
+    echo "The agent snapshot cannot rely on in-guest curl install (often SSL-timeouts)." >&2
+    echo "Fix runtime/agent/Dockerfile install, rebuild with DEVIN_FORCE_SNAPSHOT_REBUILD=true." >&2
+    exit 1
+  fi
+  echo "cursor agent present: ${AGENT_BIN#${MOUNT_DIR}}"
+  # Ensure a stable path for the runtime supervisor (absolute path inside guest).
+  mkdir -p "${MOUNT_DIR}/usr/local/bin"
+  if [[ ! -e "${MOUNT_DIR}/usr/local/bin/agent" ]]; then
+    guest_path="${AGENT_BIN#${MOUNT_DIR}}"
+    ln -sfn "${guest_path}" "${MOUNT_DIR}/usr/local/bin/agent"
+  fi
+fi
+
 cat >"${OUT_DIR}/meta.partial.json" <<EOF
 {
   "runtime": "${RUNTIME}",

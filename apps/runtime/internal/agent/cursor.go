@@ -205,7 +205,7 @@ func ensureCursorBin(
 
 	install := `set -e
 export PATH="/usr/local/bin:/root/.local/bin:$PATH"
-curl -fsSL https://cursor.com/install | bash
+curl https://cursor.com/install -fsS --connect-timeout 10 --max-time 45 | bash
 if [ -x /root/.local/bin/agent ]; then
   ln -sfn /root/.local/bin/agent /usr/local/bin/agent
 fi
