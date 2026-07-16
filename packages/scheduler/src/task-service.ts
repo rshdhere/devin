@@ -2629,51 +2629,20 @@ export class TaskService {
 
   /**
    * Guests sometimes boot from snapshots where `agent` is missing or off PATH.
-   * Prefer locating a baked-in binary. Only attempt a short online install if
-   * cursor.com is reachable — never hang for minutes on SSL timeouts.
+   * Prefer locating a baked-in binary. Online install is a short fallback — the
+   * installer often succeeds while a naive `test -x /root/...` check still fails
+   * (HOME mismatch, progress bars on stderr, --version quirks).
    */
   private async ensureCursorAgentInSandbox(
     runtime: RuntimeClient,
     taskId: string,
   ): Promise<void> {
-    const findCmd = [
-      "set +e",
-      'export PATH="/usr/local/bin:/root/.local/bin:$PATH"',
-      "for candidate in \\",
-      "  /usr/local/bin/agent \\",
-      "  /root/.local/bin/agent \\",
-      "  $(command -v agent 2>/dev/null) \\",
-      "  $(command -v cursor-agent 2>/dev/null) \\",
-      "  $(ls -1 /root/.local/share/cursor-agent/versions/*/cursor-agent 2>/dev/null | sort | tail -1)",
-      "do",
-      '  [ -n "$candidate" ] || continue',
-      '  [ -x "$candidate" ] || continue',
-      '  if "$candidate" --version >/dev/null 2>&1; then',
-      '    printf "%s\\n" "$candidate"',
-      '    "$candidate" --version 2>&1 | head -1',
-      "    exit 0",
-      "  fi",
-      "done",
-      "exit 1",
-    ].join("\n");
-
-    const probe = await runtime.terminalAllowFailure({
-      taskId,
-      command: findCmd,
-    });
-    if (probe.exitCode === 0) {
-      const detail = (probe.stdout || "").trim();
+    const located = await this.findCursorAgentBinary(runtime, taskId);
+    if (located) {
       this.emit("agent.log", taskId, "cursor agent CLI ready in sandbox", {
-        detail: detail.slice(0, 240),
+        detail: located.slice(0, 240),
       });
-      // Ensure /usr/local/bin/agent exists for older runtime supervisors.
-      const binLine = detail.split("\n")[0]?.trim();
-      if (binLine && binLine !== "/usr/local/bin/agent") {
-        await runtime.terminalAllowFailure({
-          taskId,
-          command: `ln -sfn '${escapeShell(binLine)}' /usr/local/bin/agent`,
-        });
-      }
+      await this.linkCursorAgentBinary(runtime, taskId, located);
       return;
     }
 
@@ -2695,35 +2664,121 @@ export class TaskService {
       taskId,
       "cursor agent CLI missing — attempting short online install",
       {
-        probe: (probe.stderr || probe.stdout || "").trim().slice(0, 300),
         cursorCom: installHost.detail,
       },
     );
 
+    // Official installer. Do not use `set -e` across the pipe — curl progress
+    // noise on stderr previously masked a successful install, and HOME may not
+    // be /root inside the guest.
     const install = await runtime.terminalAllowFailure({
       taskId,
       command: [
-        "set -e",
-        'export PATH="/usr/local/bin:/root/.local/bin:$PATH"',
-        "curl https://cursor.com/install -fsS --connect-timeout 10 --max-time 45 | bash",
-        "test -x /root/.local/bin/agent",
-        "ln -sfn /root/.local/bin/agent /usr/local/bin/agent",
-        "command -v agent",
-        "agent --version",
+        "set +e",
+        'export HOME="${HOME:-/root}"',
+        'export PATH="/usr/local/bin:/root/.local/bin:$HOME/.local/bin:$PATH"',
+        "curl https://cursor.com/install -fsS | bash",
+        "ec=$?",
+        'echo "cursor_install_exit=$ec home=$HOME"',
+        'ls -la /usr/local/bin/agent /root/.local/bin/agent "$HOME/.local/bin/agent" 2>&1 | head -20',
+        "ls -la /root/.local/share/cursor-agent/versions 2>&1 | tail -5",
+        'ls -la "$HOME/.local/share/cursor-agent/versions" 2>&1 | tail -5',
+        "exit 0",
       ].join("\n"),
     });
-    if (install.exitCode !== 0) {
-      const detail = (install.stderr || install.stdout || "").trim();
-      throw new Error(
-        "cursor agent CLI is not available in the sandbox and install failed" +
-          (detail ? `: ${detail.slice(0, 400)}` : "") +
-          ". Rebuild the agent Firecracker snapshot" +
-          " (./infra/scripts/rebuild-agent-snapshot.sh <instance-id>).",
-      );
+
+    const afterInstall = await this.findCursorAgentBinary(runtime, taskId);
+    if (afterInstall) {
+      await this.linkCursorAgentBinary(runtime, taskId, afterInstall);
+      this.emit("agent.log", taskId, "cursor agent CLI installed in sandbox", {
+        detail: afterInstall.slice(0, 240),
+        installLog: (install.stdout || "").trim().slice(0, 300),
+      });
+      return;
     }
 
-    this.emit("agent.log", taskId, "cursor agent CLI installed in sandbox", {
-      detail: (install.stdout || "").trim().slice(0, 200),
+    const stdout = (install.stdout || "").trim();
+    const stderr = (install.stderr || "").trim();
+    // Prefer installer text over curl progress-bar spam on stderr.
+    const detail =
+      stdout
+        .split("\n")
+        .filter((line) => !/^#/.test(line.trim()) && !/^\s*[\d.]+%$/.test(line))
+        .join("\n")
+        .trim()
+        .slice(0, 500) ||
+      stderr
+        .split("\n")
+        .filter((line) => !line.includes("#") && !/\d+\.\d+%/.test(line))
+        .join("\n")
+        .trim()
+        .slice(0, 400) ||
+      "agent binary not found after install";
+
+    throw new Error(
+      "cursor agent CLI is not available in the sandbox after install" +
+        (detail ? `: ${detail}` : "") +
+        ". Rebuild the agent Firecracker snapshot" +
+        " (./infra/scripts/rebuild-agent-snapshot.sh <instance-id>).",
+    );
+  }
+
+  private async findCursorAgentBinary(
+    runtime: RuntimeClient,
+    taskId: string,
+  ): Promise<string | null> {
+    const findCmd = [
+      "set +e",
+      'export HOME="${HOME:-/root}"',
+      'export PATH="/usr/local/bin:/root/.local/bin:$HOME/.local/bin:$PATH"',
+      "for candidate in \\",
+      "  /usr/local/bin/agent \\",
+      "  /root/.local/bin/agent \\",
+      '  "$HOME/.local/bin/agent" \\',
+      "  $(command -v agent 2>/dev/null) \\",
+      "  $(command -v cursor-agent 2>/dev/null) \\",
+      "  $(ls -1 /root/.local/share/cursor-agent/versions/*/cursor-agent 2>/dev/null | sort | tail -1) \\",
+      '  $(ls -1 "$HOME/.local/share/cursor-agent/versions/"*/cursor-agent 2>/dev/null | sort | tail -1)',
+      "do",
+      '  [ -n "$candidate" ] || continue',
+      '  [ -e "$candidate" ] || continue',
+      // Accept a present executable even if --version is flaky in the guest.
+      '  if [ -x "$candidate" ] || [ -L "$candidate" ]; then',
+      '    if "$candidate" --version >/dev/null 2>&1 || [ -x "$candidate" ]; then',
+      '      printf "%s\\n" "$candidate"',
+      "      exit 0",
+      "    fi",
+      "  fi",
+      "done",
+      "exit 1",
+    ].join("\n");
+
+    const probe = await runtime.terminalAllowFailure({
+      taskId,
+      command: findCmd,
+    });
+    if (probe.exitCode !== 0) {
+      return null;
+    }
+    const bin = probe.stdout
+      .trim()
+      .split("\n")
+      .map((line) => line.trim())
+      .find((line) => line.startsWith("/") || line.includes("agent"));
+    return bin || null;
+  }
+
+  private async linkCursorAgentBinary(
+    runtime: RuntimeClient,
+    taskId: string,
+    bin: string,
+  ): Promise<void> {
+    if (!bin || bin === "/usr/local/bin/agent") {
+      return;
+    }
+    await runtime.terminalAllowFailure({
+      taskId,
+      command: `mkdir -p /usr/local/bin /root/.local/bin && ln -sfn '${escapeShell(bin)}' /usr/local/bin/agent && ln -sfn '${escapeShell(bin)}' /root/.local/bin/agent`,
     });
   }
 

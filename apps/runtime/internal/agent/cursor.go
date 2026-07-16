@@ -203,14 +203,29 @@ func ensureCursorBin(
 		"bin":    bin,
 	})
 
-	install := `set -e
-export PATH="/usr/local/bin:/root/.local/bin:$PATH"
-curl https://cursor.com/install -fsS --connect-timeout 10 --max-time 45 | bash
-if [ -x /root/.local/bin/agent ]; then
-  ln -sfn /root/.local/bin/agent /usr/local/bin/agent
-fi
-command -v agent
-test -x "$(command -v agent)"
+	install := `set +e
+export HOME="${HOME:-/root}"
+export PATH="/usr/local/bin:/root/.local/bin:$HOME/.local/bin:$PATH"
+curl https://cursor.com/install -fsS | bash
+# Re-resolve after install — do not trust a single hard-coded path.
+for candidate in \
+  /usr/local/bin/agent \
+  /root/.local/bin/agent \
+  "$HOME/.local/bin/agent" \
+  $(command -v agent 2>/dev/null) \
+  $(ls -1 /root/.local/share/cursor-agent/versions/*/cursor-agent 2>/dev/null | sort | tail -1) \
+  $(ls -1 "$HOME/.local/share/cursor-agent/versions/"*/cursor-agent 2>/dev/null | sort | tail -1)
+do
+  [ -n "$candidate" ] || continue
+  [ -e "$candidate" ] || continue
+  if [ -x "$candidate" ] || [ -L "$candidate" ]; then
+    ln -sfn "$candidate" /usr/local/bin/agent
+    ln -sfn "$candidate" /root/.local/bin/agent
+    printf '%s\n' "$candidate"
+    exit 0
+  fi
+done
+exit 1
 `
 	installResult, installErr := executil.Run(ctx, workDir, install, env)
 	if installErr != nil {
@@ -242,29 +257,34 @@ test -x "$(command -v agent)"
 }
 
 func whichCursorBin(ctx context.Context, workDir, bin string, env []string) (string, error) {
-	script := fmt.Sprintf(
-		`export PATH="/usr/local/bin:/root/.local/bin:$PATH"
-if [ -x %s ]; then
-  printf '%%s\n' %s
-  exit 0
-fi
-resolved="$(command -v %s || true)"
-if [ -n "$resolved" ] && [ -x "$resolved" ]; then
-  printf '%%s\n' "$resolved"
-  exit 0
-fi
+	script := `set +e
+export HOME="${HOME:-/root}"
+export PATH="/usr/local/bin:/root/.local/bin:$HOME/.local/bin:$PATH"
+for candidate in \
+  ` + shellQuote(bin) + ` \
+  /usr/local/bin/agent \
+  /root/.local/bin/agent \
+  "$HOME/.local/bin/agent" \
+  $(command -v agent 2>/dev/null) \
+  $(command -v cursor-agent 2>/dev/null) \
+  $(ls -1 /root/.local/share/cursor-agent/versions/*/cursor-agent 2>/dev/null | sort | tail -1) \
+  $(ls -1 "$HOME/.local/share/cursor-agent/versions/"*/cursor-agent 2>/dev/null | sort | tail -1)
+do
+  [ -n "$candidate" ] || continue
+  [ -e "$candidate" ] || continue
+  if [ -x "$candidate" ] || [ -L "$candidate" ]; then
+    printf '%s\n' "$candidate"
+    exit 0
+  fi
+done
 exit 1
-`,
-		shellQuote(bin),
-		shellQuote(bin),
-		shellQuote(bin),
-	)
+`
 	result, err := executil.Run(ctx, workDir, script, env)
 	if err != nil {
 		return "", err
 	}
 	if result.ExitCode != 0 {
-		detail := executil.CombinedOutput(result)
+		detail := strings.TrimSpace(result.Stdout)
 		if detail == "" {
 			detail = fmt.Sprintf("%s not found on PATH", bin)
 		}
@@ -274,7 +294,6 @@ exit 1
 	if resolved == "" {
 		return "", fmt.Errorf("%s not found on PATH", bin)
 	}
-	// Prefer the last non-empty line (command -v output).
 	lines := strings.Split(resolved, "\n")
 	for i := len(lines) - 1; i >= 0; i-- {
 		line := strings.TrimSpace(lines[i])
