@@ -176,6 +176,35 @@ export function greenfieldShellScaffoldFiles(opts: {
     if (!paths.has(".gitignore")) {
       nodeFiles.push(gitignore);
     }
+    // Stack marker must always exist — Next/React prompts used to omit it.
+    if (!paths.has("package.json")) {
+      const ensured = scaffoldFilesFromDraft(
+        {
+          summary: plan.summary,
+          steps: plan.steps,
+          files: [
+            ...plan.files,
+            {
+              path: "package.json",
+              changeType: "create",
+              summary: "Define scripts and dependencies for the requested app",
+            },
+            {
+              path: "src/index.ts",
+              changeType: "create",
+              summary: "Create the main server/app entry point",
+            },
+          ],
+        },
+        { title: opts.title, prompt: opts.prompt },
+      );
+      for (const file of ensured) {
+        if (!paths.has(file.path)) {
+          nodeFiles.push(file);
+          paths.add(file.path);
+        }
+      }
+    }
     return nodeFiles;
   }
 

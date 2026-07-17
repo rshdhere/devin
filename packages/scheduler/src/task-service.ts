@@ -1029,6 +1029,7 @@ export class TaskService {
         repository,
         repoCwd,
         gitOwner,
+        resolveStackRuntime(task, job),
       );
       const repoReadyInSandbox = Boolean(repository && cloneUrl);
 
@@ -1772,7 +1773,7 @@ export class TaskService {
 
     if (check.stdout.trim() !== "yes") {
       throw new Error(
-        `Agent did not leave a runnable ${stackRuntime} project (${marker} missing)`,
+        `Greenfield scaffold is missing a runnable ${stackRuntime} project (${marker} missing)`,
       );
     }
   }
@@ -4223,11 +4224,39 @@ function buildCommitMessage(subject: string): string {
   return `${subject}\n\n${coAuthorTrailer()}`;
 }
 
+function nextjsPromptGuidance(stackRuntime?: StackRuntime): string[] {
+  if (stackRuntime !== "nextjs") {
+    return [];
+  }
+  return [
+    "",
+    "Next.js UI requirements:",
+    "- Build the app with Next.js (App Router) and TypeScript",
+    "- Use shadcn/ui for all component styling — initialize it with " +
+      "`npx --yes shadcn@latest init -d`, then add components with " +
+      "`npx --yes shadcn@latest add <component>` as needed (Tailwind CSS is required)",
+    "- Install required agent skills before building (run each once, then follow them):",
+    "  - `npx --yes skills add https://github.com/anthropics/skills --skill frontend-design`",
+    "  - `npx --yes skills add https://github.com/vercel-labs/agent-skills --skill vercel-react-best-practices`",
+    "  - `npx --yes skills add https://github.com/mattpocock/skills --skill improve-codebase-architecture`",
+    "  - `npx --yes skills add https://github.com/shadcn/ui --skill shadcn`",
+    "  - `npx --yes skills add https://github.com/supabase/agent-skills --skill supabase`",
+    "  - `npx --yes skills add https://github.com/101-skills/skills --skill landing-page-design`",
+    "- Apply frontend-design and landing-page-design for layout/visual polish, " +
+      "shadcn for component patterns, vercel-react-best-practices for React/Next.js, " +
+      "improve-codebase-architecture for module boundaries, and supabase when backend/auth/data is needed",
+    "- Compose the interface from shadcn/ui primitives — do not hand-roll " +
+      "unstyled elements when a shadcn component exists",
+    "- Verify `npm run build` succeeds before finishing",
+  ];
+}
+
 function buildAgentPrompt(
   prompt: string,
   repository: string,
   repoCwd: string,
   owner?: GitHubUserIdentity,
+  stackRuntime?: StackRuntime,
 ): string {
   const bot = resolveBotAuthor();
   const ownerLine = owner
@@ -4247,6 +4276,7 @@ function buildAgentPrompt(
     "- Do not finish while the page still says 'Scaffold is running'",
     "- Add dependencies only when needed; if you do, run npm install and verify start still works",
     "- Smoke-check GET / and /health before finishing",
+    ...nextjsPromptGuidance(stackRuntime),
     "",
     "Git / commits:",
     "- Commit incrementally after meaningful steps (API, UI, features, polish)",

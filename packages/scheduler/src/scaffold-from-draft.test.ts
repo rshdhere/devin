@@ -8,6 +8,7 @@ describe("scaffoldFilesFromDraft", () => {
       "make me a chat-app using nodejs",
       "make me a todo-app using nodejs",
       "build a notes API in node",
+      "make me a tic-tac-toe game using nextjs",
     ]) {
       const plan = buildHeuristicDraftPlan({ prompt });
       const files = scaffoldFilesFromDraft(plan, {
@@ -24,6 +25,7 @@ describe("scaffoldFilesFromDraft", () => {
       );
 
       const pkg = files.find((file) => file.path === "package.json");
+      expect(pkg).toBeDefined();
       expect(pkg!.content).not.toContain("express");
     }
   });

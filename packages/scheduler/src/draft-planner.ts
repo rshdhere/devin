@@ -231,9 +231,17 @@ function normalizeDraftPlan(raw: Partial<DraftPlan>): DraftPlan {
 
 export function buildHeuristicDraftPlan(ctx: DraftPlannerContext): DraftPlan {
   const lower = ctx.prompt.toLowerCase();
-  const isNode = ["node", "express", "typescript", "javascript", "api"].some(
-    (term) => lower.includes(term),
-  );
+  const isNode = [
+    "node",
+    "express",
+    "typescript",
+    "javascript",
+    "api",
+    "next.js",
+    "nextjs",
+    "next js",
+    "react",
+  ].some((term) => lower.includes(term));
 
   const files: DraftFilePlan[] = [
     {

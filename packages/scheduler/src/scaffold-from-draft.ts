@@ -51,7 +51,11 @@ _Scaffold only — the sandbox agent implements the product and commits as it go
     lower.includes("api") ||
     lower.includes("todo") ||
     lower.includes("chat") ||
-    lower.includes("app");
+    lower.includes("app") ||
+    lower.includes("next.js") ||
+    lower.includes("nextjs") ||
+    lower.includes("next js") ||
+    lower.includes("react");
 
   if (wantsNode) {
     const slug = opts.title
