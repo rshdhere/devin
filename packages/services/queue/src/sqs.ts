@@ -41,12 +41,22 @@ export class SqsQueue<T> implements TaskQueue<T> {
       enqueuedAt: new Date().toISOString(),
     };
 
-    await this.client.send(
-      new SendMessageCommand({
-        QueueUrl: this.queueUrl,
-        MessageBody: JSON.stringify(job),
-      }),
-    );
+    const command = new SendMessageCommand({
+      QueueUrl: this.queueUrl,
+      MessageBody: JSON.stringify(job),
+    });
+
+    for (let attempt = 0; ; attempt += 1) {
+      try {
+        await this.client.send(command);
+        break;
+      } catch (error) {
+        if (!isCredentialProviderError(error) || attempt >= 4) {
+          throw error;
+        }
+        await sleep(250 * 2 ** attempt);
+      }
+    }
 
     return job;
   }
@@ -133,4 +143,15 @@ export class SqsQueue<T> implements TaskQueue<T> {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function isCredentialProviderError(error: unknown): boolean {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+
+  return (
+    error.name === "CredentialsProviderError" ||
+    /could not load credentials from any providers/i.test(error.message)
+  );
 }
