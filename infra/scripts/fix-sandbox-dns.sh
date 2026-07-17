@@ -88,19 +88,34 @@ if [[ -d /var/run/netns ]]; then
 fi
 
 if command -v iptables >/dev/null; then
-  echo "Ensuring fcnet MASQUERADE for 192.168.127.0/24"
-  iptables -t nat -C POSTROUTING -s 192.168.127.0/24 -j MASQUERADE 2>/dev/null \
-    || iptables -t nat -A POSTROUTING -s 192.168.127.0/24 -j MASQUERADE
+  echo "Purging stale CNI NAT rules and ensuring fcnet MASQUERADE is first"
+  # Per-VM CNI POSTROUTING jumps accumulate and can shadow subnet MASQUERADE.
+  # Rewrite the nat table without CNI-* rules, then put subnet MASQ first.
+  tmp="$(mktemp)"
+  iptables-save -t nat >"${tmp}"
+  grep -v 'CNI-' "${tmp}" >"${tmp}.clean" || cp "${tmp}" "${tmp}.clean"
+  awk -v masq='-A POSTROUTING -s 192.168.127.0/24 -j MASQUERADE' '
+    BEGIN { inserted = 0 }
+    /^-A POSTROUTING -s 192\.168\.127\.0\/24 -j MASQUERADE$/ { next }
+    /^\*nat/ { print; next }
+    /^-A POSTROUTING/ && !inserted { print masq; inserted = 1 }
+    /^COMMIT/ && !inserted { print masq; inserted = 1 }
+    { print }
+  ' "${tmp}.clean" >"${tmp}.final"
+  iptables-restore <"${tmp}.final"
+  rm -f "${tmp}" "${tmp}.clean" "${tmp}.final"
+
   iptables -C FORWARD -s 192.168.127.0/24 -j ACCEPT 2>/dev/null \
-    || iptables -A FORWARD -s 192.168.127.0/24 -j ACCEPT
+    || iptables -I FORWARD 1 -s 192.168.127.0/24 -j ACCEPT
   iptables -C FORWARD -d 192.168.127.0/24 -m state --state RELATED,ESTABLISHED -j ACCEPT 2>/dev/null \
-    || iptables -A FORWARD -d 192.168.127.0/24 -m state --state RELATED,ESTABLISHED -j ACCEPT
-  echo "Removing stale CNI iptables chains..."
-  while read -r chain; do
-    [[ -n "$chain" ]] || continue
-    iptables -t nat -F "$chain" 2>/dev/null || true
-    iptables -t nat -X "$chain" 2>/dev/null || true
-  done < <(iptables -t nat -S 2>/dev/null | awk '/^-N CNI-/{print $2}')
+    || iptables -I FORWARD 1 -d 192.168.127.0/24 -m state --state RELATED,ESTABLISHED -j ACCEPT
+  # Docker sets FORWARD DROP and evaluates DOCKER-USER first.
+  if iptables -L DOCKER-USER -n >/dev/null 2>&1; then
+    iptables -C DOCKER-USER -s 192.168.127.0/24 -j ACCEPT 2>/dev/null \
+      || iptables -I DOCKER-USER 1 -s 192.168.127.0/24 -j ACCEPT
+    iptables -C DOCKER-USER -d 192.168.127.0/24 -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT 2>/dev/null \
+      || iptables -I DOCKER-USER 1 -d 192.168.127.0/24 -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+  fi
 fi
 echo ""
 echo "Restart firecracker and rebuild runtime snapshots for full effect:"

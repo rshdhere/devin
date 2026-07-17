@@ -2194,14 +2194,23 @@ export class TaskService {
       );
 
       if (attempt === 2) {
-        const message =
-          "Sandbox has no outbound DNS/HTTPS to the Cursor API (api2.cursor.sh). " +
-          "On the execution host run fix-sandbox-dns.sh and fix-cni-and-redeploy-firecracker.sh, then rebuild the agent snapshot.";
+        const corrupt =
+          /guest filesystem corrupt|Structure needs cleaning/i.test(
+            `${dnsCheck.detail} ${cursorCheck.detail} ${installCheck.detail}`,
+          );
+        const message = corrupt
+          ? "Sandbox guest filesystem is corrupt (rootfs/mem snapshot mismatch). " +
+            "On the execution host rebuild snapshots: " +
+            "DEVIN_FORCE_SNAPSHOT_REBUILD=true DEVIN_RUNTIMES='agent nextjs' " +
+            "./infra/scripts/run-ssm-bootstrap-snapshots.sh <instance-id>."
+          : "Sandbox has no outbound DNS/HTTPS to the Cursor API (api2.cursor.sh). " +
+            "On the execution host run fix-sandbox-dns.sh and fix-cni-and-redeploy-firecracker.sh, then rebuild the agent snapshot.";
         this.emit("agent.log", taskId, message, {
           cursorReachable: false,
           dns: dnsCheck,
           cursor: cursorCheck,
           cursorCom: installCheck,
+          guestFsCorrupt: corrupt,
         });
         throw new Error(message);
       }
@@ -2258,11 +2267,40 @@ export class TaskService {
   ): Promise<{ ok: boolean; detail: string }> {
     const result = await runtime.terminalAllowFailure({
       taskId,
-      command: `code=$(curl -4sS --connect-timeout 10 --max-time 15 -o /dev/null -w '%{http_code}' '${escapeShell(url)}' 2>&1) || true; echo "$code"`,
+      command: [
+        "set +e",
+        `url='${escapeShell(url)}'`,
+        "if command -v curl >/dev/null 2>&1; then",
+        "  out=$(curl -4sS --connect-timeout 10 --max-time 15 -o /dev/null -w '%{http_code}' \"$url\" 2>&1)",
+        "  code=$?",
+        '  echo "$out"',
+        "  if echo \"$out\" | grep -qi 'Structure needs cleaning'; then",
+        "    echo 'guest-fs-corrupt'",
+        "  fi",
+        "  exit $code",
+        "fi",
+        "if command -v node >/dev/null 2>&1; then",
+        '  node -e "fetch(process.argv[1],{signal:AbortSignal.timeout(15000)}).then(r=>{console.log(r.status); process.exit(0)}).catch(e=>{console.error(String(e)); process.exit(1)})" "$url"',
+        "  exit $?",
+        "fi",
+        "echo 'no-https-client'",
+        "exit 127",
+      ].join("; "),
     });
-    const combined = result.stdout.trim();
-    const httpCode = combined.split(/\s+/).pop() ?? "";
-    if (/^[0-9]{3}$/.test(httpCode) && httpCode !== "000") {
+    const combined = `${result.stdout}\n${result.stderr}`.trim();
+    if (/guest-fs-corrupt|Structure needs cleaning/i.test(combined)) {
+      return {
+        ok: false,
+        detail:
+          "guest filesystem corrupt (Structure needs cleaning) — rebuild agent/nextjs snapshots",
+      };
+    }
+    const httpCode =
+      combined
+        .split(/\s+/)
+        .reverse()
+        .find((token) => /^[0-9]{3}$/.test(token)) ?? "";
+    if (httpCode && httpCode !== "000") {
       return { ok: true, detail: `HTTP ${httpCode}` };
     }
     return {
