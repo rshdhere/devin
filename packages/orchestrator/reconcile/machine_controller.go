@@ -102,7 +102,9 @@ func (r *FirecrackerMachineReconciler) provisionVM(ctx context.Context, machine 
 	machine.Status = devinv1.FirecrackerMachineStatus{
 		Phase:      phase,
 		VMID:       vm.VMID,
-		Host:       firstNonEmpty(vm.Host, selectedHost.Name),
+		// Always pin Status.Host to the FirecrackerHost CR name. The daemon's
+		// advertised host label can diverge and breaks lookupHost on refresh.
+		Host:       selectedHost.Name,
 		RuntimeURL: vm.RuntimeURL,
 		Message:    message,
 	}
@@ -127,8 +129,14 @@ func (r *FirecrackerMachineReconciler) provisionVM(ctx context.Context, machine 
 }
 
 func (r *FirecrackerMachineReconciler) refreshVM(ctx context.Context, machine *devinv1.FirecrackerMachine) (ctrl.Result, error) {
-	hostCR, err := r.lookupHost(ctx, machine.Status.Host)
+	hostCR, err := r.lookupHost(ctx, firstNonEmpty(machine.Status.Host, machine.Spec.Host, machine.Spec.PreferredHost))
 	if err != nil {
+		if isRetryableProvisionError(err) {
+			if syncErr := r.syncSandboxCapacityWait(ctx, machine, err.Error()); syncErr != nil {
+				return ctrl.Result{}, syncErr
+			}
+			return ctrl.Result{RequeueAfter: 15 * time.Second}, nil
+		}
 		return r.fail(ctx, machine, err)
 	}
 
@@ -207,6 +215,10 @@ func (r *FirecrackerMachineReconciler) syncSandboxStatus(ctx context.Context, ma
 }
 
 func (r *FirecrackerMachineReconciler) lookupHost(ctx context.Context, hostName string) (*devinv1.FirecrackerHost, error) {
+	hostName = strings.TrimSpace(hostName)
+	if hostName == "" {
+		return nil, fmt.Errorf("firecracker host name is empty")
+	}
 	hostCR := &devinv1.FirecrackerHost{}
 	if err := r.Get(ctx, client.ObjectKey{Namespace: r.Config.FirecrackerNamespace, Name: hostName}, hostCR); err != nil {
 		return nil, err
@@ -248,8 +260,16 @@ func isRetryableProvisionError(err error) bool {
 		return false
 	}
 	message := strings.ToLower(err.Error())
-	return strings.Contains(message, "lacks capacity") ||
-		strings.Contains(message, "not found") && strings.Contains(message, "firecracker host")
+	if strings.Contains(message, "lacks capacity") {
+		return true
+	}
+	if !strings.Contains(message, "not found") {
+		return false
+	}
+	// Match both human messages ("preferred firecracker host") and Kubernetes
+	// NotFound errors ("FirecrackerHost.devin.baby \"…\" not found").
+	return strings.Contains(message, "firecracker host") ||
+		strings.Contains(message, "firecrackerhost")
 }
 
 func (r *FirecrackerMachineReconciler) writeMachineStatus(

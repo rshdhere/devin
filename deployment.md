@@ -829,7 +829,7 @@ docker logs -f scheduler
 
 ### Upgrades
 
-1. Build and push new images with a version tag (CI **Registry** workflow on `main`).
+1. Build and push new images with a version tag (CI **registry** workflow on `main`).
 2. **Execution hosts** roll automatically via the **Deploy execution hosts** GitHub Actions workflow (SSM: `docker pull` + restart). Manual fallback:
 
    ```sh

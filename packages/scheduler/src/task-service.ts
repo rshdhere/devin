@@ -3741,7 +3741,7 @@ export class TaskService {
           const retryableCapacity =
             /lacks capacity/i.test(lastMessage) ||
             (/not found/i.test(lastMessage) &&
-              /firecracker host/i.test(lastMessage));
+              /firecracker\s*host/i.test(lastMessage));
           if (retryableCapacity && Date.now() < deadline - 30_000) {
             const reclaimed = await this.reclaimDevboxCapacity(taskId, 1);
             if (reclaimed > 0) {
@@ -3768,7 +3768,8 @@ export class TaskService {
             continue;
           }
           const hostRegistryHint =
-            /preferred firecracker host/i.test(lastMessage) &&
+            /firecracker\s*host/i.test(lastMessage) &&
+            /not found|lacks capacity/i.test(lastMessage) &&
             this.preferredHost
               ? ` Re-register with: curl -X PUT -H 'Content-Type: application/json' -d '{"spec":{"address":"http://<host-ip>:9092","schedulerAddress":"http://<host-ip>:9091","capacity":{"cpu":2,"memory":"16Gi"}}}' ${this.orchestratorUrl}/internal/v1/firecracker-hosts/${this.preferredHost}`
               : undefined;
@@ -3780,10 +3781,10 @@ export class TaskService {
             remediation: hostRegistryHint,
           });
           throw new Error(
-            /preferred firecracker host/i.test(lastMessage) &&
-              /lacks capacity/i.test(lastMessage)
+            /lacks capacity/i.test(lastMessage)
               ? `${failureMessage}. End idle devbox sessions on this host or wait for capacity to free up.`
-              : /preferred firecracker host/i.test(lastMessage)
+              : /firecracker\s*host/i.test(lastMessage) &&
+                  /not found/i.test(lastMessage)
                 ? `${failureMessage}. Ensure FirecrackerHost ${this.preferredHost ?? "registration"} is registered with the orchestrator.`
                 : failureMessage,
           );

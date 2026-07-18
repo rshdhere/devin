@@ -1,11 +1,11 @@
 name: Deploy execution hosts
 
 # Rolls devin-scheduler and devin-firecracker on EC2 execution hosts after
-# Registry pushes new images. Runtime golden snapshots are NOT rebuilt here —
+# registry pushes new images. Runtime golden snapshots are NOT rebuilt here —
 # use workflow_dispatch with rebuild_runtime_snapshots when runtime/ changes.
 on:
   workflow_run:
-    workflows: ["Registry"]
+    workflows: ["registry"]
     types: [completed]
     branches: [main]
   workflow_dispatch:
