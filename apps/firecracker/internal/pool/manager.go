@@ -157,6 +157,13 @@ func (m *Manager) warmRuntimePool(ctx context.Context, runtime string, queue cha
 			continue
 		}
 
+		// Static CNI IPAM allows only one networked microVM. Never warm while
+		// an assigned/provisioning VM holds (or is about to hold) the fcnet IP.
+		if m.networkBusy() {
+			time.Sleep(time.Second)
+			continue
+		}
+
 		instance, err := m.launchWarm(ctx, runtime)
 		if err != nil {
 			slog.Error("failed to warm microVM", "runtime", runtime, "error", err)
@@ -164,6 +171,16 @@ func (m *Manager) warmRuntimePool(ctx context.Context, runtime string, queue cha
 			m.warmErrors[runtime] = err.Error()
 			m.mu.Unlock()
 			time.Sleep(5 * time.Second)
+			continue
+		}
+
+		// A cold create may have started while we were restoring; discard the
+		// warm VM so it cannot steal the static CNI address.
+		if m.networkBusy() {
+			slog.Info("discarding warm microVM; network claimed by active VM",
+				"runtime", runtime, "vmId", instance.ID)
+			_ = instance.Shutdown(context.Background())
+			time.Sleep(time.Second)
 			continue
 		}
 
@@ -180,6 +197,58 @@ func (m *Manager) warmRuntimePool(ctx context.Context, runtime string, queue cha
 			m.readyCount++
 			m.mu.Unlock()
 			slog.Info("warmed microVM", "runtime", runtime, "vmId", instance.ID, "runtimeURL", instance.RuntimeURL)
+		}
+	}
+}
+
+// networkBusy reports whether any assigned or in-flight VM owns the static
+// fcnet address (warm queue VMs are tracked separately in ready channels).
+func (m *Manager) networkBusy() bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return len(m.assigned) > 0 || len(m.vms) > 0
+}
+
+// drainWarmPool shuts down every warmed microVM so cold provision can claim
+// the single static CNI IP without colliding with a warm nextjs/agent guest.
+func (m *Manager) drainWarmPool() {
+	m.mu.RLock()
+	queues := make([]chan *vm.Instance, 0, len(m.ready))
+	for _, queue := range m.ready {
+		queues = append(queues, queue)
+	}
+	m.mu.RUnlock()
+
+	drained := make([]*vm.Instance, 0)
+	for _, queue := range queues {
+		for _, warm := range drainQueue(queue) {
+			m.mu.Lock()
+			if m.readyCount > 0 {
+				m.readyCount--
+			}
+			m.mu.Unlock()
+			drained = append(drained, warm)
+		}
+	}
+
+	for _, warm := range drained {
+		slog.Info("draining warm microVM for exclusive CNI lease",
+			"vmId", warm.ID, "runtime", warm.Runtime)
+		if err := warm.Shutdown(context.Background()); err != nil {
+			slog.Warn("failed to shut down warm microVM during drain",
+				"vmId", warm.ID, "error", err)
+		}
+	}
+}
+
+func drainQueue(queue chan *vm.Instance) []*vm.Instance {
+	out := make([]*vm.Instance, 0)
+	for {
+		select {
+		case warm := <-queue:
+			out = append(out, warm)
+		default:
+			return out
 		}
 	}
 }
@@ -292,6 +361,8 @@ func (m *Manager) Create(name, runtime, taskID string, cpu int32, memory string)
 		Message: "restoring snapshot",
 	}
 
+	// Reserve first so networkBusy() becomes true and the warmer stops
+	// launching new guests before we free the static CNI IP.
 	m.mu.Lock()
 	if existing := m.findByNameLocked(name); existing != nil {
 		m.mu.Unlock()
@@ -305,6 +376,8 @@ func (m *Manager) Create(name, runtime, taskID string, cpu int32, memory string)
 	m.vmCPU[vmID] = chargeCPU
 	m.usedCPU += chargeCPU
 	m.mu.Unlock()
+
+	m.drainWarmPool()
 
 	go m.provisionCold(vmID, name, runtime, chargeCPU, memory)
 
