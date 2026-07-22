@@ -2909,9 +2909,10 @@ export class TaskService {
   }
 
   /**
-   * Cursor agent CLI shebang is `#!/usr/bin/env bash`. Guests with a stripped
-   * PATH (or a rootfs missing bash) fail immediately with:
-   *   /usr/bin/env: 'bash': No such file or directory
+   * Cursor agent CLI shebang is `#!/usr/bin/env bash`. Guests often boot with a
+   * PATH that omits /bin:/usr/bin, so env cannot find bash even when /bin/bash
+   * exists. Old runtime snapshots also prepend only /usr/local/bin — put bash
+   * there and rewrite agent shebangs so launches work before snapshot rebuild.
    */
   private async ensureBashInSandbox(
     runtime: RuntimeClient,
@@ -2922,34 +2923,46 @@ export class TaskService {
       command: [
         "set +e",
         'export PATH="/usr/local/bin:/root/.local/bin:/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin:$PATH"',
-        "if command -v bash >/dev/null 2>&1; then",
-        "  command -v bash",
-        "  exit 0",
-        "fi",
-        "if [ -x /bin/bash ]; then",
-        "  echo /bin/bash",
-        "  exit 0",
-        "fi",
-        "if [ -x /usr/bin/bash ]; then",
-        "  echo /usr/bin/bash",
-        "  exit 0",
-        "fi",
-        "if command -v apt-get >/dev/null 2>&1; then",
+        "bash_bin=''",
+        "if command -v bash >/dev/null 2>&1; then bash_bin=$(command -v bash); fi",
+        'if [ -z "$bash_bin" ] && [ -x /bin/bash ]; then bash_bin=/bin/bash; fi',
+        'if [ -z "$bash_bin" ] && [ -x /usr/bin/bash ]; then bash_bin=/usr/bin/bash; fi',
+        'if [ -z "$bash_bin" ] && command -v apt-get >/dev/null 2>&1; then',
         "  apt-get update -qq >/tmp/devin-bash-apt.log 2>&1",
         "  apt-get install -y -qq bash >/tmp/devin-bash-apt.log 2>&1",
+        '  export PATH="/usr/local/bin:/root/.local/bin:/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin:$PATH"',
+        "  bash_bin=$(command -v bash)",
         "fi",
-        'export PATH="/usr/local/bin:/root/.local/bin:/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin:$PATH"',
-        "command -v bash || exit 1",
+        'if [ -z "$bash_bin" ] || [ ! -x "$bash_bin" ]; then',
+        "  echo 'bash-not-found'",
+        "  exit 1",
+        "fi",
+        "mkdir -p /usr/local/bin /bin",
+        // Old guest PATH is often just /usr/local/bin:/root/.local/bin — env bash
+        // must resolve from those dirs without relying on /bin being present.
+        'ln -sfn "$bash_bin" /usr/local/bin/bash',
+        'if [ ! -x /bin/bash ]; then ln -sfn "$bash_bin" /bin/bash; fi',
+        'if [ ! -x /usr/bin/bash ]; then mkdir -p /usr/bin && ln -sfn "$bash_bin" /usr/bin/bash; fi',
+        // Simulate legacy agent launch PATH (no /bin) — must succeed.
+        'PATH="/usr/local/bin:/root/.local/bin" /usr/bin/env bash -c "echo ok" >/tmp/devin-bash-env-ok 2>/tmp/devin-bash-env-err',
+        "ec=$?",
+        'if [ "$ec" -ne 0 ]; then',
+        '  echo "env-bash-failed:$(cat /tmp/devin-bash-env-err 2>/dev/null)"',
+        "  exit 1",
+        "fi",
+        'printf "%s\\n" "$bash_bin"',
       ].join("\n"),
     });
     if (probe.exitCode !== 0) {
       throw new Error(
-        "Sandbox has no bash (/usr/bin/env bash fails). Rebuild the agent Firecracker snapshot " +
-          "with bash installed (runtime/agent/Dockerfile).",
+        "Sandbox has no usable bash for Cursor agent (#/usr/bin/env bash). " +
+          `detail=${(probe.stderr || probe.stdout || "").trim().slice(0, 240)}. ` +
+          "Rebuild the agent Firecracker snapshot (runtime/agent/Dockerfile).",
       );
     }
     this.emit("agent.log", taskId, "bash available in sandbox", {
       detail: probe.stdout.trim().slice(0, 120),
+      linkedAt: "/usr/local/bin/bash",
     });
   }
 
@@ -3099,12 +3112,57 @@ export class TaskService {
     taskId: string,
     bin: string,
   ): Promise<void> {
-    if (!bin || bin === "/usr/local/bin/agent") {
-      return;
-    }
     await runtime.terminalAllowFailure({
       taskId,
-      command: `mkdir -p /usr/local/bin /root/.local/bin && ln -sfn '${escapeShell(bin)}' /usr/local/bin/agent && ln -sfn '${escapeShell(bin)}' /root/.local/bin/agent`,
+      command: [
+        "set +e",
+        'export PATH="/usr/local/bin:/root/.local/bin:/usr/bin:/bin:$PATH"',
+        "mkdir -p /usr/local/bin /root/.local/bin",
+        `target='${escapeShell(bin)}'`,
+        'if [ -z "$target" ] || [ ! -e "$target" ]; then target=$(command -v agent 2>/dev/null); fi',
+        'if [ -z "$target" ] || [ ! -e "$target" ]; then exit 0; fi',
+        // Prefer a previously saved real binary so re-linking does not wrap our
+        // own PATH wrapper (which would recurse on exec).
+        "real=''",
+        "if [ -e /root/.local/bin/agent.real ]; then",
+        "  real=$(readlink -f /root/.local/bin/agent.real 2>/dev/null || printf '%s' /root/.local/bin/agent.real)",
+        "fi",
+        'if [ -z "$real" ] || [ ! -e "$real" ]; then',
+        '  real=$(readlink -f "$target" 2>/dev/null || printf "%s" "$target")',
+        "fi",
+        // If target already is our wrapper, dig out the exec line fallback.
+        'if [ -f "$real" ] && head -n 1 "$real" 2>/dev/null | grep -q "^#!/bin/sh$" \\',
+        '   && grep -q "agent.real" "$real" 2>/dev/null; then',
+        "  if [ -e /root/.local/bin/agent.real ]; then",
+        "    real=$(readlink -f /root/.local/bin/agent.real 2>/dev/null || printf '%s' /root/.local/bin/agent.real)",
+        "  fi",
+        "fi",
+        'if [ -z "$real" ] || [ ! -e "$real" ]; then exit 0; fi',
+        'ln -sfn "$real" /root/.local/bin/agent.real',
+        "bash_abs=/usr/local/bin/bash",
+        "[ -x /bin/bash ] && bash_abs=/bin/bash",
+        "[ -x /usr/bin/bash ] && bash_abs=/usr/bin/bash",
+        // Wrapper forces a full PATH before exec so nested #!/usr/bin/env bash
+        // shebangs resolve even on old snapshots with stripped guest PATH.
+        "cat > /usr/local/bin/agent <<'WRAP'",
+        "#!/bin/sh",
+        'export PATH="/usr/local/bin:/root/.local/bin:/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin"',
+        'exec /root/.local/bin/agent.real "$@"',
+        "WRAP",
+        "chmod +x /usr/local/bin/agent",
+        "ln -sfn /usr/local/bin/agent /root/.local/bin/agent",
+        'if [ -f "$real" ] && [ ! -L "$real" ]; then',
+        '  first=$(head -n 1 "$real" 2>/dev/null || true)',
+        '  case "$first" in',
+        "  '#!/usr/bin/env bash'*)",
+        '    sed -i "1s|^#!/usr/bin/env bash.*|#!${bash_abs}|" "$real" 2>/dev/null || true',
+        '    chmod +x "$real" 2>/dev/null || true',
+        "    ;;",
+        "  esac",
+        "fi",
+        'PATH="/usr/local/bin:/root/.local/bin" /usr/bin/env bash -c "true" || exit 1',
+        "exit 0",
+      ].join("\n"),
     });
   }
 
