@@ -2285,7 +2285,7 @@ export class TaskService {
         "fi",
         "echo 'no-https-client'",
         "exit 127",
-      ].join("; "),
+      ].join("\n"),
     });
     const combined = `${result.stdout}\n${result.stderr}`.trim();
     if (/guest-fs-corrupt|Structure needs cleaning/i.test(combined)) {
