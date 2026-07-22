@@ -45,11 +45,12 @@ func Run(ctx context.Context, cwd, command string, env []string) (*Result, error
 	err := cmd.Run()
 	exitCode := 0
 	if err != nil {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		var exitErr *exec.ExitError
 		if ok := asExitError(err, &exitErr); ok {
 			exitCode = exitErr.ExitCode()
-		} else if ctx.Err() != nil {
-			return nil, ctx.Err()
 		} else {
 			return nil, err
 		}
@@ -198,11 +199,15 @@ func RunStreamingUntil(
 	err = cmd.Wait()
 	exitCode := 0
 	if err != nil {
+		// CommandContext kills the process on cancel; Wait then returns ExitError
+		// with code -1. Prefer the context error so callers can report timeouts
+		// instead of a cryptic "exited with code -1".
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		var exitErr *exec.ExitError
 		if ok := asExitError(err, &exitErr); ok {
 			exitCode = exitErr.ExitCode()
-		} else if ctx.Err() != nil {
-			return nil, ctx.Err()
 		} else if stopRequested {
 			// Process killed after successful early stop.
 		} else {
@@ -281,11 +286,12 @@ func RunStreaming(ctx context.Context, cwd, command string, env []string, onOutp
 	err = cmd.Wait()
 	exitCode := 0
 	if err != nil {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		var exitErr *exec.ExitError
 		if ok := asExitError(err, &exitErr); ok {
 			exitCode = exitErr.ExitCode()
-		} else if ctx.Err() != nil {
-			return nil, ctx.Err()
 		} else {
 			return nil, err
 		}

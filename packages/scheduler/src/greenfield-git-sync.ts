@@ -2,7 +2,12 @@ export const GREENFIELD_FETCH_TIMEOUT_SEC = 30;
 export const GREENFIELD_FETCH_RETRIES = 2;
 
 export function isAgentTimeoutMessage(message: string): boolean {
-  return /did not finish within/i.test(message);
+  return (
+    /did not finish within/i.test(message) ||
+    /timed out after/i.test(message) ||
+    /context deadline exceeded/i.test(message) ||
+    /exited with code -1/i.test(message)
+  );
 }
 
 /** Fetch origin/main with retries; hard-reset working tree onto remote tip. */

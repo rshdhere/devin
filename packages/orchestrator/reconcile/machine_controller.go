@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/client-go/util/retry"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -184,34 +185,38 @@ func (r *FirecrackerMachineReconciler) finalize(ctx context.Context, machine *de
 }
 
 func (r *FirecrackerMachineReconciler) syncSandboxProvisioning(ctx context.Context, machine *devinv1.FirecrackerMachine) error {
-	sandbox := &devinv1.Sandbox{}
-	if err := r.Get(ctx, client.ObjectKey{Namespace: machine.Namespace, Name: machine.Spec.SandboxName}, sandbox); err != nil {
-		return client.IgnoreNotFound(err)
-	}
+	return retry.RetryOnConflict(retry.DefaultBackoff, func() error {
+		sandbox := &devinv1.Sandbox{}
+		if err := r.Get(ctx, client.ObjectKey{Namespace: machine.Namespace, Name: machine.Spec.SandboxName}, sandbox); err != nil {
+			return client.IgnoreNotFound(err)
+		}
 
-	sandbox.Status.Phase = devinv1.SandboxPhaseProvisioning
-	sandbox.Status.VMID = machine.Status.VMID
-	sandbox.Status.Host = machine.Status.Host
-	sandbox.Status.MachineName = machine.Name
-	sandbox.Status.Message = machine.Status.Message
+		sandbox.Status.Phase = devinv1.SandboxPhaseProvisioning
+		sandbox.Status.VMID = machine.Status.VMID
+		sandbox.Status.Host = machine.Status.Host
+		sandbox.Status.MachineName = machine.Name
+		sandbox.Status.Message = machine.Status.Message
 
-	return r.Status().Update(ctx, sandbox)
+		return r.Status().Update(ctx, sandbox)
+	})
 }
 
 func (r *FirecrackerMachineReconciler) syncSandboxStatus(ctx context.Context, machine *devinv1.FirecrackerMachine) error {
-	sandbox := &devinv1.Sandbox{}
-	if err := r.Get(ctx, client.ObjectKey{Namespace: machine.Namespace, Name: machine.Spec.SandboxName}, sandbox); err != nil {
-		return client.IgnoreNotFound(err)
-	}
+	return retry.RetryOnConflict(retry.DefaultBackoff, func() error {
+		sandbox := &devinv1.Sandbox{}
+		if err := r.Get(ctx, client.ObjectKey{Namespace: machine.Namespace, Name: machine.Spec.SandboxName}, sandbox); err != nil {
+			return client.IgnoreNotFound(err)
+		}
 
-	sandbox.Status.Phase = devinv1.SandboxPhaseRunning
-	sandbox.Status.VMID = machine.Status.VMID
-	sandbox.Status.Host = machine.Status.Host
-	sandbox.Status.RuntimeURL = machine.Status.RuntimeURL
-	sandbox.Status.MachineName = machine.Name
-	sandbox.Status.Message = machine.Status.Message
+		sandbox.Status.Phase = devinv1.SandboxPhaseRunning
+		sandbox.Status.VMID = machine.Status.VMID
+		sandbox.Status.Host = machine.Status.Host
+		sandbox.Status.RuntimeURL = machine.Status.RuntimeURL
+		sandbox.Status.MachineName = machine.Name
+		sandbox.Status.Message = machine.Status.Message
 
-	return r.Status().Update(ctx, sandbox)
+		return r.Status().Update(ctx, sandbox)
+	})
 }
 
 func (r *FirecrackerMachineReconciler) lookupHost(ctx context.Context, hostName string) (*devinv1.FirecrackerHost, error) {
@@ -235,24 +240,28 @@ func (r *FirecrackerMachineReconciler) fail(ctx context.Context, machine *devinv
 }
 
 func (r *FirecrackerMachineReconciler) syncSandboxFailed(ctx context.Context, machine *devinv1.FirecrackerMachine, message string) error {
-	sandbox := &devinv1.Sandbox{}
-	if err := r.Get(ctx, client.ObjectKey{Namespace: machine.Namespace, Name: machine.Spec.SandboxName}, sandbox); err != nil {
-		return client.IgnoreNotFound(err)
-	}
-	sandbox.Status.Phase = devinv1.SandboxPhaseFailed
-	sandbox.Status.Message = message
-	return r.Status().Update(ctx, sandbox)
+	return retry.RetryOnConflict(retry.DefaultBackoff, func() error {
+		sandbox := &devinv1.Sandbox{}
+		if err := r.Get(ctx, client.ObjectKey{Namespace: machine.Namespace, Name: machine.Spec.SandboxName}, sandbox); err != nil {
+			return client.IgnoreNotFound(err)
+		}
+		sandbox.Status.Phase = devinv1.SandboxPhaseFailed
+		sandbox.Status.Message = message
+		return r.Status().Update(ctx, sandbox)
+	})
 }
 
 func (r *FirecrackerMachineReconciler) syncSandboxCapacityWait(ctx context.Context, machine *devinv1.FirecrackerMachine, message string) error {
-	sandbox := &devinv1.Sandbox{}
-	if err := r.Get(ctx, client.ObjectKey{Namespace: machine.Namespace, Name: machine.Spec.SandboxName}, sandbox); err != nil {
-		return client.IgnoreNotFound(err)
-	}
-	sandbox.Status.Phase = devinv1.SandboxPhaseProvisioning
-	sandbox.Status.MachineName = machine.Name
-	sandbox.Status.Message = message
-	return r.Status().Update(ctx, sandbox)
+	return retry.RetryOnConflict(retry.DefaultBackoff, func() error {
+		sandbox := &devinv1.Sandbox{}
+		if err := r.Get(ctx, client.ObjectKey{Namespace: machine.Namespace, Name: machine.Spec.SandboxName}, sandbox); err != nil {
+			return client.IgnoreNotFound(err)
+		}
+		sandbox.Status.Phase = devinv1.SandboxPhaseProvisioning
+		sandbox.Status.MachineName = machine.Name
+		sandbox.Status.Message = message
+		return r.Status().Update(ctx, sandbox)
+	})
 }
 
 func isRetryableProvisionError(err error) bool {

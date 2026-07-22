@@ -4467,7 +4467,8 @@ function escapeShell(value: string): string {
 
 function resolveAgentTimeoutMinutes(): number {
   const raw = process.env.AGENT_RUN_TIMEOUT_MIN?.trim();
-  const defaultMinutes = 30;
+  // Greenfield cursor runs commonly need >30m (install + implement + verify).
+  const defaultMinutes = 60;
   if (!raw) {
     return defaultMinutes;
   }

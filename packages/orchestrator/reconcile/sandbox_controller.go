@@ -8,6 +8,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/client-go/util/retry"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -37,6 +38,9 @@ func (r *SandboxReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	if !controllerutil.ContainsFinalizer(&sandbox, sandboxFinalizer) {
 		controllerutil.AddFinalizer(&sandbox, sandboxFinalizer)
 		if err := r.Update(ctx, &sandbox); err != nil {
+			if apierrors.IsConflict(err) {
+				return ctrl.Result{Requeue: true}, nil
+			}
 			return ctrl.Result{}, err
 		}
 	}
@@ -46,6 +50,11 @@ func (r *SandboxReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	}
 
 	if err := r.ensureMachine(ctx, &sandbox); err != nil {
+		// Concurrent status writers (machine ↔ sandbox) race often; never mark
+		// the sandbox Failed for a conflict — just retry.
+		if apierrors.IsConflict(err) {
+			return ctrl.Result{Requeue: true}, nil
+		}
 		return r.fail(ctx, &sandbox, err)
 	}
 
@@ -94,26 +103,38 @@ func (r *SandboxReconciler) ensureMachine(ctx context.Context, sandbox *devinv1.
 	}
 
 	if latestMachine.Status.Phase == devinv1.MachinePhaseRunning {
-		sandbox.Status.Phase = devinv1.SandboxPhaseRunning
-		sandbox.Status.VMID = latestMachine.Status.VMID
-		sandbox.Status.Host = latestMachine.Status.Host
-		sandbox.Status.RuntimeURL = latestMachine.Status.RuntimeURL
-		sandbox.Status.MachineName = latestMachine.Name
-		sandbox.Status.Message = latestMachine.Status.Message
-		return r.Status().Update(ctx, sandbox)
+		return r.patchSandboxFromMachine(ctx, sandbox.Name, sandbox.Namespace, latestMachine, devinv1.SandboxPhaseRunning)
 	}
 
 	if latestMachine.Status.Phase == devinv1.MachinePhaseFailed {
 		return fmt.Errorf("%s", firstNonEmpty(latestMachine.Status.Message, "firecracker machine failed"))
 	}
 
-	message := firstNonEmpty(latestMachine.Status.Message, "provisioning firecracker microVM")
-	sandbox.Status.Phase = devinv1.SandboxPhaseProvisioning
-	sandbox.Status.VMID = latestMachine.Status.VMID
-	sandbox.Status.Host = latestMachine.Status.Host
-	sandbox.Status.MachineName = latestMachine.Name
-	sandbox.Status.Message = message
-	return r.Status().Update(ctx, sandbox)
+	return r.patchSandboxFromMachine(ctx, sandbox.Name, sandbox.Namespace, latestMachine, devinv1.SandboxPhaseProvisioning)
+}
+
+func (r *SandboxReconciler) patchSandboxFromMachine(
+	ctx context.Context,
+	name, namespace string,
+	machine *devinv1.FirecrackerMachine,
+	phase devinv1.SandboxPhase,
+) error {
+	return retry.RetryOnConflict(retry.DefaultBackoff, func() error {
+		latest := &devinv1.Sandbox{}
+		if err := r.Get(ctx, client.ObjectKey{Namespace: namespace, Name: name}, latest); err != nil {
+			return err
+		}
+		latest.Status.Phase = phase
+		latest.Status.VMID = machine.Status.VMID
+		latest.Status.Host = machine.Status.Host
+		latest.Status.RuntimeURL = machine.Status.RuntimeURL
+		latest.Status.MachineName = machine.Name
+		latest.Status.Message = firstNonEmpty(machine.Status.Message, latest.Status.Message)
+		if phase == devinv1.SandboxPhaseProvisioning && latest.Status.Message == "" {
+			latest.Status.Message = "provisioning firecracker microVM"
+		}
+		return r.Status().Update(ctx, latest)
+	})
 }
 
 func (r *SandboxReconciler) finalize(ctx context.Context, sandbox *devinv1.Sandbox) (ctrl.Result, error) {
@@ -130,6 +151,9 @@ func (r *SandboxReconciler) finalize(ctx context.Context, sandbox *devinv1.Sandb
 
 		controllerutil.RemoveFinalizer(sandbox, sandboxFinalizer)
 		if err := r.Update(ctx, sandbox); err != nil {
+			if apierrors.IsConflict(err) {
+				return ctrl.Result{Requeue: true}, nil
+			}
 			return ctrl.Result{}, err
 		}
 	}
@@ -147,15 +171,17 @@ func (r *SandboxReconciler) writeStatus(
 	phase devinv1.SandboxPhase,
 	message string,
 ) (ctrl.Result, error) {
-	latest := &devinv1.Sandbox{}
-	if err := r.Get(ctx, client.ObjectKeyFromObject(sandbox), latest); err != nil {
-		return ctrl.Result{}, err
-	}
+	err := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
+		latest := &devinv1.Sandbox{}
+		if err := r.Get(ctx, client.ObjectKeyFromObject(sandbox), latest); err != nil {
+			return err
+		}
 
-	latest.Status.Phase = phase
-	latest.Status.Message = message
-
-	if err := r.Status().Update(ctx, latest); err != nil {
+		latest.Status.Phase = phase
+		latest.Status.Message = message
+		return r.Status().Update(ctx, latest)
+	})
+	if err != nil {
 		return ctrl.Result{}, err
 	}
 

@@ -145,7 +145,7 @@ umask 077
   printf 'GITHUB_BOT_TOKEN=%s\n' "${GITHUB_BOT_TOKEN}"
   echo "GITHUB_BOT_NAME=baby-devin-bot"
   echo "GITHUB_BOT_EMAIL=baby-devin-bot@users.noreply.github.com"
-  echo "AGENT_RUN_TIMEOUT_MIN=30"
+  echo "AGENT_RUN_TIMEOUT_MIN=60"
 } >/etc/devin/scheduler-secrets.env
 chmod 600 /etc/devin/scheduler-secrets.env
 cat >/etc/systemd/system/devin-scheduler.service.d/secrets.conf <<EOF

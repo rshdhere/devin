@@ -12,6 +12,10 @@ describe("greenfield-git-sync", () => {
         "Agent run for task abc did not finish within 1800s",
       ),
     ).toBe(true);
+    expect(isAgentTimeoutMessage("Agent run timed out after 30m0s")).toBe(true);
+    expect(isAgentTimeoutMessage("cursor agent exited with code -1")).toBe(
+      true,
+    );
     expect(isAgentTimeoutMessage("cursor agent exited with code 1")).toBe(
       false,
     );

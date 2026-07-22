@@ -158,7 +158,7 @@ ExecStart=/usr/bin/docker run --rm --name scheduler \\
   -e DEFAULT_AGENT=cursor \\
   -e SANDBOX_READY_TIMEOUT_SECONDS=300 \\
   -e RUNTIME_READY_TIMEOUT_SECONDS=60 \\
-  -e AGENT_RUN_TIMEOUT_MIN=30 \\
+  -e AGENT_RUN_TIMEOUT_MIN=60 \\
   -e PREVIEW_BASE_DOMAIN=3897534985y30589y3ruwehrkjsehfr8er34858w36.devin.baby \\
   ${container_registry}/devin-scheduler:${image_tag}
 ExecStop=/usr/bin/docker stop scheduler
