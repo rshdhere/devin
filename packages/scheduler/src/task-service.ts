@@ -1941,6 +1941,34 @@ export class TaskService {
       githubToken,
     });
 
+    // Greenfield hydrate already wrote the same files the control plane pushed.
+    // Skip origin align entirely for greenfield — guest GitHub egress is often
+    // down this early and the failed fetch burns the UI on an empty agent panel.
+    if (job.greenfieldPushed) {
+      await runtime.gitCommit({
+        taskId: task.id,
+        cwd: repoCwd,
+        env: gitEnv,
+        message: buildCommitMessage(
+          `devin: initialize ${task.title ?? "project"}`,
+        ),
+        paths: ["."],
+      });
+      this.emit(
+        "agent.log",
+        task.id,
+        "Hydrated greenfield scaffold locally (skipped origin align)",
+        { repository: task.repository, skippedAlign: true },
+      );
+      return;
+    }
+
+    this.emit(
+      "agent.log",
+      task.id,
+      "Aligning hydrated repo with origin/main (best-effort)",
+      { repository: task.repository },
+    );
     const aligned = await this.alignHydratedRepoWithOriginMain(
       runtime,
       task.id,
@@ -2144,6 +2172,9 @@ export class TaskService {
     runtime: RuntimeClient,
     taskId: string,
   ): Promise<void> {
+    this.emit("agent.log", taskId, "Checking sandbox outbound connectivity", {
+      phase: "egress_probe",
+    });
     for (let attempt = 0; attempt < 3; attempt += 1) {
       await this.ensureSandboxDns(runtime, taskId);
       if (attempt > 0) {
@@ -2247,9 +2278,11 @@ export class TaskService {
     taskId: string,
     host: string,
   ): Promise<{ ok: boolean; detail: string }> {
+    // Wrap getent in timeout — a wedged resolver can hang for many minutes and
+    // leave the UI sitting on an empty agent panel after hydrate.
     const result = await runtime.terminalAllowFailure({
       taskId,
-      command: `getent ahostsv4 '${escapeShell(host)}' 2>/dev/null | awk 'NR==1{print $1; exit}' || getent ahosts '${escapeShell(host)}' 2>/dev/null | awk '/STREAM/{print $1; exit}'`,
+      command: `timeout 5 getent ahostsv4 '${escapeShell(host)}' 2>/dev/null | awk 'NR==1{print $1; exit}' || timeout 5 getent ahosts '${escapeShell(host)}' 2>/dev/null | awk '/STREAM/{print $1; exit}'`,
     });
     const address = result.stdout.trim();
     if (result.exitCode === 0 && address) {
@@ -2272,7 +2305,7 @@ export class TaskService {
         "set +e",
         `url='${escapeShell(url)}'`,
         "if command -v curl >/dev/null 2>&1; then",
-        "  out=$(curl -4sS --connect-timeout 10 --max-time 15 -o /dev/null -w '%{http_code}' \"$url\" 2>&1)",
+        "  out=$(curl -4sS --connect-timeout 5 --max-time 8 -o /dev/null -w '%{http_code}' \"$url\" 2>&1)",
         "  code=$?",
         '  echo "$out"',
         "  if echo \"$out\" | grep -qi 'Structure needs cleaning'; then",
@@ -2281,7 +2314,7 @@ export class TaskService {
         "  exit $code",
         "fi",
         "if command -v node >/dev/null 2>&1; then",
-        '  node -e "fetch(process.argv[1],{signal:AbortSignal.timeout(15000)}).then(r=>{console.log(r.status); process.exit(0)}).catch(e=>{console.error(String(e)); process.exit(1)})" "$url"',
+        '  node -e "fetch(process.argv[1],{signal:AbortSignal.timeout(8000)}).then(r=>{console.log(r.status); process.exit(0)}).catch(e=>{console.error(String(e)); process.exit(1)})" "$url"',
         "  exit $?",
         "fi",
         "echo 'no-https-client'",

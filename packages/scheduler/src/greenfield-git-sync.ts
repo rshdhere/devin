@@ -1,5 +1,5 @@
-export const GREENFIELD_FETCH_TIMEOUT_SEC = 30;
-export const GREENFIELD_FETCH_RETRIES = 2;
+export const GREENFIELD_FETCH_TIMEOUT_SEC = 8;
+export const GREENFIELD_FETCH_RETRIES = 1;
 
 export function isAgentTimeoutMessage(message: string): boolean {
   return (
