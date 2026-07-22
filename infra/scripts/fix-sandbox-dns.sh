@@ -117,6 +117,15 @@ if command -v iptables >/dev/null; then
       || iptables -I DOCKER-USER 1 -d 192.168.127.0/24 -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
   fi
 fi
+
+# Shared static guest IP leaves ESTABLISHED conntrack entries that poison the
+# next microVM's NAT. Flush them after rewriting iptables.
+if command -v conntrack >/dev/null; then
+  echo "Flushing guest conntrack entries for 192.168.127.0/24"
+  conntrack -D -s 192.168.127.0/24 >/dev/null 2>&1 || true
+  conntrack -D -d 192.168.127.0/24 >/dev/null 2>&1 || true
+fi
+
 echo ""
 echo "Restart firecracker and rebuild runtime snapshots for full effect:"
 echo "  sudo systemctl restart devin-firecracker"

@@ -150,7 +150,31 @@ func cleanupOrphanedNetNS(networkName, confDir, binPath string) error {
 }
 
 func cleanupStaleCNIChains() error {
-	out, err := exec.Command("iptables", "-t", "nat", "-S").CombinedOutput()
+	// Drop per-VM POSTROUTING jumps that shadow the subnet MASQUERADE rule.
+	// These accumulate across microVM lifecycles and black-hole guest egress.
+	out, err := exec.Command("iptables-save", "-t", "nat").CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("iptables-save nat: %w: %s", err, strings.TrimSpace(string(out)))
+	}
+	var kept []string
+	var postroutingDeleted int
+	for _, line := range strings.Split(string(out), "\n") {
+		if strings.HasPrefix(line, "-A POSTROUTING ") && strings.Contains(line, " -j CNI-") {
+			postroutingDeleted++
+			continue
+		}
+		kept = append(kept, line)
+	}
+	if postroutingDeleted > 0 {
+		restore := exec.Command("iptables-restore")
+		restore.Stdin = strings.NewReader(strings.Join(kept, "\n") + "\n")
+		if restoreOut, restoreErr := restore.CombinedOutput(); restoreErr != nil {
+			return fmt.Errorf("iptables-restore after cni jump purge: %w: %s", restoreErr, strings.TrimSpace(string(restoreOut)))
+		}
+		slog.Info("removed stale cni POSTROUTING jumps", "count", postroutingDeleted)
+	}
+
+	out, err = exec.Command("iptables", "-t", "nat", "-S").CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("list nat chains: %w: %s", err, strings.TrimSpace(string(out)))
 	}
@@ -173,5 +197,26 @@ func cleanupStaleCNIChains() error {
 	if cleaned > 0 {
 		slog.Info("removed stale cni iptables chains", "count", cleaned)
 	}
+
+	// Shared static guest IP (192.168.127.8) leaves ESTABLISHED conntrack entries
+	// that poison NAT for the next microVM. Flush them whenever we tidy CNI.
+	flushGuestConntrack()
+	ensureSubnetMasquerade()
 	return nil
+}
+
+func flushGuestConntrack() {
+	if _, err := exec.LookPath("conntrack"); err != nil {
+		return
+	}
+	_ = exec.Command("conntrack", "-D", "-s", "192.168.127.0/24").Run()
+	_ = exec.Command("conntrack", "-D", "-d", "192.168.127.0/24").Run()
+}
+
+func ensureSubnetMasquerade() {
+	check := exec.Command("iptables", "-t", "nat", "-C", "POSTROUTING", "-s", "192.168.127.0/24", "-j", "MASQUERADE")
+	if check.Run() == nil {
+		return
+	}
+	_ = exec.Command("iptables", "-t", "nat", "-I", "POSTROUTING", "1", "-s", "192.168.127.0/24", "-j", "MASQUERADE").Run()
 }

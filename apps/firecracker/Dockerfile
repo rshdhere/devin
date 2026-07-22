@@ -16,7 +16,7 @@ RUN git clone https://github.com/awslabs/tc-redirect-tap.git /tmp/tc-redirect-ta
 FROM debian:bookworm-slim
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates curl iproute2 iptables \
+    ca-certificates curl iproute2 iptables conntrack \
     && rm -rf /var/lib/apt/lists/*
 
 ARG FIRECRACKER_VERSION=1.8.0
