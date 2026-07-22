@@ -5,6 +5,8 @@ import (
 	"strings"
 )
 
+const guestPathPrefix = "/usr/local/bin:/root/.local/bin:/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin"
+
 func envValue(req RunRequest, key string) string {
 	if req.Env != nil {
 		if value := req.Env[key]; value != "" {
@@ -15,14 +17,15 @@ func envValue(req RunRequest, key string) string {
 }
 
 func mergeEnv(req RunRequest, extra ...string) []string {
-	// Cursor CLI installs under /root/.local/bin; login shells inside guests
-	// sometimes drop that. Always prepend known agent locations.
+	// Cursor CLI uses #!/usr/bin/env bash — env looks up bash on PATH.
+	// Guests sometimes boot with a PATH that omits /bin:/usr/bin, so always
+	// prepend a full system path plus known agent install locations.
 	path := envValue(req, "PATH")
 	if path == "" {
 		path = os.Getenv("PATH")
 	}
 	merged := []string{
-		"PATH=/usr/local/bin:/root/.local/bin:" + path,
+		"PATH=" + guestPathPrefix + pathSuffix(path),
 	}
 	merged = append(merged, extra...)
 	if req.Env == nil {
@@ -35,6 +38,14 @@ func mergeEnv(req RunRequest, extra ...string) []string {
 		merged = append(merged, key+"="+value)
 	}
 	return merged
+}
+
+func pathSuffix(path string) string {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return ""
+	}
+	return ":" + path
 }
 
 // resolveCursorBin prefers request/env overrides, then known install paths from

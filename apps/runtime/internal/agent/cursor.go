@@ -71,8 +71,9 @@ func (r *CursorRunner) Run(
 
 	// Non-login shell + explicit PATH: guest login profiles often wipe PATH and
 	// turn an absolute-or-resolved binary lookup into `agent: not found`.
+	// Include /usr/bin:/bin so `#!/usr/bin/env bash` shebangs resolve.
 	command := fmt.Sprintf(
-		`export PATH="/usr/local/bin:/root/.local/bin:$PATH"; exec %s %s`,
+		`export PATH="/usr/local/bin:/root/.local/bin:/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin:$PATH"; exec %s %s`,
 		shellQuote(bin),
 		joinShellArgs(args),
 	)
@@ -205,7 +206,7 @@ func ensureCursorBin(
 
 	install := `set +e
 export HOME="${HOME:-/root}"
-export PATH="/usr/local/bin:/root/.local/bin:$HOME/.local/bin:$PATH"
+export PATH="/usr/local/bin:/root/.local/bin:$HOME/.local/bin:/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin:$PATH"
 curl https://cursor.com/install -fsS | bash
 # Re-resolve after install — do not trust a single hard-coded path.
 for candidate in \
@@ -259,7 +260,7 @@ exit 1
 func whichCursorBin(ctx context.Context, workDir, bin string, env []string) (string, error) {
 	script := `set +e
 export HOME="${HOME:-/root}"
-export PATH="/usr/local/bin:/root/.local/bin:$HOME/.local/bin:$PATH"
+export PATH="/usr/local/bin:/root/.local/bin:$HOME/.local/bin:/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin:$PATH"
 for candidate in \
   ` + shellQuote(bin) + ` \
   /usr/local/bin/agent \

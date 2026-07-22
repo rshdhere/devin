@@ -1097,6 +1097,7 @@ export class TaskService {
           );
         } else {
           if (task.agent === "cursor" && runtime) {
+            await this.ensureBashInSandbox(runtime, task.id);
             await this.ensureCursorAgentInSandbox(runtime, task.id);
           }
           runResult = await runtime.runAndWait(
@@ -2908,6 +2909,51 @@ export class TaskService {
   }
 
   /**
+   * Cursor agent CLI shebang is `#!/usr/bin/env bash`. Guests with a stripped
+   * PATH (or a rootfs missing bash) fail immediately with:
+   *   /usr/bin/env: 'bash': No such file or directory
+   */
+  private async ensureBashInSandbox(
+    runtime: RuntimeClient,
+    taskId: string,
+  ): Promise<void> {
+    const probe = await runtime.terminalAllowFailure({
+      taskId,
+      command: [
+        "set +e",
+        'export PATH="/usr/local/bin:/root/.local/bin:/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin:$PATH"',
+        "if command -v bash >/dev/null 2>&1; then",
+        "  command -v bash",
+        "  exit 0",
+        "fi",
+        "if [ -x /bin/bash ]; then",
+        "  echo /bin/bash",
+        "  exit 0",
+        "fi",
+        "if [ -x /usr/bin/bash ]; then",
+        "  echo /usr/bin/bash",
+        "  exit 0",
+        "fi",
+        "if command -v apt-get >/dev/null 2>&1; then",
+        "  apt-get update -qq >/tmp/devin-bash-apt.log 2>&1",
+        "  apt-get install -y -qq bash >/tmp/devin-bash-apt.log 2>&1",
+        "fi",
+        'export PATH="/usr/local/bin:/root/.local/bin:/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin:$PATH"',
+        "command -v bash || exit 1",
+      ].join("\n"),
+    });
+    if (probe.exitCode !== 0) {
+      throw new Error(
+        "Sandbox has no bash (/usr/bin/env bash fails). Rebuild the agent Firecracker snapshot " +
+          "with bash installed (runtime/agent/Dockerfile).",
+      );
+    }
+    this.emit("agent.log", taskId, "bash available in sandbox", {
+      detail: probe.stdout.trim().slice(0, 120),
+    });
+  }
+
+  /**
    * Guests sometimes boot from snapshots where `agent` is missing or off PATH.
    * Prefer locating a baked-in binary. Online install is a short fallback — the
    * installer often succeeds while a naive `test -x /root/...` check still fails
@@ -2956,7 +3002,7 @@ export class TaskService {
       command: [
         "set +e",
         'export HOME="${HOME:-/root}"',
-        'export PATH="/usr/local/bin:/root/.local/bin:$HOME/.local/bin:$PATH"',
+        'export PATH="/usr/local/bin:/root/.local/bin:$HOME/.local/bin:/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin:$PATH"',
         "curl https://cursor.com/install -fsS | bash",
         "ec=$?",
         'echo "cursor_install_exit=$ec home=$HOME"',
@@ -3010,7 +3056,7 @@ export class TaskService {
     const findCmd = [
       "set +e",
       'export HOME="${HOME:-/root}"',
-      'export PATH="/usr/local/bin:/root/.local/bin:$HOME/.local/bin:$PATH"',
+      'export PATH="/usr/local/bin:/root/.local/bin:$HOME/.local/bin:/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin:$PATH"',
       "for candidate in \\",
       "  /usr/local/bin/agent \\",
       "  /root/.local/bin/agent \\",

@@ -36,7 +36,7 @@ func Run(ctx context.Context, cwd, command string, env []string) (*Result, error
 
 	cmd := exec.CommandContext(ctx, "/bin/sh", "-c", command)
 	cmd.Dir = filepath.Clean(cwd)
-	cmd.Env = append(os.Environ(), env...)
+	cmd.Env = mergeProcessEnv(env)
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -79,6 +79,34 @@ func asExitError(err error, target **exec.ExitError) bool {
 	return false
 }
 
+// mergeProcessEnv starts from the current process environment and applies
+// overrides. Later duplicate keys replace earlier ones so callers can fix PATH.
+func mergeProcessEnv(overrides []string) []string {
+	envMap := make(map[string]string)
+	order := make([]string, 0, 64)
+	add := func(entry string) {
+		key, value, ok := strings.Cut(entry, "=")
+		if !ok || key == "" {
+			return
+		}
+		if _, exists := envMap[key]; !exists {
+			order = append(order, key)
+		}
+		envMap[key] = value
+	}
+	for _, entry := range os.Environ() {
+		add(entry)
+	}
+	for _, entry := range overrides {
+		add(entry)
+	}
+	out := make([]string, 0, len(order))
+	for _, key := range order {
+		out = append(out, key+"="+envMap[key])
+	}
+	return out
+}
+
 func CombinedOutput(result *Result) string {
 	if result.Stderr == "" {
 		return result.Stdout
@@ -109,13 +137,13 @@ func RunStreamingUntil(
 
 	cmd := exec.CommandContext(ctx, "/bin/sh", "-c", command)
 	cmd.Dir = filepath.Clean(cwd)
-	cmd.Env = append(os.Environ(), env...)
+	cmd.Env = mergeProcessEnv(env)
 
 	stdoutPipe, err := cmd.StdoutPipe()
 	if err != nil {
 		return nil, fmt.Errorf("stdout pipe: %w", err)
 	}
-stderrPipe, err := cmd.StderrPipe()
+	stderrPipe, err := cmd.StderrPipe()
 	if err != nil {
 		return nil, fmt.Errorf("stderr pipe: %w", err)
 	}
@@ -208,7 +236,7 @@ func RunStreaming(ctx context.Context, cwd, command string, env []string, onOutp
 
 	cmd := exec.CommandContext(ctx, "/bin/sh", "-c", command)
 	cmd.Dir = filepath.Clean(cwd)
-	cmd.Env = append(os.Environ(), env...)
+	cmd.Env = mergeProcessEnv(env)
 
 	stdoutPipe, err := cmd.StdoutPipe()
 	if err != nil {

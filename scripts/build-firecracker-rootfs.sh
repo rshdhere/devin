@@ -76,6 +76,11 @@ if [[ "${RUNTIME}" == "agent" ]]; then
     exit 1
   fi
   echo "cursor agent present: ${AGENT_BIN#${MOUNT_DIR}}"
+  if [[ ! -x "${MOUNT_DIR}/bin/bash" && ! -x "${MOUNT_DIR}/usr/bin/bash" ]]; then
+    echo "ERROR: bash missing from ${IMAGE}." >&2
+    echo "Cursor agent shebang is #!/usr/bin/env bash — install bash in runtime/agent/Dockerfile." >&2
+    exit 1
+  fi
   # Ensure a stable path for the runtime supervisor (absolute path inside guest).
   mkdir -p "${MOUNT_DIR}/usr/local/bin"
   if [[ ! -e "${MOUNT_DIR}/usr/local/bin/agent" ]]; then
