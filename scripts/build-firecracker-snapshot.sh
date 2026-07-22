@@ -92,7 +92,9 @@ if [[ -z "${HOST_GW}" ]]; then
   HOST_GW="192.168.127.1"
 fi
 IP_BOOTARG="ip=${GUEST_IP}::${HOST_GW}:255.255.255.0::eth0:off"
-BOOT_ARGS="console=ttyS0 reboot=k panic=1 pci=off ${IP_BOOTARG} init=/usr/local/bin/devin-runtime-supervisor"
+# random.trust_cpu=on unblocks getrandom/TLS when the host CPU provides RDRAND.
+# virtio-rng (/entropy) is also attached below for kernels without trusted CPU RNG.
+BOOT_ARGS="console=ttyS0 reboot=k panic=1 pci=off random.trust_cpu=on ${IP_BOOTARG} init=/usr/local/bin/devin-runtime-supervisor"
 
 curl -fsS --unix-socket "${SOCKET}" -X PUT "http://localhost/boot-source" \
   -H 'Content-Type: application/json' \
@@ -105,6 +107,13 @@ curl -fsS --unix-socket "${SOCKET}" -X PUT "http://localhost/drives/root" \
 curl -fsS --unix-socket "${SOCKET}" -X PUT "http://localhost/network-interfaces/eth0" \
   -H 'Content-Type: application/json' \
   -d "{\"iface_id\":\"eth0\",\"guest_mac\":\"${GUEST_MAC}\",\"host_dev_name\":\"${TAP_DEVICE}\"}" >/dev/null
+
+# Attach virtio-rng so the guest CRNG can initialize before the golden snapshot.
+if ! curl -fsS --unix-socket "${SOCKET}" -X PUT "http://localhost/entropy" \
+  -H 'Content-Type: application/json' \
+  -d '{}' >/dev/null; then
+  echo "warning: firecracker /entropy not available; relying on random.trust_cpu=on + runtime EnsureEntropy" >&2
+fi
 
 curl -fsS --unix-socket "${SOCKET}" -X PUT "http://localhost/actions" \
   -H 'Content-Type: application/json' \

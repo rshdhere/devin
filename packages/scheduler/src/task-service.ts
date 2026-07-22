@@ -1807,6 +1807,9 @@ export class TaskService {
     try {
       const viaApi = await runtime.ensureDns();
       if (viaApi) {
+        // Older guest runtimes only refresh resolv.conf; always seed entropy
+        // for snapshots that resume with an uninitialized CRNG.
+        await this.ensureSandboxEntropy(runtime, taskId);
         return;
       }
 
@@ -1826,12 +1829,58 @@ export class TaskService {
           },
         );
       }
+      await this.ensureSandboxEntropy(runtime, taskId);
     } catch (error) {
       const message =
         error instanceof Error ? error.message : "sandbox DNS setup failed";
       this.emit("agent.log", taskId, `Skipped sandbox DNS setup: ${message}`, {
         dnsSetupSkipped: true,
       });
+      await this.ensureSandboxEntropy(runtime, taskId);
+    }
+  }
+
+  /**
+   * Credit the guest kernel RNG so OpenSSL/Node getrandom() and HTTPS work.
+   * Firecracker golden snapshots often resume with crng_init=0 and no virtio-rng.
+   */
+  private async ensureSandboxEntropy(
+    runtime: RuntimeClient,
+    taskId: string,
+  ): Promise<void> {
+    const command = [
+      "perl - <<'PERL'",
+      "open U, '</dev/urandom' or exit 0;",
+      "sysread(U, $b, 256) == 256 or exit 0;",
+      "close U;",
+      "open R, '+<', '/dev/random' or exit 0;",
+      'ioctl(R, 0x40085203, pack("iia*", 2048, 256, $b)) or exit 0;',
+      "close R;",
+      'print "entropy_ok\\n";',
+      "PERL",
+    ].join("\n");
+    try {
+      const result = await runtime.terminalAllowFailure({ taskId, command });
+      if (result.exitCode === 0 && /entropy_ok/.test(result.stdout)) {
+        this.emit("agent.log", taskId, "Sandbox guest entropy credited", {
+          entropySeeded: true,
+        });
+        return;
+      }
+      this.emit("agent.log", taskId, "Sandbox guest entropy seed skipped", {
+        entropySeeded: false,
+        exitCode: result.exitCode,
+        detail: (result.stderr || result.stdout).trim(),
+      });
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "sandbox entropy setup failed";
+      this.emit(
+        "agent.log",
+        taskId,
+        `Skipped sandbox entropy setup: ${message}`,
+        { entropySetupSkipped: true },
+      );
     }
   }
 

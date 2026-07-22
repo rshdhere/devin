@@ -23,10 +23,13 @@ func EnsureDNS() {
 
 	if err := os.WriteFile("/etc/resolv.conf", []byte(defaultResolvConf), 0o644); err != nil {
 		slog.Warn("failed to configure guest DNS", "error", err)
-		return
+	} else {
+		slog.Info("configured guest DNS resolvers for sandbox egress")
 	}
 
-	slog.Info("configured guest DNS resolvers for sandbox egress")
+	// Always seed entropy when refreshing guest network state — old golden
+	// snapshots often resume with an uninitialized CRNG that blocks TLS.
+	EnsureEntropy()
 }
 
 // hasUnreachableNameserver detects resolvers copied from the execution host that
