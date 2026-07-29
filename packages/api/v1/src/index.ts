@@ -34,7 +34,7 @@ app.use((req, res, next) => {
 
 const authHandler = toNodeHandler(auth);
 
-app.all("/api/v1/auth/{*any}", (req, res, next) => {
+app.all("/api/v1/auth/{*any}", (req, res, _next) => {
   const originalSetHeader = res.setHeader.bind(res);
   res.setHeader = (
     name: string,
@@ -66,7 +66,7 @@ app.all("/api/v1/auth/{*any}", (req, res, next) => {
     return originalSetHeader(name, value);
   };
 
-  authHandler(req, res, next);
+  authHandler(req, res);
 });
 
 app.use(express.json());

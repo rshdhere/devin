@@ -2,6 +2,7 @@ import { db } from "@devin/drizzle";
 import { schema } from "@devin/drizzle/schema";
 import { sendMagicLinkEmail, sendVerificationEmail } from "@devin/email";
 import { betterAuth } from "better-auth";
+import type { BetterAuthPlugin } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { genericOAuth, magicLink } from "better-auth/plugins";
 import { oAuthProxy } from "better-auth/plugins/oauth-proxy";
@@ -48,7 +49,15 @@ if (windsurfClientId && windsurfClientSecret && windsurfDiscoveryUrl) {
   });
 }
 
-const authPlugins = [
+const authPlugins: BetterAuthPlugin[] = [
+  ...(shouldUseOAuthProxy()
+    ? [
+        oAuthProxy({
+          productionURL: resolveOAuthProductionUrl(),
+          currentURL: process.env.BETTER_AUTH_URL,
+        }),
+      ]
+    : []),
   magicLink({
     sendMagicLink: async ({ email, url }) => {
       await sendMagicLinkEmail({ to: email, url });
@@ -58,15 +67,6 @@ const authPlugins = [
     ? [genericOAuth({ config: oauthProviders })]
     : []),
 ];
-
-if (shouldUseOAuthProxy()) {
-  authPlugins.unshift(
-    oAuthProxy({
-      productionURL: resolveOAuthProductionUrl(),
-      currentURL: process.env.BETTER_AUTH_URL,
-    }),
-  );
-}
 
 function resolveCrossSubDomainCookieDomain(): string | undefined {
   const webAppUrl = process.env.WEB_APP_URL?.trim();

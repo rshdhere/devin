@@ -19,11 +19,3 @@ export async function requireAuth(
   req.auth = session;
   next();
 }
-
-declare global {
-  namespace Express {
-    interface Request {
-      auth?: Awaited<ReturnType<typeof auth.api.getSession>>;
-    }
-  }
-}
