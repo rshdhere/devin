@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { inferStackFromPrompt } from "@devin/types";
-import { greenfieldShellScaffoldFiles } from "./greenfield-shell-scaffold.js";
+import { greenfieldShellScaffoldFiles } from "./shell-scaffold.js";
 
 describe("greenfieldShellScaffoldFiles", () => {
   test("includes package.json for Next.js prompts", () => {

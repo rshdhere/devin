@@ -1,15 +1,34 @@
-# types
+# `@devin/types`
 
-To install dependencies:
+Shared TypeScript types and helpers used across the API, scheduler, and web app.
 
-```bash
-bun install
+## Exports
+
+| Area | Contents |
+| ---- | -------- |
+| Agents | `AgentProvider`, `usesRuntimeAgent`, `isTemplateAgent` |
+| Tasks | `Task`, `TaskStatus`, `CreateTaskRequest`, `GitHubPermissions` |
+| Events | `TaskEvent`, `TaskEventType` |
+| Diagnostics | Infra / task / sandbox probe types |
+| Runtime | `SANDBOX_RUNTIMES`, stack inference, `resolveRuntimeForTask` |
+
+```ts
+import {
+  resolveRuntimeForTask,
+  type Task,
+  type AgentProvider,
+} from "@devin/types";
 ```
 
-To run:
+## Layout
 
-```bash
-bun run index.ts
+```text
+src/
+  index.ts         # Public barrel
+  agents.ts
+  tasks.ts
+  events.ts
+  diagnostics.ts
+  runtime.ts
+  runtime.test.ts
 ```
-
-This project was created using `bun init` in bun v1.2.3. [Bun](https://bun.sh) is a fast all-in-one JavaScript runtime.

@@ -13,15 +13,15 @@ export {
   runtimeLabel,
 } from "@devin/types";
 export type { SandboxRuntime, StackRuntime } from "@devin/types";
-export { resolveDefaultAgent, usesRuntimeAgent } from "./agent-defaults.js";
-export { resolvePreferredHost } from "./preferred-host.js";
+export { resolveDefaultAgent, usesRuntimeAgent } from "./agent/defaults.js";
+export { resolvePreferredHost } from "./host/preferred-host.js";
 export {
   registerExecutionHost,
   ensureExecutionHostRegistered,
-} from "./register-execution-host.js";
-export { TaskService } from "./task-service.js";
-export { TaskStore } from "./task-store.js";
-export type { PersistedSession, AgentSessionState } from "./task-store.js";
+} from "./host/register-execution-host.js";
+export { TaskService } from "./task/service.js";
+export { TaskStore } from "./task/store.js";
+export type { PersistedSession, AgentSessionState } from "./task/store.js";
 export { startSchedulerServer } from "./start-server.js";
 export type { StartSchedulerServerOptions } from "./start-server.js";
 export {
@@ -30,26 +30,26 @@ export {
   previewDeployEnabled,
   isPreviewTlsDomainAllowed,
   matchPreviewSlug,
-} from "./preview-registry.js";
+} from "./preview/registry.js";
 export {
   handlePreviewProxy,
   shouldHandlePreviewHost,
-} from "./preview-proxy.js";
+} from "./preview/proxy.js";
 export {
   collectInfraDiagnostics,
   fetchFirecrackerHostStatus,
   listSandboxes,
-} from "./diagnostics.js";
+} from "./diagnostics/collect.js";
 export type {
   InfraDiagnostics,
   TaskDiagnostics,
   SandboxSummary,
   FirecrackerHostStatus,
-} from "./diagnostics.js";
+} from "./diagnostics/collect.js";
 export type {
   CreateTaskInput,
   ScheduleJob,
   ServiceMode,
   Task,
   TaskStatus,
-} from "./types.js";
+} from "./task/types.js";

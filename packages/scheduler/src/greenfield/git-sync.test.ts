@@ -3,7 +3,7 @@ import {
   buildAlignHydratedRepoScript,
   buildPushGreenfieldMainScript,
   isAgentTimeoutMessage,
-} from "./greenfield-git-sync.js";
+} from "./git-sync.js";
 
 describe("greenfield-git-sync", () => {
   test("isAgentTimeoutMessage detects scheduler timeout", () => {

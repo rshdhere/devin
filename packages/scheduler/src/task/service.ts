@@ -2,13 +2,13 @@ import { RuntimeClient, type RunResponse } from "@devin/agent-sdk";
 import { EventBus } from "@devin/events";
 import type { TaskEvent, TaskEventType } from "@devin/events";
 import { createQueue, type TaskQueue } from "@devin/queue";
-import { resolveDefaultAgent, usesRuntimeAgent } from "./agent-defaults.js";
+import { resolveDefaultAgent, usesRuntimeAgent } from "../agent/defaults.js";
 import {
   inferStackFromPrompt,
   resolveRuntimeForTask,
   type StackRuntime,
 } from "@devin/types";
-import { resolvePreferredHost } from "./preferred-host.js";
+import { resolvePreferredHost } from "../host/preferred-host.js";
 import {
   collectInfraDiagnostics,
   fetchSandboxByName,
@@ -16,7 +16,7 @@ import {
   validateFirecrackerHostForRuntime,
   type InfraDiagnostics,
   type TaskDiagnostics,
-} from "./diagnostics.js";
+} from "../diagnostics/collect.js";
 import {
   authenticatedCloneUrl,
   createGitHubInitialCommit,
@@ -27,19 +27,22 @@ import {
   fetchGitHubUserIdentity,
   setRepositoryHomepage,
   type GitHubUserIdentity,
-} from "./github.js";
-import { generateProjectMetadata } from "./project-metadata.js";
-import { bootstrapGreenfieldProject } from "./greenfield-bootstrap.js";
+} from "../github/client.js";
+import { generateProjectMetadata } from "../greenfield/project-metadata.js";
+import { bootstrapGreenfieldProject } from "../greenfield/bootstrap.js";
 import {
   buildAlignHydratedRepoScript,
   buildPushGreenfieldMainScript,
   isAgentTimeoutMessage,
-} from "./greenfield-git-sync.js";
-import { greenfieldShellScaffoldFiles } from "./greenfield-shell-scaffold.js";
-import { ensureExecutionHostRegistered } from "./register-execution-host.js";
-import { generateDraftPlan, type DraftPlan } from "./draft-planner.js";
-import { scaffoldFilesFromDraft } from "./scaffold-from-draft.js";
-import { deployProductionPreview } from "./preview-deploy.js";
+} from "../greenfield/git-sync.js";
+import { greenfieldShellScaffoldFiles } from "../greenfield/shell-scaffold.js";
+import { ensureExecutionHostRegistered } from "../host/register-execution-host.js";
+import {
+  generateDraftPlan,
+  type DraftPlan,
+} from "../greenfield/draft-planner.js";
+import { scaffoldFilesFromDraft } from "../greenfield/scaffold-from-draft.js";
+import { deployProductionPreview } from "../preview/deploy.js";
 import type {
   AgentProvider,
   CreateTaskInput,
@@ -48,7 +51,7 @@ import type {
   Task,
   TaskStatus,
 } from "./types.js";
-import { TaskStore, type PersistedSession } from "./task-store.js";
+import { TaskStore, type PersistedSession } from "./store.js";
 
 export interface TaskServiceOptions {
   orchestratorUrl: string;
@@ -795,13 +798,17 @@ export class TaskService {
           sandboxCpu,
         );
 
-        const sandbox = await this.waitForSandbox(sandboxName, task.id, () =>
-          this.provisionSandboxWithCapacityRetry(
-            sandboxName,
-            task.id,
-            sandboxSpec,
-            sandboxCpu,
-          ),
+        const provisionedSandboxName = sandboxName;
+        const sandbox = await this.waitForSandbox(
+          provisionedSandboxName,
+          task.id,
+          () =>
+            this.provisionSandboxWithCapacityRetry(
+              provisionedSandboxName,
+              task.id,
+              sandboxSpec,
+              sandboxCpu,
+            ),
         );
         this.assertSandboxOnLocalHost(sandbox, task.id);
         task.sessionActive = true;
@@ -1033,7 +1040,7 @@ export class TaskService {
 
       const agentPrompt = buildAgentPrompt(
         job.prompt,
-        repository,
+        repository ?? "workspace repository",
         repoCwd,
         gitOwner,
         resolveStackRuntime(task, job),
@@ -4157,35 +4164,7 @@ export class TaskService {
   }
 
   private emit(
-    type:
-      | "task.created"
-      | "task.scheduled"
-      | "task.phase_changed"
-      | "draft.started"
-      | "draft.updated"
-      | "draft.diff"
-      | "draft.completed"
-      | "draft.failed"
-      | "execution.started"
-      | "sandbox.requested"
-      | "sandbox.provisioning"
-      | "sandbox.started"
-      | "sandbox.failed"
-      | "runtime.waiting"
-      | "runtime.ready"
-      | "agent.running"
-      | "git.clone"
-      | "git.commit"
-      | "git.push"
-      | "git.pr"
-      | "git.repo"
-      | "git.issue"
-      | "tests.running"
-      | "deploy.building"
-      | "deploy.ready"
-      | "deploy.failed"
-      | "task.completed"
-      | "task.failed",
+    type: TaskEventType,
     taskId: string,
     message: string,
     data?: Record<string, unknown>,

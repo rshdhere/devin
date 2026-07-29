@@ -1,5 +1,5 @@
-import type { AgentProvider } from "./agents";
-import type { SandboxRuntime } from "./runtime";
+import type { AgentProvider } from "./agents.js";
+import type { SandboxRuntime } from "./runtime.js";
 
 export type TaskStatus =
   | "queued"

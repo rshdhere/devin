@@ -6,8 +6,8 @@ import type {
   ServiceProbe,
   TaskDiagnostics,
 } from "@devin/types";
-import { resolveDefaultAgent } from "./agent-defaults.js";
-import { resolvePreferredHost } from "./preferred-host.js";
+import { resolveDefaultAgent } from "../agent/defaults.js";
+import { resolvePreferredHost } from "../host/preferred-host.js";
 
 export type {
   FirecrackerHostStatus,

@@ -1,5 +1,5 @@
-import type { DraftPlan } from "./draft-planner.js";
-import type { SandboxRuntime } from "@devin/types";
+import type { DraftPlan } from "../greenfield/draft-planner.js";
+import type { AgentProvider, SandboxRuntime } from "@devin/types";
 
 export type { AgentProvider } from "@devin/types";
 

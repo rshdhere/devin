@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { inferStackFromPrompt, resolveRuntimeForTask } from "./runtime";
+import { inferStackFromPrompt, resolveRuntimeForTask } from "./runtime.js";
 
 describe("inferStackFromPrompt", () => {
   test("detects Next.js", () => {

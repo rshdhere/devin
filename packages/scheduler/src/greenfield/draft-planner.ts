@@ -1,4 +1,4 @@
-import type { AgentProvider } from "./types.js";
+import type { AgentProvider } from "../task/types.js";
 
 export type DraftFilePlan = {
   path: string;

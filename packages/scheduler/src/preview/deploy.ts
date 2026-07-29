@@ -5,7 +5,7 @@ import {
   previewDeployEnabled,
   registerPreviewRoute,
   type PreviewRoute,
-} from "./preview-registry.js";
+} from "./registry.js";
 
 export interface PreviewDeployResult {
   slug: string;
@@ -31,14 +31,6 @@ function parsePackageScripts(stdout: string): Record<string, string> | null {
   }
 }
 
-/**
- * Agents often write CommonJS sources as `.ts`. Node cannot run those with
- * `npm start` (`node src/index.ts`). Materialize sibling `.js` files and rewrite
- * package.json scripts before starting the preview process.
- *
- * Embedded as a nested heredoc inside PREVIEW_START — never chain with
- * `NODE && ...` on the terminator line (that feeds shell text into node).
- */
 const MATERIALIZE_JS_BODY = `const fs = require('fs');
 const path = require('path');
 function walk(dir) {

@@ -1,4 +1,4 @@
-import { pickRandomRepoName } from "./project-metadata.js";
+import { pickRandomRepoName } from "../greenfield/project-metadata.js";
 
 export interface CreatedRepository {
   fullName: string;

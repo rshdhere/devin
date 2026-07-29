@@ -1,6 +1,6 @@
 import http from "node:http";
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { getPreviewRoute, matchPreviewSlug } from "./preview-registry.js";
+import { getPreviewRoute, matchPreviewSlug } from "./registry.js";
 
 export function shouldHandlePreviewHost(
   hostHeader: string | undefined,

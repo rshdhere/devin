@@ -165,6 +165,8 @@
         "@devin/events": "workspace:*",
         "@devin/queue": "workspace:*",
         "@devin/types": "workspace:*",
+        "@types/express": "^5.0.6",
+        "express": "^5.2.1",
       },
       "peerDependencies": {
         "typescript": "^5",
