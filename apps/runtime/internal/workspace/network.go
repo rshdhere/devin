@@ -12,10 +12,6 @@ nameserver 1.1.1.1
 nameserver 8.8.4.4
 `
 
-// EnsureDNS always writes public resolvers for sandbox egress.
-// Firecracker guests inherit host/VPC resolvers (via CNI or snapshots) that are
-// often unreachable inside the microVM NAT namespace — e.g. 169.254.169.253 or
-// the VPC DNS at the subnet base. Public resolvers work through ipMasq NAT.
 func EnsureDNS() {
 	if runtime.GOOS != "linux" {
 		return
@@ -27,13 +23,9 @@ func EnsureDNS() {
 		slog.Info("configured guest DNS resolvers for sandbox egress")
 	}
 
-	// Always seed entropy when refreshing guest network state — old golden
-	// snapshots often resume with an uninitialized CRNG that blocks TLS.
 	EnsureEntropy()
 }
 
-// hasUnreachableNameserver detects resolvers copied from the execution host that
-// microVM guests cannot reach. Used only by tests.
 func hasUnreachableNameserver(content string) bool {
 	for _, line := range strings.Split(content, "\n") {
 		line = strings.TrimSpace(line)

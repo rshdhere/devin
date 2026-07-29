@@ -80,8 +80,6 @@ func asExitError(err error, target **exec.ExitError) bool {
 	return false
 }
 
-// mergeProcessEnv starts from the current process environment and applies
-// overrides. Later duplicate keys replace earlier ones so callers can fix PATH.
 func mergeProcessEnv(overrides []string) []string {
 	envMap := make(map[string]string)
 	order := make([]string, 0, 64)
@@ -120,7 +118,6 @@ func CombinedOutput(result *Result) string {
 
 type OnOutputFunc func(line OutputLine)
 
-// StreamLineHandler returns stop=true to terminate the process early (e.g. agent finished).
 type StreamLineHandler func(line OutputLine) (stop bool, stopErr error)
 
 func RunStreamingUntil(
@@ -199,9 +196,6 @@ func RunStreamingUntil(
 	err = cmd.Wait()
 	exitCode := 0
 	if err != nil {
-		// CommandContext kills the process on cancel; Wait then returns ExitError
-		// with code -1. Prefer the context error so callers can report timeouts
-		// instead of a cryptic "exited with code -1".
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
@@ -209,7 +203,6 @@ func RunStreamingUntil(
 		if ok := asExitError(err, &exitErr); ok {
 			exitCode = exitErr.ExitCode()
 		} else if stopRequested {
-			// Process killed after successful early stop.
 		} else {
 			return nil, err
 		}
@@ -219,7 +212,6 @@ func RunStreamingUntil(
 		return nil, stopErr
 	}
 
-	// Early stop after a successful stream handler must not look like a crash.
 	if stopRequested && exitCode != 0 {
 		exitCode = 0
 	}

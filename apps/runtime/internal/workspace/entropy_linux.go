@@ -12,16 +12,12 @@ import (
 
 const entropySeedBytes = 256
 
-// randPoolInfo matches linux/random.h struct rand_pool_info for RNDADDENTROPY.
 type randPoolInfo struct {
 	entropyCount int32
 	bufSize      int32
 	buf          [entropySeedBytes]byte
 }
 
-// EnsureEntropy credits the guest kernel RNG so getrandom()/OpenSSL/TLS can
-// proceed. Firecracker microVMs often boot (and are snapshotted) with
-// crng_init=0 and no virtio-rng, which leaves HTTPS hanging after TCP connect.
 func EnsureEntropy() {
 	seed := make([]byte, entropySeedBytes)
 	urandom, err := os.Open("/dev/urandom")

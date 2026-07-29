@@ -17,9 +17,6 @@ func envValue(req RunRequest, key string) string {
 }
 
 func mergeEnv(req RunRequest, extra ...string) []string {
-	// Cursor CLI uses #!/usr/bin/env bash — env looks up bash on PATH.
-	// Guests sometimes boot with a PATH that omits /bin:/usr/bin, so always
-	// prepend a full system path plus known agent install locations.
 	path := envValue(req, "PATH")
 	if path == "" {
 		path = os.Getenv("PATH")
@@ -48,8 +45,6 @@ func pathSuffix(path string) string {
 	return ":" + path
 }
 
-// resolveCursorBin prefers request/env overrides, then known install paths from
-// runtime/agent/Dockerfile, then the configured binary name.
 func resolveCursorBin(cfg Config, req RunRequest) string {
 	candidates := []string{
 		envValue(req, "CURSOR_AGENT_BIN"),
@@ -67,7 +62,6 @@ func resolveCursorBin(cfg Config, req RunRequest) string {
 			continue
 		}
 		seen[candidate] = struct{}{}
-		// Prefer absolute paths that exist; for bare names rely on PATH later.
 		if candidate[0] == '/' {
 			if _, err := os.Stat(candidate); err == nil {
 				return candidate

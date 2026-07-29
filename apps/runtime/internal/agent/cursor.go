@@ -69,9 +69,6 @@ func (r *CursorRunner) Run(
 	args = append(args, "--workspace", workDir)
 	args = append(args, req.Prompt)
 
-	// Non-login shell + explicit PATH: guest login profiles often wipe PATH and
-	// turn an absolute-or-resolved binary lookup into `agent: not found`.
-	// Include /usr/bin:/bin so `#!/usr/bin/env bash` shebangs resolve.
 	command := fmt.Sprintf(
 		`export PATH="/usr/local/bin:/root/.local/bin:/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin:$PATH"; exec %s %s`,
 		shellQuote(bin),
@@ -158,7 +155,6 @@ func (r *CursorRunner) Run(
 		}, nil
 	}
 
-	// Instant "success" with no tools means the brain never touched the repo.
 	if !sawToolCall {
 		return &RunResult{
 			Status: "failed",
