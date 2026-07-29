@@ -3,8 +3,8 @@
   "type": "module",
   "private": true,
   "scripts": {
-    "dev": "npx tsx watch src/main.ts",
-    "start": "npx tsx src/main.ts"
+    "dev": "npx tsx watch src/bin.ts",
+    "start": "npx tsx src/bin.ts"
   },
   "dependencies": {
     "@devin/scheduler": "workspace:*"

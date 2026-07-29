@@ -22,4 +22,4 @@ USER app
 EXPOSE 9092
 ENV BRAIN_PORT=9092
 ENV SERVICE_MODE=brain
-CMD ["bun", "run", "apps/brain/src/main.ts"]
+CMD ["bun", "run", "apps/brain/src/bin.ts"]
