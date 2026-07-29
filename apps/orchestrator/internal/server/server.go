@@ -9,11 +9,10 @@ import (
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	devinv1 "github.com/rshdhere/devin/packages/sandbox/api/v1"
 	"github.com/rshdhere/devin/packages/orchestrator/store"
+	devinv1 "github.com/rshdhere/devin/packages/sandbox/api/v1"
 )
 
-// InternalServer exposes sandbox lifecycle endpoints for the scheduler only.
 type InternalServer struct {
 	store     store.SandboxStore
 	hostStore store.HostStore
@@ -286,8 +285,8 @@ func (s *InternalServer) handleGetFirecrackerHost(w http.ResponseWriter, r *http
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
-		"name": host.Name,
-		"spec": host.Spec,
+		"name":   host.Name,
+		"spec":   host.Spec,
 		"status": host.Status,
 	})
 }
