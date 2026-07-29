@@ -92,6 +92,7 @@ func Bootstrap(ctx context.Context, args []string, agent bool) error {
 		force,
 		envx.Env("DEVIN_REPO_REF", "main"),
 		envx.Env("DEVIN_CONTAINER_IMAGE_TAG", envx.Env("DEVIN_IMAGE_TAG", "latest")),
+		envx.Env("DEVIN_CONTAINER_REGISTRY", "docker.io/rshdhere"),
 	)
 	return awsutil.SendAndWait(ctx, r, id, "Bootstrap devin Firecracker snapshots", payload, 2*time.Hour, 15*time.Second, true)
 }

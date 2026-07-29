@@ -69,6 +69,12 @@ func (l *Launcher) Restore(ctx context.Context, vmID, name, runtime string, cpu 
 		VMID:       vmID,
 		SocketPath: socketPath,
 		LogPath:    logPath,
+		// WARNING: snapshot restore does not re-attach drives (the SDK's
+		// loadSnapshot handler list omits AttachDrivesHandler), so IsReadOnly is
+		// inert here. Firecracker restores the drive recorded in the snapshot,
+		// which is the golden rootfs opened read-write — every microVM shares and
+		// mutates it. Isolating writes requires a per-VM backing file swapped in
+		// via UpdateGuestDrive while the restored VM is still paused.
 		Drives: []models.Drive{
 			{
 				DriveID:      firecracker.String("root"),

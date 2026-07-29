@@ -3,7 +3,8 @@ package hostpayload
 import "fmt"
 
 // SyncPlatformConfig invokes the installed binary, with a minimal secrets-only
-// fallback for hosts that have not yet received the Go CLI.
+// fallback for hosts that have not yet received the Go CLI. The fallback stays
+// inline (no docker/git needed) so config sync works on a degraded host.
 func SyncPlatformConfig(region, prefix string) string {
 	return fmt.Sprintf(`#!/bin/bash
 set -euo pipefail
