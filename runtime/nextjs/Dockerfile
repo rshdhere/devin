@@ -1,9 +1,3 @@
-# Next.js runtime — Node 22 + Bun for app scaffolding, dev server, and builds.
-#
-# Build from repo root:
-#   go build -o apps/runtime/bin/runtime ./apps/runtime/cmd/runtime
-#   docker build -f runtime/nextjs/Dockerfile -t devin-runtime-nextjs:latest .
-
 FROM node:22-bookworm-slim
 
 RUN apt-get update && apt-get install -y --no-install-recommends \

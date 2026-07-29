@@ -1,7 +1,3 @@
-# Local HashiCorp Vault for development.
-# Start: docker compose -f vault/docker-compose.yaml up -d
-# Bootstrap: ./vault/bootstrap/local.sh
-
 name: devin-vault
 
 services:

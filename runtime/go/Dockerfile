@@ -1,9 +1,3 @@
-# Go runtime — toolchain for services, CLIs, and backend work.
-#
-# Build from repo root:
-#   go build -o apps/runtime/bin/runtime ./apps/runtime/cmd/runtime
-#   docker build -f runtime/go/Dockerfile -t devin-runtime-go:latest .
-
 FROM golang:1.23-bookworm
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
