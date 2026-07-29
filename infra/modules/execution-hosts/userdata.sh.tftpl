@@ -85,6 +85,7 @@ Requires=docker.service
 Restart=always
 RestartSec=5
 ExecStartPre=/bin/bash -c 'rm -rf /var/lib/cni/networks/fcnet || true'
+ExecStartPre=-/usr/bin/docker rm -f firecracker
 ExecStart=/usr/bin/docker run --rm --name firecracker \\
   --privileged \\
   --network host \\
@@ -123,6 +124,7 @@ Wants=devin-firecracker.service
 Restart=always
 RestartSec=5
 Environment=ORCHESTRATOR_URL=http://pending-ssm-sync:9090
+ExecStartPre=-/usr/bin/docker rm -f scheduler
 ExecStart=/usr/bin/docker run --rm --name scheduler \\
   --network host \\
   --env-file /etc/devin/scheduler-secrets.env \\
