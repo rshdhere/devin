@@ -87,6 +87,50 @@ if [[ "${RUNTIME}" == "agent" ]]; then
     guest_path="${AGENT_BIN#${MOUNT_DIR}}"
     ln -sfn "${guest_path}" "${MOUNT_DIR}/usr/local/bin/agent"
   fi
+
+  # Resolve the real bash binary inside the rootfs and publish it on the legacy
+  # guest PATH (/usr/local/bin first). Never point /usr/local/bin/bash at itself.
+  BASH_CANDIDATE=""
+  for candidate in "${MOUNT_DIR}/bin/bash" "${MOUNT_DIR}/usr/bin/bash"; do
+    if [[ -e "${candidate}" ]]; then
+      BASH_CANDIDATE="${candidate}"
+      break
+    fi
+  done
+  if [[ -z "${BASH_CANDIDATE}" ]]; then
+    echo "ERROR: bash missing from ${IMAGE}." >&2
+    exit 1
+  fi
+  BASH_REAL="$(readlink -f "${BASH_CANDIDATE}")"
+  if [[ -z "${BASH_REAL}" || ! -e "${BASH_REAL}" ]]; then
+    echo "ERROR: could not resolve bash binary in rootfs (${BASH_CANDIDATE})." >&2
+    exit 1
+  fi
+  BASH_GUEST="${BASH_REAL#${MOUNT_DIR}}"
+  if [[ "${BASH_GUEST}" == "${BASH_REAL}" || -z "${BASH_GUEST}" ]]; then
+    echo "ERROR: resolved bash path is outside rootfs: ${BASH_REAL}" >&2
+    exit 1
+  fi
+  if [[ "${BASH_GUEST}" == "/usr/local/bin/bash" ]]; then
+    echo "ERROR: bash resolved to /usr/local/bin/bash (would create a symlink loop)." >&2
+    exit 1
+  fi
+  ln -sfn "${BASH_GUEST}" "${MOUNT_DIR}/usr/local/bin/bash"
+  if [[ -L "${MOUNT_DIR}/usr/local/bin/bash" ]]; then
+    LINK_TARGET="$(readlink -f "${MOUNT_DIR}/usr/local/bin/bash" 2>/dev/null || true)"
+    if [[ -z "${LINK_TARGET}" || "${LINK_TARGET}" == "${MOUNT_DIR}/usr/local/bin/bash" ]]; then
+      echo "ERROR: /usr/local/bin/bash symlink loop in rootfs." >&2
+      exit 1
+    fi
+  fi
+  # Verify #!/usr/bin/env bash works with the stripped guest PATH.
+  if ! docker run --rm --entrypoint /usr/bin/env "${IMAGE}" \
+      PATH="/usr/local/bin:/root/.local/bin" bash -c 'echo ok' >/dev/null; then
+    echo "ERROR: PATH=/usr/local/bin:/root/.local/bin cannot resolve bash in ${IMAGE}." >&2
+    echo "Fix runtime/agent/Dockerfile (link real bash into /usr/local/bin/bash)." >&2
+    exit 1
+  fi
+  echo "bash ready for env shebang: /usr/local/bin/bash -> ${BASH_GUEST}"
 fi
 
 cat >"${OUT_DIR}/meta.partial.json" <<EOF

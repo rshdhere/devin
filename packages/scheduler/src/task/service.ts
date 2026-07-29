@@ -2942,6 +2942,10 @@ export class TaskService {
    * PATH that omits /bin:/usr/bin, so env cannot find bash even when /bin/bash
    * exists. Old runtime snapshots also prepend only /usr/local/bin — put bash
    * there and rewrite agent shebangs so launches work before snapshot rebuild.
+   *
+   * Never `ln -sfn` bash onto itself: with /usr/local/bin first on PATH,
+   * `command -v bash` can return /usr/local/bin/bash and that creates a
+   * self-referential symlink ("Too many levels of symbolic links").
    */
   private async ensureBashInSandbox(
     runtime: RuntimeClient,
@@ -2951,27 +2955,49 @@ export class TaskService {
       taskId,
       command: [
         "set +e",
-        'export PATH="/usr/local/bin:/root/.local/bin:/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin:$PATH"',
+        'export PATH="/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/local/bin:/root/.local/bin:$PATH"',
+        // Drop broken / circular bash stubs before probing (self-symlink loops).
+        "for stub in /usr/local/bin/bash /root/.local/bin/bash; do",
+        '  if [ -L "$stub" ] && ! [ -x "$stub" ]; then rm -f "$stub"; fi',
+        '  if [ -L "$stub" ]; then',
+        '    resolved=$(readlink -f "$stub" 2>/dev/null || true)',
+        '    if [ -z "$resolved" ] || [ "$resolved" = "$stub" ]; then rm -f "$stub"; fi',
+        "  fi",
+        "done",
         "bash_bin=''",
-        "if command -v bash >/dev/null 2>&1; then bash_bin=$(command -v bash); fi",
-        'if [ -z "$bash_bin" ] && [ -x /bin/bash ]; then bash_bin=/bin/bash; fi',
+        // Prefer real system paths over anything under /usr/local/bin.
+        "if [ -x /bin/bash ]; then bash_bin=/bin/bash; fi",
         'if [ -z "$bash_bin" ] && [ -x /usr/bin/bash ]; then bash_bin=/usr/bin/bash; fi',
+        'if [ -z "$bash_bin" ] && command -v bash >/dev/null 2>&1; then bash_bin=$(command -v bash); fi',
         'if [ -z "$bash_bin" ] && command -v apt-get >/dev/null 2>&1; then',
         "  apt-get update -qq >/tmp/devin-bash-apt.log 2>&1",
         "  apt-get install -y -qq bash >/tmp/devin-bash-apt.log 2>&1",
-        '  export PATH="/usr/local/bin:/root/.local/bin:/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin:$PATH"',
-        "  bash_bin=$(command -v bash)",
+        "  if [ -x /bin/bash ]; then bash_bin=/bin/bash; fi",
+        '  if [ -z "$bash_bin" ] && [ -x /usr/bin/bash ]; then bash_bin=/usr/bin/bash; fi',
+        '  if [ -z "$bash_bin" ]; then bash_bin=$(command -v bash); fi',
         "fi",
         'if [ -z "$bash_bin" ] || [ ! -x "$bash_bin" ]; then',
         "  echo 'bash-not-found'",
         "  exit 1",
         "fi",
-        "mkdir -p /usr/local/bin /bin",
+        // Canonicalize so we never symlink a path onto itself.
+        'bash_real=$(readlink -f "$bash_bin" 2>/dev/null || printf "%s" "$bash_bin")',
+        'if [ -z "$bash_real" ] || [ ! -x "$bash_real" ]; then',
+        "  echo 'bash-unresolvable'",
+        "  exit 1",
+        "fi",
+        "mkdir -p /usr/local/bin /bin /usr/bin",
         // Old guest PATH is often just /usr/local/bin:/root/.local/bin — env bash
         // must resolve from those dirs without relying on /bin being present.
-        'ln -sfn "$bash_bin" /usr/local/bin/bash',
-        'if [ ! -x /bin/bash ]; then ln -sfn "$bash_bin" /bin/bash; fi',
-        'if [ ! -x /usr/bin/bash ]; then mkdir -p /usr/bin && ln -sfn "$bash_bin" /usr/bin/bash; fi',
+        'if [ /usr/local/bin/bash -ef "$bash_real" ] 2>/dev/null; then',
+        "  :",
+        'elif [ "$(readlink -f /usr/local/bin/bash 2>/dev/null)" = "$bash_real" ]; then',
+        "  :",
+        "else",
+        '  ln -sfn "$bash_real" /usr/local/bin/bash',
+        "fi",
+        'if [ ! -x /bin/bash ]; then ln -sfn "$bash_real" /bin/bash; fi',
+        'if [ ! -x /usr/bin/bash ]; then ln -sfn "$bash_real" /usr/bin/bash; fi',
         // Simulate legacy agent launch PATH (no /bin) — must succeed.
         'PATH="/usr/local/bin:/root/.local/bin" /usr/bin/env bash -c "echo ok" >/tmp/devin-bash-env-ok 2>/tmp/devin-bash-env-err',
         "ec=$?",
@@ -2979,7 +3005,7 @@ export class TaskService {
         '  echo "env-bash-failed:$(cat /tmp/devin-bash-env-err 2>/dev/null)"',
         "  exit 1",
         "fi",
-        'printf "%s\\n" "$bash_bin"',
+        'printf "%s\\n" "$bash_real"',
       ].join("\n"),
     });
     if (probe.exitCode !== 0) {
@@ -3168,9 +3194,13 @@ export class TaskService {
         "fi",
         'if [ -z "$real" ] || [ ! -e "$real" ]; then exit 0; fi',
         'ln -sfn "$real" /root/.local/bin/agent.real',
-        "bash_abs=/usr/local/bin/bash",
+        // Prefer real system bash; /usr/local/bin/bash may be a stub symlink.
+        "bash_abs=''",
         "[ -x /bin/bash ] && bash_abs=/bin/bash",
-        "[ -x /usr/bin/bash ] && bash_abs=/usr/bin/bash",
+        '[ -z "$bash_abs" ] && [ -x /usr/bin/bash ] && bash_abs=/usr/bin/bash',
+        '[ -z "$bash_abs" ] && [ -x /usr/local/bin/bash ] && bash_abs=/usr/local/bin/bash',
+        '[ -z "$bash_abs" ] && bash_abs=/bin/bash',
+        'bash_abs=$(readlink -f "$bash_abs" 2>/dev/null || printf "%s" "$bash_abs")',
         // Wrapper forces a full PATH before exec so nested #!/usr/bin/env bash
         // shebangs resolve even on old snapshots with stripped guest PATH.
         "cat > /usr/local/bin/agent <<'WRAP'",

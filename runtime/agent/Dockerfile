@@ -1,8 +1,16 @@
 FROM node:22-bookworm-slim
 
+# Cursor agent shebang is #!/usr/bin/env bash. Guests may boot with PATH limited
+# to /usr/local/bin:/root/.local/bin — expose a real bash there. Always link the
+# canonical binary (never /usr/local/bin/bash → itself).
 RUN apt-get update && apt-get install -y --no-install-recommends \
     bash ca-certificates curl git openssh-client unzip \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* \
+    && BASH_REAL="$(readlink -f /bin/bash 2>/dev/null || readlink -f /usr/bin/bash)" \
+    && test -x "$BASH_REAL" \
+    && ln -sfn "$BASH_REAL" /usr/local/bin/bash \
+    && test -x /usr/local/bin/bash \
+    && PATH="/usr/local/bin:/root/.local/bin" /usr/bin/env bash -c 'echo ok'
 
 RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
       | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg \
