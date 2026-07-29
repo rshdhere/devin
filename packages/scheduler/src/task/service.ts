@@ -1426,7 +1426,7 @@ export class TaskService {
 
     if (!process.env.OPENAI_API_KEY?.trim()) {
       throw new Error(
-        "OPENAI_API_KEY is not set on the scheduler. Add it to AWS SSM as a SecureString at /<env>/platform/openai_api_key, then run devin-sync-platform-config on the execution host.",
+        "OPENAI_API_KEY is not set on the scheduler. Add it to AWS SSM as a SecureString at /<env>/platform/openai_api_key, then run sudo devin-infra sync-platform-config on the execution host.",
       );
     }
   }
@@ -2230,9 +2230,9 @@ export class TaskService {
           ? "Sandbox guest filesystem is corrupt (rootfs/mem snapshot mismatch). " +
             "On the execution host rebuild snapshots: " +
             "DEVIN_FORCE_SNAPSHOT_REBUILD=true DEVIN_RUNTIMES='agent nextjs' " +
-            "./infra/scripts/run-ssm-bootstrap-snapshots.sh <instance-id>."
+            "devin-infra bootstrap-snapshots <instance-id>."
           : "Sandbox has no outbound DNS/HTTPS to the Cursor API (api2.cursor.sh). " +
-            "On the execution host run fix-sandbox-dns.sh and fix-cni-and-redeploy-firecracker.sh, then rebuild the agent snapshot.";
+            "On the execution host run: sudo devin-infra fix-sandbox-dns && sudo devin-infra fix-cni, then rebuild the agent snapshot.";
         this.emit("agent.log", taskId, message, {
           cursorReachable: false,
           dns: dnsCheck,
@@ -3023,7 +3023,7 @@ export class TaskService {
       throw new Error(
         "cursor agent CLI is missing from the agent Firecracker snapshot, and the sandbox cannot reach cursor.com to install it" +
           ` (${installHost.detail}). Rebuild the agent snapshot on the execution host` +
-          " (./infra/scripts/rebuild-agent-snapshot.sh <instance-id>).",
+          " (devin-infra rebuild-agent-snapshot <instance-id>).",
       );
     }
 
@@ -3087,7 +3087,7 @@ export class TaskService {
       "cursor agent CLI is not available in the sandbox after install" +
         (detail ? `: ${detail}` : "") +
         ". Rebuild the agent Firecracker snapshot" +
-        " (./infra/scripts/rebuild-agent-snapshot.sh <instance-id>).",
+        " (devin-infra rebuild-agent-snapshot <instance-id>).",
     );
   }
 

@@ -101,5 +101,5 @@ OpenAI plan → control-plane scaffold push → `nextjs` snapshot verify. Kept f
 
 - `SCHEDULER_HOST_NAME` must match `FirecrackerHost` CR name (pins devbox to execution host).
 - Cloud: `DATABASE_URL` on brain + worker; `EXECUTION_WORKER_URL` on brain; `SCHEDULER_URL` on API → brain.
-- Run `devin-sync-platform-config.sh` after SSM or image updates.
+- Run `sudo devin-infra sync-platform-config` after SSM or image updates.
 - Apply migrations `0002_require_review_before_push.sql` and `0003_agent_sessions.sql`.

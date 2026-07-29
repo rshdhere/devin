@@ -833,13 +833,13 @@ docker logs -f scheduler
 2. **Execution hosts** roll automatically via the **Deploy execution hosts** GitHub Actions workflow (SSM: `docker pull` + restart). Manual fallback:
 
    ```sh
-   DEVIN_IMAGE_TAG=<git-sha> ./infra/scripts/deploy-execution-host-images.sh --discover
+   DEVIN_IMAGE_TAG=<git-sha> go run -C infra ./cmd/devin-infra deploy-images --discover
    ```
 
 3. **Runtime snapshots** (when `apps/runtime/`, `runtime/*`, or guest size envs change — e.g. `FIRECRACKER_WARM_MEMORY_MIB`): run **Deploy execution hosts** manually with `rebuild_runtime_snapshots=true`, or on the host:
 
    ```sh
-   DEVIN_FORCE_SNAPSHOT_REBUILD=true ./infra/scripts/run-ssm-bootstrap-snapshots.sh <instance-id> ap-south-1
+   DEVIN_FORCE_SNAPSHOT_REBUILD=true go run -C infra ./cmd/devin-infra bootstrap-snapshots <instance-id> ap-south-1
    ```
 
    Firecracker cannot resize RAM on restore; old 512 MiB golden snapshots will keep OOMing until rebuilt at 8192 MiB.

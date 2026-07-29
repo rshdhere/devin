@@ -374,7 +374,7 @@ function DiagnosticsPanel({
                   Dependency install in the sandbox timed out. On the execution
                   host run{" "}
                   <span className="font-mono text-amber-100">
-                    sudo ./infra/scripts/fix-sandbox-dns.sh
+                    sudo devin-infra fix-sandbox-dns
                   </span>{" "}
                   and confirm the microVM has outbound HTTPS (443) to the npm
                   registry.
@@ -422,7 +422,7 @@ function DiagnosticsPanel({
               The sandbox could not reach api2.cursor.sh. On the execution host
               run{" "}
               <span className="font-mono text-amber-100">
-                sudo ./infra/scripts/fix-sandbox-dns.sh
+                sudo devin-infra fix-sandbox-dns
               </span>{" "}
               (enables ip_forward + CNI DNS), restart firecracker and scheduler,
               then rebuild the agent snapshot.
@@ -435,7 +435,7 @@ function DiagnosticsPanel({
               Sandbox networking failed while allocating the microVM IP. On the
               execution host run{" "}
               <span className="font-mono text-amber-100">
-                sudo ./infra/scripts/fix-sandbox-dns.sh
+                sudo devin-infra fix-sandbox-dns
               </span>
               , then restart firecracker and scheduler. If the error persists,
               redeploy the latest{" "}

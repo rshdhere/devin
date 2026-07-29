@@ -88,12 +88,12 @@ Ensure execution-host SG can reach the NLB on **5432**.
 Deploy latest **devin** scheduler image (includes `SERVICE_MODE=worker` support), then on each host:
 
 ```bash
-sudo devin-sync-platform-config.sh
+sudo devin-infra sync-platform-config
 curl -s http://127.0.0.1:9091/health | jq .
 # expect: "mode": "worker", "durable": true (when DATABASE_URL set)
 ```
 
-`devin-sync-platform-config.sh` sets `SERVICE_MODE=worker` and `DATABASE_URL` from SSM.
+`devin-infra sync-platform-config` sets `SERVICE_MODE=worker` and `DATABASE_URL` from SSM.
 
 Update ops `devin-platform` ConfigMap `EXECUTION_WORKER_URL` if the worker is not `http://10.0.4.73:9091` (use scheduler NLB when available).
 
@@ -149,7 +149,7 @@ curl -s http://<execution-host>:9091/health | jq .
 | Docker | `docker/brain/Dockerfile` |
 | CI images | `.github/workflows/registry.yaml` |
 | Migrations | `packages/drizzle/drizzle/0003_agent_sessions.sql` |
-| Worker SSM sync | `infra/scripts/devin-sync-platform-config.sh` |
+| Worker SSM sync | `devin-infra sync-platform-config` (see `infra/README-cli.md`) |
 | Alignment | `docs/devin-alignment.md` |
 
 ---

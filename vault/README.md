@@ -115,7 +115,6 @@ Choose one integration pattern (examples in `vault/examples/`):
 | --- | --- |
 | **External Secrets Operator** | GitOps-friendly sync to K8s `Secret` |
 | **Vault Agent Injector** | Sidecar file injection, no K8s Secret |
-| **AppRole + script** | EC2 execution hosts (scheduler) |
 
 ## Policies
 
@@ -154,8 +153,7 @@ vault/
 ├── scripts/
 │   └── vault-env.sh          # Export KV → shell env (local dev)
 └── examples/
-    ├── external-secrets.yaml # ESO GitOps manifest
-    └── ec2-scheduler-vault.sh
+    └── external-secrets.yaml # ESO GitOps manifest
 ```
 
 ## Security notes

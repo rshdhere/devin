@@ -115,7 +115,7 @@ resource "null_resource" "sync_execution_host_config" {
   }
 
   provisioner "local-exec" {
-    command     = "${path.module}/scripts/sync-execution-host-config.sh ${module.execution_hosts[0].hosts[each.key].instance_id} ${var.aws_region} ${local.ssm_parameter_prefix}"
+    command     = "go run -C '${path.module}' ./cmd/devin-infra sync-host-config ${module.execution_hosts[0].hosts[each.key].instance_id} ${var.aws_region} ${local.ssm_parameter_prefix}"
     interpreter = ["bash", "-c"]
   }
 
@@ -132,7 +132,7 @@ resource "null_resource" "enable_execution_host_nested_virt" {
   }
 
   provisioner "local-exec" {
-    command     = "chmod +x ${path.module}/scripts/enable-nested-virtualization.sh && ${path.module}/scripts/enable-nested-virtualization.sh ${module.execution_hosts[0].hosts[each.key].instance_id} ${var.aws_region}"
+    command     = "go run -C '${path.module}' ./cmd/devin-infra enable-nested-virt ${module.execution_hosts[0].hosts[each.key].instance_id} ${var.aws_region}"
     interpreter = ["bash", "-c"]
   }
 

@@ -68,6 +68,16 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: infra/go.mod
+          cache-dependency-path: infra/go.sum
+
+      - name: Build devin-infra CLI
+        working-directory: infra
+        run: go build -o bin/devin-infra ./cmd/devin-infra
+
       - name: Resolve image tag
         id: tag
         run: |
@@ -90,7 +100,6 @@ jobs:
           if [[ -z "${ids}" ]]; then
             ids="${{ vars.EXECUTION_HOST_INSTANCE_IDS }}"
           fi
-          # Trim whitespace around commas
           ids="$(echo "${ids}" | tr -d '[:space:]')"
           echo "instance_ids=${ids}" >> "${GITHUB_OUTPUT}"
           if [[ -n "${ids}" ]]; then
@@ -112,22 +121,20 @@ jobs:
           DEVIN_NAME_PREFIX: ${{ vars.DEVIN_NAME_PREFIX || 'devin-production' }}
         run: |
           set -euo pipefail
-          chmod +x infra/scripts/deploy-execution-host-images.sh
-
           ids="${{ steps.hosts.outputs.instance_ids }}"
           if [[ -n "${ids}" ]]; then
             IFS=',' read -ra instances <<< "${ids}"
-            infra/scripts/deploy-execution-host-images.sh "${instances[@]}"
+            infra/bin/devin-infra deploy-images "${instances[@]}"
           else
-            infra/scripts/deploy-execution-host-images.sh --discover
+            infra/bin/devin-infra deploy-images --discover
           fi
 
       - name: Rebuild runtime snapshots (optional)
         if: github.event_name == 'workflow_dispatch' && github.event.inputs.rebuild_runtime_snapshots == 'true'
+        env:
+          DEVIN_FORCE_SNAPSHOT_REBUILD: "true"
         run: |
           set -euo pipefail
-          chmod +x infra/scripts/run-ssm-bootstrap-snapshots.sh
-
           ids="${{ steps.hosts.outputs.instance_ids }}"
           if [[ -n "${ids}" ]]; then
             IFS=',' read -ra instances <<< "${ids}"
@@ -150,5 +157,5 @@ jobs:
 
           for instance_id in "${instances[@]}"; do
             echo "Rebuilding snapshots on ${instance_id}..."
-            infra/scripts/run-ssm-bootstrap-snapshots.sh "${instance_id}" "${AWS_REGION}"
+            infra/bin/devin-infra bootstrap-snapshots "${instance_id}" "${AWS_REGION}"
           done

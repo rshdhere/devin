@@ -37,6 +37,10 @@ jobs:
           - app: firecracker
             image: devin-firecracker
             dockerfile: docker/firecracker/Dockerfile
+          - app: infra
+            image: devin-infra
+            dockerfile: infra/Dockerfile
+            context: infra
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -124,7 +128,7 @@ jobs:
         if: matrix.app != 'web'
         uses: docker/build-push-action@v6
         with:
-          context: .
+          context: ${{ matrix.context || '.' }}
           file: ${{ matrix.dockerfile }}
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}

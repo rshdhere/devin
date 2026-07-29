@@ -1,0 +1,6 @@
+package host
+
+const fcnet = `{
+  "cniVersion":"0.4.0","name":"fcnet","plugins":[
+    {"type":"ptp","ipMasq":true,"ipam":{"type":"static","addresses":[{"address":"192.168.127.8/24","gateway":"192.168.127.1"}],"routes":[{"dst":"0.0.0.0/0"}],"dns":{"nameservers":["8.8.8.8","1.1.1.1","8.8.4.4"]}}},
+    {"type":"tc-redirect-tap"}]}`

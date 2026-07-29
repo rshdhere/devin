@@ -125,7 +125,7 @@ resource "null_resource" "sync_scheduler_url" {
   }
 
   provisioner "local-exec" {
-    command     = "${path.module}/../../scripts/patch-server-scheduler-url.sh"
+    command     = "go run -C '${path.module}/../..' ./cmd/devin-infra patch-scheduler-url"
     interpreter = ["bash", "-c"]
     environment = {
       SCHEDULER_URL = local.effective_scheduler_url

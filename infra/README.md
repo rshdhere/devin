@@ -89,6 +89,7 @@ Set `container_registry` in `terraform.tfvars` (e.g. `docker.io/youruser`). Imag
 | scheduler | `<container_registry>/devin-scheduler:<tag>` |
 | brain | `<container_registry>/devin-brain:<tag>` |
 | firecracker | `<container_registry>/devin-firecracker:<tag>` |
+| infra CLI | `<container_registry>/devin-infra:<tag>` |
 
 On **EKS**, add a `kubernetes.io/dockerconfigjson` secret and reference it in your GitOps manifests for private repos.
 
@@ -98,11 +99,11 @@ On **execution hosts**, run `docker login` before enabling the systemd units if 
 
 | Workflow | Trigger | What it does |
 | --- | --- | --- |
-| **Registry** | push to `main` | Builds and pushes all images including `devin-brain`, `devin-scheduler`, and `devin-firecracker` |
+| **Registry** | push to `main` | Builds and pushes all images including `devin-brain`, `devin-scheduler`, `devin-firecracker`, and `devin-infra` |
 | **Deploy execution hosts** | after Registry on `main`; or manual | SSM: `docker pull` + restart scheduler and firecracker on EC2 |
 | **build-check** | push / PR | Compiles Go services and dry-builds the scheduler Docker image |
 
-Execution hosts are **not** rolled by GitOps. Runtime golden snapshots require a manual deploy with `rebuild_runtime_snapshots=true` or `./infra/scripts/run-ssm-bootstrap-snapshots.sh`.
+Execution hosts are **not** rolled by GitOps. Runtime golden snapshots require a manual deploy with `rebuild_runtime_snapshots=true` or `devin-infra bootstrap-snapshots <instance-id>`.
 
 GitHub variables: `AWS_IAM_SYNC_ROLE_ARN` (required for deploy; from `infra/iam`), optional `AWS_DEPLOY_ROLE_ARN`, `EXECUTION_HOST_INSTANCE_IDS`, `AWS_REGION`.
 
@@ -111,8 +112,11 @@ GitHub variables: `AWS_IAM_SYNC_ROLE_ARN` (required for deploy; from `infra/iam`
 Manual deploy:
 
 ```bash
-DEVIN_IMAGE_TAG=<git-sha> ./infra/scripts/deploy-execution-host-images.sh --discover
+cd infra && go build -o bin/devin-infra ./cmd/devin-infra
+DEVIN_IMAGE_TAG=<git-sha> ./bin/devin-infra deploy-images --discover
 ```
+
+See [README-cli.md](./README-cli.md) for the full CLI.
 
 ## Outputs
 
@@ -135,7 +139,8 @@ Execution hosts have **no public IP**. Use **SSM Session Manager** (not direct S
 `aws ssm start-session` requires the [Session Manager plugin](https://docs.aws.amazon.com/systems-manager/latest/userguide/session-manager-working-with-install-plugin.html) on your laptop (separate from the AWS CLI):
 
 ```sh
-./infra/scripts/install-session-manager-plugin.sh
+cd infra && go build -o bin/devin-infra ./cmd/devin-infra
+./bin/devin-infra install-ssm-plugin
 session-manager-plugin --version
 ```
 
@@ -179,7 +184,8 @@ cd infra/iam && terraform apply   # admin credentials only
 Then enable nested virt on C7i:
 
 ```sh
-./infra/scripts/enable-nested-virtualization.sh $(terraform -chdir=infra output -json execution_hosts | jq -r '."fc-01".instance_id')
+cd infra && go build -o bin/devin-infra ./cmd/devin-infra
+./bin/devin-infra enable-nested-virt $(terraform -chdir=infra output -json execution_hosts | jq -r '."fc-01".instance_id')
 ```
 
 ### 2. Host bootstrap (if cloud-init failed)
@@ -187,13 +193,13 @@ Then enable nested virt on C7i:
 Ubuntu 24.04 has no `awscli` apt package — userdata installs AWS CLI v2. If the first boot failed (missing egress HTTP/DNS), re-run:
 
 ```sh
-./infra/scripts/rebootstrap-execution-host.sh <instance-id> ap-south-1
+./bin/devin-infra rebootstrap <instance-id> ap-south-1
 ```
 
 ### 3. Firecracker snapshots
 
 ```sh
-./infra/scripts/run-ssm-bootstrap-snapshots.sh <instance-id> ap-south-1
+./bin/devin-infra bootstrap-snapshots <instance-id> ap-south-1
 ```
 
 Verify on the host:
@@ -239,14 +245,14 @@ Store shared agent keys in **AWS SSM SecureString** parameters (not per-user). E
 | `/devin-production/platform/github_bot_token` | `baby-devin-bot` repo creation |
 
 ```sh
-# Create or update (prompts for value)
-CURSOR_API_KEY="..." ./infra/scripts/set-platform-secret.sh cursor_api_key
+# Create or update (prompts for value via env)
+CURSOR_API_KEY="..." ./bin/devin-infra set-platform-secret cursor_api_key
 
 # Push config to a running execution host
-./infra/scripts/sync-execution-host-config.sh i-0123456789abcdef0
+./bin/devin-infra sync-host-config i-0123456789abcdef0
 ```
 
-Use `--with-decryption` when reading SecureString params (handled by `devin-sync-platform-config.sh`). After updating SSM, sync or restart the scheduler on each execution host.
+SecureString params are decrypted by `devin-infra sync-platform-config` on the host. After updating SSM, sync or restart the scheduler on each execution host.
 
 Users can check status from the dashboard via **Advanced capabilities →** (reads scheduler diagnostics).
 
