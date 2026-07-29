@@ -780,22 +780,29 @@ export class TaskService {
           },
         );
 
+        const sandboxSpec: Record<string, unknown> = {
+          taskId: task.id,
+          runtime: runtimeImage,
+          cpu: sandboxCpu,
+          memory: resolveSandboxMemory(task),
+          ...(this.preferredHost ? { preferredHost: this.preferredHost } : {}),
+        };
+
         await this.provisionSandboxWithCapacityRetry(
           sandboxName,
           task.id,
-          {
-            taskId: task.id,
-            runtime: runtimeImage,
-            cpu: sandboxCpu,
-            memory: resolveSandboxMemory(task),
-            ...(this.preferredHost
-              ? { preferredHost: this.preferredHost }
-              : {}),
-          },
+          sandboxSpec,
           sandboxCpu,
         );
 
-        const sandbox = await this.waitForSandbox(sandboxName, task.id);
+        const sandbox = await this.waitForSandbox(sandboxName, task.id, () =>
+          this.provisionSandboxWithCapacityRetry(
+            sandboxName,
+            task.id,
+            sandboxSpec,
+            sandboxCpu,
+          ),
+        );
         this.assertSandboxOnLocalHost(sandbox, task.id);
         task.sessionActive = true;
         this.emit("sandbox.started", task.id, "Devbox microVM is running", {
@@ -3673,16 +3680,24 @@ export class TaskService {
     ]);
 
     for (const sandbox of sandboxes) {
-      if (sandbox.phase === "Failed") {
-        await this.deleteSandbox(sandbox.name);
-        reclaimed += 1;
-        this.emit(
-          "agent.log",
-          taskId,
-          `Reclaimed failed sandbox ${sandbox.name}`,
-          { sandboxName: sandbox.name, reclaimed: true },
-        );
+      if (sandbox.phase !== "Failed") {
+        continue;
       }
+      // Never delete the in-flight task's own sandbox here. waitForSandbox
+      // owns retry/recreate for that record; reclaiming it leaves a ghost
+      // name that the poll loop waits on until the ready timeout.
+      const ownerTaskId = sandbox.taskId?.trim();
+      if (ownerTaskId && protectedTaskIds.has(ownerTaskId)) {
+        continue;
+      }
+      await this.deleteSandbox(sandbox.name);
+      reclaimed += 1;
+      this.emit(
+        "agent.log",
+        taskId,
+        `Reclaimed failed sandbox ${sandbox.name}`,
+        { sandboxName: sandbox.name, reclaimed: true },
+      );
     }
 
     for (const sandbox of sandboxes) {
@@ -3844,16 +3859,22 @@ export class TaskService {
   private async waitForSandbox(
     sandboxName: string,
     taskId: string,
+    reprovision?: () => Promise<void>,
   ): Promise<SandboxRecord> {
     const deadline = Date.now() + this.sandboxReadyTimeoutMs;
     let lastPhase = "unknown";
     let lastMessage = "";
     let lastProgressAt = 0;
     let pendingSince: number | null = null;
+    let missingSince: number | null = null;
+    let everObserved = false;
+    let reprovisionAttempts = 0;
 
     while (Date.now() < deadline) {
       const sandbox = await this.fetchSandbox(sandboxName);
       if (sandbox) {
+        everObserved = true;
+        missingSince = null;
         const phase = sandbox.status?.phase ?? "Pending";
         const message = sandbox.status?.message?.trim() ?? "";
         const phaseChanged = phase !== lastPhase;
@@ -3928,29 +3949,36 @@ export class TaskService {
             /lacks capacity/i.test(lastMessage) ||
             (/not found/i.test(lastMessage) &&
               /firecracker\s*host/i.test(lastMessage));
-          if (retryableCapacity && Date.now() < deadline - 30_000) {
+          if (
+            retryableCapacity &&
+            reprovision &&
+            Date.now() < deadline - 30_000
+          ) {
             const reclaimed = await this.reclaimDevboxCapacity(taskId, 1);
-            if (reclaimed > 0) {
-              await this.deleteSandbox(sandboxName);
-              await this.waitForSandboxDeleted(sandboxName);
-              await sleep(3_000);
-              lastPhase = "unknown";
-              lastMessage = "";
-              pendingSince = null;
-              continue;
-            }
             this.emit(
               "sandbox.provisioning",
               taskId,
-              `Waiting for execution host capacity (${lastMessage})`,
+              reclaimed > 0
+                ? `Reclaimed ${reclaimed} devbox(es); re-creating sandbox`
+                : `Waiting for execution host capacity (${lastMessage})`,
               {
                 sandboxName,
                 phase,
-                message: lastMessage,
-                waitingForCapacity: true,
+                message: lastMessage || undefined,
+                waitingForCapacity: reclaimed === 0,
+                reclaimedSandboxes: reclaimed,
               },
             );
-            await sleep(5_000);
+            // The failed sandbox must be removed and re-created; otherwise the
+            // orchestrator holds no record and the poll loop below would wait
+            // forever on a sandbox that will never exist again.
+            await this.deleteSandbox(sandboxName);
+            await this.waitForSandboxDeleted(sandboxName);
+            await sleep(reclaimed > 0 ? 3_000 : 5_000);
+            await reprovision();
+            lastPhase = "unknown";
+            lastMessage = "";
+            pendingSince = null;
             continue;
           }
           const hostRegistryHint =
@@ -3975,31 +4003,88 @@ export class TaskService {
                 : failureMessage,
           );
         }
-      } else if (Date.now() - lastProgressAt >= 3_000) {
-        lastProgressAt = Date.now();
-        this.emit(
-          "sandbox.provisioning",
-          taskId,
-          "Sandbox not found in orchestrator yet — still waiting",
-          {
+      } else {
+        missingSince ??= Date.now();
+        const missingMs = Date.now() - missingSince;
+
+        // A create/delete race (e.g. reclaiming a stale same-named sandbox)
+        // can leave the orchestrator with no record. Rather than polling a
+        // ghost until timeout, re-issue the create request once it has been
+        // missing long enough.
+        if (
+          reprovision &&
+          missingMs > 15_000 &&
+          reprovisionAttempts < 3 &&
+          Date.now() < deadline - 30_000
+        ) {
+          reprovisionAttempts += 1;
+          this.emit(
+            "sandbox.provisioning",
+            taskId,
+            everObserved
+              ? "Sandbox disappeared from orchestrator — re-creating"
+              : "Sandbox was never registered — re-creating",
+            {
+              sandboxName,
+              phase: "unknown",
+              orchestratorUrl: this.orchestratorUrl,
+              reprovisionAttempt: reprovisionAttempts,
+            },
+          );
+          await reprovision();
+          missingSince = null;
+          await sleep(1_000);
+          continue;
+        }
+
+        // After re-create attempts are exhausted, fail fast instead of
+        // burning the full ready timeout on a sandbox that will never appear.
+        if (missingMs > 45_000 && (!reprovision || reprovisionAttempts >= 3)) {
+          const missingMessage = everObserved
+            ? `sandbox ${sandboxName} disappeared from the orchestrator and could not be re-created for task ${taskId}`
+            : `sandbox ${sandboxName} was never registered with the orchestrator for task ${taskId}`;
+          this.emit("sandbox.failed", taskId, missingMessage, {
             sandboxName,
             phase: "unknown",
             orchestratorUrl: this.orchestratorUrl,
-          },
-        );
+            reprovisionAttempts,
+            missingMs,
+          });
+          throw new Error(missingMessage);
+        }
+
+        if (Date.now() - lastProgressAt >= 3_000) {
+          lastProgressAt = Date.now();
+          this.emit(
+            "sandbox.provisioning",
+            taskId,
+            "Sandbox not found in orchestrator yet — still waiting",
+            {
+              sandboxName,
+              phase: "unknown",
+              orchestratorUrl: this.orchestratorUrl,
+            },
+          );
+        }
       }
       await sleep(500);
     }
 
-    const detail = lastMessage
-      ? ` (phase=${lastPhase}, ${lastMessage})`
-      : ` (phase=${lastPhase})`;
+    const detail = !everObserved
+      ? " (sandbox was never found in orchestrator)"
+      : lastMessage
+        ? ` (phase=${lastPhase}, ${lastMessage})`
+        : lastPhase === "unknown"
+          ? " (sandbox disappeared from orchestrator)"
+          : ` (phase=${lastPhase})`;
     const timeoutMessage = `sandbox ${sandboxName} did not become ready for task ${taskId} within ${this.sandboxReadyTimeoutMs / 1000}s${detail}`;
     this.emit("sandbox.failed", taskId, timeoutMessage, {
       sandboxName,
       phase: lastPhase,
       message: lastMessage || undefined,
       timeoutSeconds: this.sandboxReadyTimeoutMs / 1000,
+      everObserved,
+      reprovisionAttempts,
     });
     throw new Error(timeoutMessage);
   }
