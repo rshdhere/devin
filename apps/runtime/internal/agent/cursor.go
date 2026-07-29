@@ -2,24 +2,14 @@ package agent
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/rshdhere/devin/apps/runtime/internal/executil"
 )
 
 type CursorRunner struct {
 	cfg Config
-}
-
-type cursorStreamEvent struct {
-	Type     string `json:"type"`
-	Subtype  string `json:"subtype"`
-	IsError  bool   `json:"is_error"`
-	Result   string `json:"result"`
-	Duration int64  `json:"duration_ms"`
 }
 
 func (r *CursorRunner) Name() string {
@@ -81,28 +71,36 @@ func (r *CursorRunner) Run(
 		"bin":     bin,
 	})
 
-	var lastPublish time.Time
 	var resultText string
 	var gotResult bool
 	var sawToolCall bool
 	var durationMs int64
 
 	result, runErr := executil.RunStreamingUntil(ctx, workDir, command, env, func(line executil.OutputLine) (bool, error) {
-		if time.Since(lastPublish) >= 100*time.Millisecond || len(line.Line) >= 200 {
-			lastPublish = time.Now()
-			publish("agent.output", line.Line, map[string]any{
-				"stream": line.Stream,
-			})
-		}
-
-		var evt cursorStreamEvent
-		if json.Unmarshal([]byte(line.Line), &evt) != nil {
+		evt, isStreamEvent := parseCursorEvent(line.Line)
+		if !isStreamEvent {
+			// Non-JSON output (stderr, installer progress). Forward verbatim —
+			// dropping it is what made runs look frozen in the UI.
+			if text := truncateMessage(line.Line); text != "" {
+				publish("agent.output", text, map[string]any{
+					"stream": line.Stream,
+				})
+			}
 			return false, nil
 		}
 
-		if evt.Type == "tool_call" {
+		for _, published := range summarizeCursorEvent(evt) {
+			publish(published.Type, published.Message, published.Data)
+		}
+
+		if evt.Type == "tool_call" || evt.Type == "tool_use" {
 			sawToolCall = true
 			return false, nil
+		}
+		for _, part := range evt.contentParts() {
+			if part.Type == "tool_use" {
+				sawToolCall = true
+			}
 		}
 
 		if evt.Type != "result" {

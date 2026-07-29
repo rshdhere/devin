@@ -1,0 +1,199 @@
+package agent
+
+import (
+	"encoding/json"
+	"fmt"
+	"strings"
+)
+
+// maxPublishedMessage bounds a single event message. Agent payloads (file
+// contents, diffs) can be megabytes and would otherwise flood the event bus.
+const maxPublishedMessage = 2000
+
+type cursorStreamEvent struct {
+	Type     string          `json:"type"`
+	Subtype  string          `json:"subtype"`
+	IsError  bool            `json:"is_error"`
+	Result   string          `json:"result"`
+	Duration int64           `json:"duration_ms"`
+	Message  json.RawMessage `json:"message"`
+	Name     string          `json:"name"`
+	Tool     string          `json:"tool"`
+	ToolName string          `json:"tool_name"`
+	Input    json.RawMessage `json:"input"`
+}
+
+type cursorMessage struct {
+	Role    string          `json:"role"`
+	Content json.RawMessage `json:"content"`
+}
+
+type cursorContentPart struct {
+	Type  string          `json:"type"`
+	Text  string          `json:"text"`
+	Name  string          `json:"name"`
+	Input json.RawMessage `json:"input"`
+}
+
+// publishedEvent is a human-readable projection of one stream-json line.
+type publishedEvent struct {
+	Type    string
+	Message string
+	Data    map[string]any
+}
+
+func truncateMessage(value string) string {
+	value = strings.TrimSpace(value)
+	if len(value) <= maxPublishedMessage {
+		return value
+	}
+	return value[:maxPublishedMessage] + "… (truncated)"
+}
+
+// parseCursorEvent decodes a stream-json line. ok is false for non-JSON lines
+// (progress bars, stderr noise) which callers should forward verbatim.
+func parseCursorEvent(line string) (cursorStreamEvent, bool) {
+	trimmed := strings.TrimSpace(line)
+	if !strings.HasPrefix(trimmed, "{") {
+		return cursorStreamEvent{}, false
+	}
+	var evt cursorStreamEvent
+	if json.Unmarshal([]byte(trimmed), &evt) != nil {
+		return cursorStreamEvent{}, false
+	}
+	if evt.Type == "" {
+		return cursorStreamEvent{}, false
+	}
+	return evt, true
+}
+
+func (e cursorStreamEvent) contentParts() []cursorContentPart {
+	if len(e.Message) == 0 {
+		return nil
+	}
+	var msg cursorMessage
+	if json.Unmarshal(e.Message, &msg) != nil {
+		return nil
+	}
+	if len(msg.Content) == 0 {
+		return nil
+	}
+	// content is either a plain string or an array of typed blocks.
+	var text string
+	if json.Unmarshal(msg.Content, &text) == nil {
+		if strings.TrimSpace(text) == "" {
+			return nil
+		}
+		return []cursorContentPart{{Type: "text", Text: text}}
+	}
+	var parts []cursorContentPart
+	if json.Unmarshal(msg.Content, &parts) != nil {
+		return nil
+	}
+	return parts
+}
+
+func (e cursorStreamEvent) toolLabel() string {
+	for _, candidate := range []string{e.ToolName, e.Tool, e.Name} {
+		if strings.TrimSpace(candidate) != "" {
+			return strings.TrimSpace(candidate)
+		}
+	}
+	for _, part := range e.contentParts() {
+		if part.Type == "tool_use" && strings.TrimSpace(part.Name) != "" {
+			return strings.TrimSpace(part.Name)
+		}
+	}
+	return ""
+}
+
+// toolDetail pulls the most useful identifier out of a tool input payload so the
+// activity feed shows "Read src/app/page.tsx" instead of a bare tool name.
+func toolDetail(raw json.RawMessage) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	var fields map[string]any
+	if json.Unmarshal(raw, &fields) != nil {
+		return ""
+	}
+	for _, key := range []string{
+		"command", "path", "file_path", "filePath", "target_file",
+		"pattern", "query", "url",
+	} {
+		if value, ok := fields[key]; ok {
+			if text, ok := value.(string); ok && strings.TrimSpace(text) != "" {
+				return truncateMessage(text)
+			}
+		}
+	}
+	return ""
+}
+
+func (e cursorStreamEvent) toolInput() json.RawMessage {
+	if len(e.Input) > 0 {
+		return e.Input
+	}
+	for _, part := range e.contentParts() {
+		if part.Type == "tool_use" && len(part.Input) > 0 {
+			return part.Input
+		}
+	}
+	return nil
+}
+
+// summarizeCursorEvent converts a parsed stream event into readable events.
+// Returning an empty slice means the event carries no user-facing information.
+func summarizeCursorEvent(evt cursorStreamEvent) []publishedEvent {
+	switch evt.Type {
+	case "assistant", "message":
+		var out []publishedEvent
+		for _, part := range evt.contentParts() {
+			switch part.Type {
+			case "text", "":
+				if text := truncateMessage(part.Text); text != "" {
+					out = append(out, publishedEvent{
+						Type:    "agent.output",
+						Message: text,
+						Data:    map[string]any{"stream": "assistant"},
+					})
+				}
+			case "tool_use":
+				out = append(out, toolEvent(part.Name, toolDetail(part.Input)))
+			}
+		}
+		return out
+
+	case "tool_call", "tool_use":
+		return []publishedEvent{toolEvent(evt.toolLabel(), toolDetail(evt.toolInput()))}
+
+	case "result":
+		message := truncateMessage(evt.Result)
+		if message == "" {
+			message = "cursor agent finished"
+		}
+		data := map[string]any{"durationMs": evt.Duration}
+		if evt.IsError {
+			return []publishedEvent{{Type: "agent.output", Message: message, Data: data}}
+		}
+		return []publishedEvent{{Type: "agent.output", Message: message, Data: data}}
+	}
+
+	return nil
+}
+
+func toolEvent(name, detail string) publishedEvent {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		name = "tool"
+	}
+	message := name
+	if detail != "" {
+		message = fmt.Sprintf("%s %s", name, detail)
+	}
+	data := map[string]any{"tool": name}
+	if detail != "" {
+		data["detail"] = detail
+	}
+	return publishedEvent{Type: "agent.tool", Message: message, Data: data}
+}

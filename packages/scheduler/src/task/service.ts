@@ -4449,6 +4449,26 @@ function buildCommitMessage(subject: string): string {
   return `${subject}\n\n${coAuthorTrailer()}`;
 }
 
+/**
+ * Skill installs are six cold `npx` fetches inside the microVM before any
+ * product code gets written, which dominated run time. Opt in explicitly.
+ */
+function agentSkillsEnabled(): boolean {
+  return process.env.AGENT_SKILLS_ENABLED?.trim().toLowerCase() === "true";
+}
+
+function agentSkillGuidance(): string[] {
+  if (!agentSkillsEnabled()) {
+    return [];
+  }
+  return [
+    "- Optionally install agent skills first (skip any that fail — do not retry):",
+    "  - `npx --yes skills add https://github.com/anthropics/skills --skill frontend-design`",
+    "  - `npx --yes skills add https://github.com/vercel-labs/agent-skills --skill vercel-react-best-practices`",
+    "  - `npx --yes skills add https://github.com/101-skills/skills --skill landing-page-design`",
+  ];
+}
+
 function nextjsPromptGuidance(stackRuntime?: StackRuntime): string[] {
   if (stackRuntime !== "nextjs") {
     return [];
@@ -4457,22 +4477,20 @@ function nextjsPromptGuidance(stackRuntime?: StackRuntime): string[] {
     "",
     "Next.js UI requirements:",
     "- Build the app with Next.js (App Router) and TypeScript",
-    "- Use shadcn/ui for all component styling — initialize it with " +
-      "`npx --yes shadcn@latest init -d`, then add components with " +
-      "`npx --yes shadcn@latest add <component>` as needed (Tailwind CSS is required)",
-    "- Install required agent skills before building (run each once, then follow them):",
-    "  - `npx --yes skills add https://github.com/anthropics/skills --skill frontend-design`",
-    "  - `npx --yes skills add https://github.com/vercel-labs/agent-skills --skill vercel-react-best-practices`",
-    "  - `npx --yes skills add https://github.com/mattpocock/skills --skill improve-codebase-architecture`",
-    "  - `npx --yes skills add https://github.com/shadcn/ui --skill shadcn`",
-    "  - `npx --yes skills add https://github.com/supabase/agent-skills --skill supabase`",
-    "  - `npx --yes skills add https://github.com/101-skills/skills --skill landing-page-design`",
-    "- Apply frontend-design and landing-page-design for layout/visual polish, " +
-      "shadcn for component patterns, vercel-react-best-practices for React/Next.js, " +
-      "improve-codebase-architecture for module boundaries, and supabase when backend/auth/data is needed",
-    "- Compose the interface from shadcn/ui primitives — do not hand-roll " +
-      "unstyled elements when a shadcn component exists",
+    "- Use shadcn/ui for component styling when it is already configured; " +
+      "initialize it with `npx --yes shadcn@latest init -d` only if the project " +
+      "has no styling setup yet (Tailwind CSS is required)",
+    "- Prefer writing components directly over running many `shadcn add` commands — " +
+      "each npx call is slow in the sandbox",
+    "- Apply solid visual design: clear layout, consistent spacing, accessible " +
+      "contrast, responsive behaviour, and hover/focus states",
+    ...agentSkillGuidance(),
     "- Verify `npm run build` succeeds before finishing",
+    "",
+    "Work efficiently — the run has a hard timeout:",
+    "- Ship a working product first, then polish if time remains",
+    "- Do not re-run installs that already succeeded",
+    "- Narrate what you are doing in short messages so progress is visible",
   ];
 }
 
