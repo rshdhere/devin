@@ -9,12 +9,12 @@ import {
   useState,
   type ReactNode,
 } from "react";
+import { useRouter } from "next/navigation";
 import { createTask, fetchTasks } from "@/lib/api/tasks";
 import type { Task } from "@devin/types";
 
 interface SessionsContextValue {
   tasks: Task[];
-  activeTaskId: string | null;
   isLoading: boolean;
   refreshTasks: () => Promise<void>;
   startSession: (input: {
@@ -28,15 +28,13 @@ interface SessionsContextValue {
     issueTitle?: string;
     issueBody?: string;
   }) => Promise<Task>;
-  selectTask: (taskId: string | null) => void;
-  activeTask: Task | null;
 }
 
 const SessionsContext = createContext<SessionsContextValue | null>(null);
 
 export function SessionsProvider({ children }: { children: ReactNode }) {
+  const router = useRouter();
   const [tasks, setTasks] = useState<Task[]>([]);
-  const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
   const refreshTasks = useCallback(async () => {
@@ -81,40 +79,20 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
     }) => {
       const task = await createTask(input);
       setTasks((current) => [task, ...current]);
-      setActiveTaskId(task.id);
+      router.push(`/s/${task.id}`);
       return task;
     },
-    [],
-  );
-
-  const selectTask = useCallback((taskId: string | null) => {
-    setActiveTaskId(taskId);
-  }, []);
-
-  const activeTask = useMemo(
-    () => tasks.find((task) => task.id === activeTaskId) ?? null,
-    [tasks, activeTaskId],
+    [router],
   );
 
   const value = useMemo(
     () => ({
       tasks,
-      activeTaskId,
       isLoading,
       refreshTasks,
       startSession,
-      selectTask,
-      activeTask,
     }),
-    [
-      tasks,
-      activeTaskId,
-      isLoading,
-      refreshTasks,
-      startSession,
-      selectTask,
-      activeTask,
-    ],
+    [tasks, isLoading, refreshTasks, startSession],
   );
 
   return (

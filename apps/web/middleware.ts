@@ -6,14 +6,29 @@ const SESSION_COOKIE_NAMES = [
   "better-auth.session_token",
 ] as const;
 
+const PROTECTED_PREFIXES = [
+  "/s",
+  "/ask",
+  "/automations",
+  "/review",
+  "/wiki",
+  "/dashboard",
+] as const;
+
 function hasSessionCookie(request: NextRequest): boolean {
   return SESSION_COOKIE_NAMES.some((name) => request.cookies.has(name));
+}
+
+function isProtectedPath(pathname: string): boolean {
+  return PROTECTED_PREFIXES.some(
+    (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`),
+  );
 }
 
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
-  if (pathname.startsWith("/dashboard") && !hasSessionCookie(request)) {
+  if (isProtectedPath(pathname) && !hasSessionCookie(request)) {
     const loginUrl = request.nextUrl.clone();
     loginUrl.pathname = "/login";
     loginUrl.search = "";
@@ -21,15 +36,29 @@ export function middleware(request: NextRequest) {
   }
 
   if (pathname === "/login" && hasSessionCookie(request)) {
-    const dashboardUrl = request.nextUrl.clone();
-    dashboardUrl.pathname = "/dashboard";
-    dashboardUrl.search = "";
-    return NextResponse.redirect(dashboardUrl);
+    const sessionsUrl = request.nextUrl.clone();
+    sessionsUrl.pathname = "/s";
+    sessionsUrl.search = "";
+    return NextResponse.redirect(sessionsUrl);
   }
 
   return NextResponse.next();
 }
 
 export const config = {
-  matcher: ["/dashboard/:path*", "/login"],
+  matcher: [
+    "/s",
+    "/s/:path*",
+    "/ask",
+    "/ask/:path*",
+    "/automations",
+    "/automations/:path*",
+    "/review",
+    "/review/:path*",
+    "/wiki",
+    "/wiki/:path*",
+    "/dashboard",
+    "/dashboard/:path*",
+    "/login",
+  ],
 };

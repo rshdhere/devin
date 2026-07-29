@@ -1,5 +1,7 @@
 "use client";
 
+import Link from "next/link";
+import { usePathname } from "next/navigation";
 import {
   BookOpen,
   Download,
@@ -17,8 +19,10 @@ import {
   Sparkles,
 } from "lucide-react";
 import {
-  type NavId,
+  navIdFromPathname,
+  navItems,
   recentEmptyLabels,
+  sessionIdFromPathname,
 } from "@/components/dashboard/dashboard-nav";
 import { useSessions } from "@/components/dashboard/sessions-context";
 import { reviewRecentItems } from "@/components/dashboard/views/review-view";
@@ -26,22 +30,24 @@ import { MotionButton } from "@/components/dashboard/motion-button";
 import { UserMenu } from "@/components/dashboard/user-menu";
 import { cn } from "@/lib/utils";
 
+const navIcons = {
+  sessions: MessageSquare,
+  ask: MessageCircleQuestion,
+  automations: History,
+  review: GitBranch,
+  wiki: BookOpen,
+} as const;
+
 interface SidebarProps {
   userName: string;
-  activeNav: NavId;
-  onNavChange: (nav: NavId) => void;
 }
 
-const navItems = [
-  { id: "sessions" as const, label: "Sessions", icon: MessageSquare },
-  { id: "ask" as const, label: "Ask", icon: MessageCircleQuestion },
-  { id: "automations" as const, label: "Automations", icon: History },
-  { id: "review" as const, label: "Review", icon: GitBranch },
-  { id: "wiki" as const, label: "Wiki", icon: BookOpen },
-];
+export function Sidebar({ userName }: SidebarProps) {
+  const pathname = usePathname();
+  const activeNav = navIdFromPathname(pathname);
+  const activeSessionId = sessionIdFromPathname(pathname);
+  const { tasks } = useSessions();
 
-export function Sidebar({ userName, activeNav, onNavChange }: SidebarProps) {
-  const { tasks, activeTaskId, selectTask } = useSessions();
   return (
     <aside className="flex h-full w-[240px] shrink-0 flex-col border-r border-[#252525] bg-[#111111]">
       <div className="flex items-center gap-2 px-3 pt-3 pb-2">
@@ -69,14 +75,13 @@ export function Sidebar({ userName, activeNav, onNavChange }: SidebarProps) {
 
       <nav className="mt-1 space-y-0.5 px-2">
         {navItems.map((item) => {
-          const Icon = item.icon;
+          const Icon = navIcons[item.id];
           const isActive = activeNav === item.id;
 
           return (
-            <MotionButton
+            <Link
               key={item.id}
-              type="button"
-              onClick={() => onNavChange(item.id)}
+              href={item.href}
               className={cn(
                 "flex w-full cursor-pointer items-center gap-2.5 rounded-lg px-2.5 py-2 text-[14px] font-medium transition-all duration-150",
                 isActive
@@ -92,7 +97,7 @@ export function Sidebar({ userName, activeNav, onNavChange }: SidebarProps) {
                 strokeWidth={1.75}
               />
               {item.label}
-            </MotionButton>
+            </Link>
           );
         })}
       </nav>
@@ -109,18 +114,13 @@ export function Sidebar({ userName, activeNav, onNavChange }: SidebarProps) {
             >
               <Search className="size-3.5" strokeWidth={1.75} />
             </MotionButton>
-            <MotionButton
-              type="button"
-              pressStyle="icon"
-              onClick={() => {
-                onNavChange("sessions");
-                selectTask(null);
-              }}
+            <Link
+              href="/s"
               className="cursor-pointer rounded-md p-1 text-gray-500 transition-colors hover:bg-[#1a1a1a] hover:text-gray-300"
               aria-label="Create new"
             >
               <Plus className="size-3.5" strokeWidth={1.75} />
-            </MotionButton>
+            </Link>
             <MotionButton
               type="button"
               pressStyle="icon"
@@ -158,13 +158,12 @@ export function Sidebar({ userName, activeNav, onNavChange }: SidebarProps) {
               </p>
             ) : (
               tasks.slice(0, 12).map((task) => (
-                <MotionButton
+                <Link
                   key={task.id}
-                  type="button"
-                  onClick={() => selectTask(task.id)}
+                  href={`/s/${task.id}`}
                   className={cn(
                     "flex w-full cursor-pointer items-start gap-2 rounded-md px-1 py-2 text-left transition-colors hover:bg-[#1a1a1a]",
-                    activeTaskId === task.id && "bg-[#1a1a1a]",
+                    activeSessionId === task.id && "bg-[#1a1a1a]",
                   )}
                 >
                   <MessageSquare className="mt-0.5 size-3.5 shrink-0 text-gray-500" />
@@ -176,7 +175,7 @@ export function Sidebar({ userName, activeNav, onNavChange }: SidebarProps) {
                       {task.repository ?? task.status}
                     </p>
                   </div>
-                </MotionButton>
+                </Link>
               ))
             )}
           </div>

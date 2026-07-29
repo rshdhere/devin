@@ -105,7 +105,7 @@ export function GitHubPermissionsPanel({
       await authClient.linkSocial({
         provider: "github",
         scopes: [...GITHUB_REPO_SCOPES, "read:user", "user:email"],
-        callbackURL: getCallbackURL("/dashboard"),
+        callbackURL: getCallbackURL("/s"),
       });
     } catch {
       setError("Failed to connect GitHub. Please try again.");
@@ -121,7 +121,7 @@ export function GitHubPermissionsPanel({
       await authClient.linkSocial({
         provider: "github",
         scopes: ["repo"],
-        callbackURL: getCallbackURL("/dashboard"),
+        callbackURL: getCallbackURL("/s"),
       });
     } catch {
       setError("Failed to request repository access. Please try again.");

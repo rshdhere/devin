@@ -50,7 +50,7 @@ export function LoginForm() {
     const { error: signInError } = await authClient.signIn.magicLink({
       email,
       name: getNameFromEmail(email),
-      callbackURL: getCallbackURL("/dashboard"),
+      callbackURL: getCallbackURL("/s"),
       errorCallbackURL: getCallbackURL("/login"),
     });
 

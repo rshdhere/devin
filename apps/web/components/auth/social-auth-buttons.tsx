@@ -48,7 +48,7 @@ export function SocialAuthButtons({ callbackURL }: SocialAuthButtonsProps) {
     setLoadingProvider(provider.id);
     setError(null);
 
-    const targetCallbackURL = callbackURL ?? getCallbackURL("/dashboard");
+    const targetCallbackURL = callbackURL ?? getCallbackURL("/s");
 
     try {
       if (provider.type === "social") {

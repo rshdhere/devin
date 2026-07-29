@@ -5,7 +5,6 @@ import { motion } from "motion/react";
 import { GitHubPermissionsPanel } from "@/components/dashboard/github-permissions-panel";
 import { OnboardingPanel } from "@/components/dashboard/onboarding-panel";
 import { PromptComposer } from "@/components/dashboard/prompt-composer";
-import { SessionDetail } from "@/components/dashboard/session-detail";
 import { useSessions } from "@/components/dashboard/sessions-context";
 import { fetchDashboardSettingsSafe } from "@/lib/dashboard-settings-api";
 import { fetchGitHubStatusSafe } from "@/lib/github-api";
@@ -31,7 +30,7 @@ const collapseTransition = {
 };
 
 export function SessionsView() {
-  const { activeTask, selectTask, tasks } = useSessions();
+  const { tasks } = useSessions();
   const panelSectionRef = useRef<HTMLDivElement>(null);
   const [panelHeight, setPanelHeight] = useState<number | null>(null);
   const [isCollapsing, setIsCollapsing] = useState(false);
@@ -72,18 +71,6 @@ export function SessionsView() {
         setIsCollapsing(true);
       });
     });
-  }
-
-  if (activeTask) {
-    return (
-      <div className="flex min-h-0 w-full max-w-[900px] flex-1 flex-col self-center overflow-hidden">
-        <SessionDetail
-          key={activeTask.id}
-          task={activeTask}
-          onBack={() => selectTask(null)}
-        />
-      </div>
-    );
   }
 
   return (

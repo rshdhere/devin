@@ -9,7 +9,7 @@ export const authConfig = {
   webAppUrl,
 } as const;
 
-export function getCallbackURL(path = "/dashboard") {
+export function getCallbackURL(path = "/s") {
   if (path.startsWith("http://") || path.startsWith("https://")) {
     return path;
   }

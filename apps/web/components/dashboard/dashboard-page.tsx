@@ -2,12 +2,13 @@
 
 import { useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import type { ReactNode } from "react";
 import { DashboardShell } from "@/components/dashboard/dashboard-shell";
 import { LoadingScreen } from "@/components/loading-screen";
 import { authClient } from "@/lib/auth-client";
 import { useMinimumLoadingDuration } from "@/lib/use-minimum-loading-duration";
 
-export function DashboardPage() {
+export function DashboardPage({ children }: { children: ReactNode }) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { data: session, isPending } = authClient.useSession();
@@ -41,5 +42,7 @@ export function DashboardPage() {
     return <LoadingScreen />;
   }
 
-  return <DashboardShell userName={session.user.name} />;
+  return (
+    <DashboardShell userName={session.user.name}>{children}</DashboardShell>
+  );
 }

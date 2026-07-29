@@ -3,7 +3,7 @@ import { sendVerificationEmail } from "@devin/email";
 
 function getWebAppUrl() {
   const base = process.env.WEB_APP_URL ?? "http://localhost:3000";
-  return `${base.replace(/\/$/, "")}/dashboard`;
+  return `${base.replace(/\/$/, "")}/s`;
 }
 
 function getAuthBaseUrl() {

@@ -19,7 +19,7 @@ export function AuthRedirectIfLoggedIn({ children }: { children: ReactNode }) {
     }
 
     if (session) {
-      router.replace(getCallbackURL("/dashboard"));
+      router.replace(getCallbackURL("/s"));
       return;
     }
 
@@ -31,7 +31,7 @@ export function AuthRedirectIfLoggedIn({ children }: { children: ReactNode }) {
         return;
       }
 
-      router.replace(getCallbackURL("/dashboard"));
+      router.replace(getCallbackURL("/s"));
     })();
 
     return () => {
