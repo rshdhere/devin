@@ -42,6 +42,12 @@ func TestPayloadsAreValidBashAndSelfInstalling(t *testing.T) {
 			t.Errorf("%s payload does not bootstrap devin-infra", name)
 		}
 	}
+	if !strings.Contains(cases["deploy"], "docker rm -f scheduler firecracker") {
+		t.Error("deploy payload must clear leftover container names before host-deploy")
+	}
+	if !strings.Contains(cases["deploy"], "docker.io/example/devin-infra:abc123") {
+		t.Error("deploy payload must refresh CLI from the requested image tag")
+	}
 
 	// bootstrap-snapshots wraps its inner script in base64; the CLI bootstrap
 	// must live inside that payload, not the outer launcher.

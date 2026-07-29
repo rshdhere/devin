@@ -2,11 +2,11 @@ package hostpayload
 
 import "fmt"
 
-// EnsureCLI emits bash that guarantees /usr/local/bin/devin-infra exists.
+// EnsureCLI emits bash that installs or refreshes /usr/local/bin/devin-infra.
 //
-// SSM payloads run on hosts whose userdata predates the Go CLI, so payloads that
-// merely check for the binary fail permanently and silently block every deploy.
-// Prefer the published devin-infra image, then fall back to building from git.
+// SSM payloads run on hosts whose userdata predates the Go CLI, and on hosts
+// that already have a stale binary from an earlier deploy. Always prefer the
+// published image for the requested tag so host-deploy picks up payload fixes.
 func EnsureCLI(registry, tag, repoRef string) string {
 	if registry == "" {
 		registry = "docker.io/rshdhere"
@@ -18,11 +18,10 @@ func EnsureCLI(registry, tag, repoRef string) string {
 		repoRef = "main"
 	}
 	return fmt.Sprintf(`install_devin_infra() {
-  if [ -x /usr/local/bin/devin-infra ]; then
-    return 0
-  fi
-  echo "devin-infra is not installed on this host — installing now" >&2
-  for image in %q %q; do
+  primary=%q
+  fallback=%q
+  for image in "$primary" "$fallback"; do
+    [ -n "$image" ] || continue
     if ! docker pull "$image" >/dev/null 2>&1; then
       continue
     fi
@@ -33,11 +32,15 @@ func EnsureCLI(registry, tag, repoRef string) string {
     if docker cp devin-infra-extract:/usr/local/bin/devin-infra /usr/local/bin/devin-infra; then
       docker rm -f devin-infra-extract >/dev/null 2>&1 || true
       chmod 755 /usr/local/bin/devin-infra
-      echo "installed devin-infra from $image" >&2
+      echo "installed/refreshed devin-infra from $image" >&2
       return 0
     fi
     docker rm -f devin-infra-extract >/dev/null 2>&1 || true
   done
+  if [ -x /usr/local/bin/devin-infra ]; then
+    echo "warning: could not refresh devin-infra from image; using existing binary" >&2
+    return 0
+  fi
   echo "devin-infra image unavailable — building CLI from source" >&2
   export DEBIAN_FRONTEND=noninteractive
   apt-get update -y
