@@ -1,7 +1,7 @@
 # `@devin/scheduler`
 
 Task orchestration: queue jobs, provision sandboxes, drive the runtime agent,
-stream events, and manage previews.
+stream events, and push completed work to GitHub.
 
 Consumed by `apps/scheduler` / `apps/brain` via:
 
@@ -39,9 +39,8 @@ src/
   github/
     client.ts              # GitHub repo / PR / issue helpers
   preview/
-    registry.ts            # Preview slug routing
-    proxy.ts               # Host-based preview proxy
-    deploy.ts              # Production preview deploy
+    registry.ts            # Preview slug routing (legacy)
+    proxy.ts               # Host-based preview proxy (legacy)
   diagnostics/
     collect.ts             # Infra / sandbox / host probes
 ```
@@ -52,7 +51,7 @@ src/
 2. Reclaim capacity and provision sandboxes through the orchestrator
 3. Clone or bootstrap greenfield repos, then run the Cursor/Claude agent
 4. Publish activity on `@devin/events` and persist via `TaskStore`
-5. Optionally deploy and proxy per-task previews
+5. Push completed work to GitHub (commit / PR) — preview deploy is not supported
 
 ## Key env
 
@@ -62,7 +61,7 @@ src/
 | `FIRECRACKER_HOST_URL`           | Host daemon for registration / probes     |
 | `SCHEDULER_HOST_NAME`            | Preferred FirecrackerHost CR name         |
 | `SANDBOX_CPU` / `SANDBOX_MEMORY` | Default sandbox sizing                    |
-| Queue / preview vars             | See `start-server.ts` and preview modules |
+| Queue vars                       | See `start-server.ts`                     |
 
 ## Develop
 

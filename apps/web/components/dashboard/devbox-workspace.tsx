@@ -365,8 +365,8 @@ function BrowserPanel({ task }: { task: Task }) {
   if (!previewUrl) {
     return (
       <div className="px-4 py-8 text-center text-[12px] text-gray-500">
-        No preview URL yet. When the agent deploys a preview, it will appear
-        here in an embedded browser panel.
+        Preview deploy is not supported. Devin pushes completed work to GitHub
+        only — open the repository from the session header to review changes.
       </div>
     );
   }

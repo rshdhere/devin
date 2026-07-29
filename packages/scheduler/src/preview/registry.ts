@@ -16,14 +16,6 @@ export function previewBaseDomain(): string {
   );
 }
 
-export function previewDeployEnabled(): boolean {
-  const flag = process.env.PREVIEW_DEPLOY_ENABLED?.trim().toLowerCase();
-  if (flag === "false" || flag === "0" || flag === "no") {
-    return false;
-  }
-  return true;
-}
-
 export function buildPreviewUrl(slug: string): string {
   const scheme = process.env.PREVIEW_URL_SCHEME?.trim() || "https";
   return `${scheme}://${slug}.${previewBaseDomain()}`;

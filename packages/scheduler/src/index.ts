@@ -27,7 +27,6 @@ export type { StartSchedulerServerOptions } from "./start-server.js";
 export {
   buildPreviewUrl,
   previewBaseDomain,
-  previewDeployEnabled,
   isPreviewTlsDomainAllowed,
   matchPreviewSlug,
 } from "./preview/registry.js";

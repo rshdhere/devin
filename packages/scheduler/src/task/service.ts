@@ -25,7 +25,6 @@ import {
   createGitHubRepositoryUnique,
   fetchDefaultBranch,
   fetchGitHubUserIdentity,
-  setRepositoryHomepage,
   type GitHubUserIdentity,
 } from "../github/client.js";
 import { generateProjectMetadata } from "../greenfield/project-metadata.js";
@@ -42,7 +41,6 @@ import {
   type DraftPlan,
 } from "../greenfield/draft-planner.js";
 import { scaffoldFilesFromDraft } from "../greenfield/scaffold-from-draft.js";
-import { deployProductionPreview } from "../preview/deploy.js";
 import type {
   AgentProvider,
   CreateTaskInput,
@@ -1266,34 +1264,6 @@ export class TaskService {
           });
         }
 
-        if (guestHost) {
-          const preview = await deployProductionPreview({
-            runtime,
-            taskId: task.id,
-            repoCwd,
-            guestHost,
-            emit: (type, message, data) =>
-              this.emit(type, task.id, message, data),
-          });
-          if (preview) {
-            retainSandboxForPreview = true;
-            this.patchTask(task.id, {
-              previewUrl: preview.previewUrl,
-              deployStatus: "live",
-            });
-            if (githubToken && repository) {
-              await this.attachPreviewHomepage(
-                task.id,
-                repository,
-                preview.previewUrl,
-                githubToken,
-              );
-            }
-          } else {
-            this.patchTask(task.id, { deployStatus: "failed" });
-          }
-        }
-
         if (
           job.issueTitle &&
           job.permissions?.canCreateIssue &&
@@ -1304,16 +1274,16 @@ export class TaskService {
         }
       }
 
-      const completionMessage = task.previewUrl
-        ? "Work completed — pushed to GitHub and preview deployed"
-        : runResult.message || "Task completed";
+      const completionMessage =
+        repository && cloneUrl
+          ? "Work completed — pushed to GitHub"
+          : runResult.message || "Task completed";
       this.updateTask(task.id, "completed", completionMessage);
       this.emit("task.completed", task.id, completionMessage, {
         output: runResult.output,
         agent: runResult.agent ?? task.agent,
         prUrl: task.prUrl,
         branch: task.branch,
-        previewUrl: task.previewUrl,
         pushedToGitHub: Boolean(repository && cloneUrl),
         sessionActive: usesRuntimeAgent(task.agent),
       });
@@ -1397,15 +1367,8 @@ export class TaskService {
       throw new Error("task is not awaiting review");
     }
 
-    const {
-      runtime,
-      sandboxName,
-      repoCwd,
-      job,
-      githubToken,
-      createdNewRepo,
-      guestHost,
-    } = session;
+    const { runtime, sandboxName, repoCwd, job, githubToken, createdNewRepo } =
+      session;
 
     try {
       if (job.testCommand) {
@@ -1417,33 +1380,6 @@ export class TaskService {
           greenfield: createdNewRepo,
           createPullRequest: opts.createPullRequest,
         });
-      }
-
-      if (guestHost) {
-        const preview = await deployProductionPreview({
-          runtime,
-          taskId: task.id,
-          repoCwd,
-          guestHost,
-          emit: (type, message, data) =>
-            this.emit(type, task.id, message, data),
-        });
-        if (preview) {
-          this.patchTask(task.id, {
-            previewUrl: preview.previewUrl,
-            deployStatus: "live",
-          });
-          if (githubToken && job.repository) {
-            await this.attachPreviewHomepage(
-              task.id,
-              job.repository,
-              preview.previewUrl,
-              githubToken,
-            );
-          }
-        } else {
-          this.patchTask(task.id, { deployStatus: "failed" });
-        }
       }
 
       if (
@@ -1459,16 +1395,13 @@ export class TaskService {
         ? task.prUrl
           ? "Changes pushed and pull request opened"
           : "Changes pushed to GitHub"
-        : task.previewUrl
-          ? "Changes committed — preview deployed"
-          : "Changes committed and pushed to GitHub";
+        : "Changes committed and pushed to GitHub";
 
       this.updateTask(task.id, "completed", completionMessage);
       this.emit("task.completed", task.id, completionMessage, {
         agent: task.agent,
         prUrl: task.prUrl,
         branch: task.branch,
-        previewUrl: task.previewUrl,
         pushedToGitHub: Boolean(job.repository && job.cloneUrl),
         userApproved: true,
         createPullRequest: opts.createPullRequest,
@@ -3518,33 +3451,6 @@ export class TaskService {
       command: testCommand,
       exitCode: result.exitCode,
     });
-  }
-
-  private async attachPreviewHomepage(
-    taskId: string,
-    repository: string,
-    previewUrl: string,
-    token: string,
-  ): Promise<void> {
-    try {
-      await setRepositoryHomepage(token, repository, previewUrl);
-      this.emit(
-        "deploy.ready",
-        taskId,
-        "Attached preview URL to GitHub repository website",
-        { repository, previewUrl, homepage: previewUrl },
-      );
-    } catch (error) {
-      const message =
-        error instanceof Error
-          ? error.message
-          : "Failed to set repository homepage";
-      this.emit("deploy.ready", taskId, message, {
-        repository,
-        previewUrl,
-        error: message,
-      });
-    }
   }
 
   private async createTaskIssue(

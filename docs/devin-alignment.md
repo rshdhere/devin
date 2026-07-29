@@ -48,7 +48,7 @@ Set `SCHEDULER_URL` on the API server to the brain URL in cloud deployments.
 |-------|-----|-------|
 | **Shell** | `POST /tasks/:id/terminal` (`stream: true`) | Streaming command output from devbox |
 | **Files** | `GET /tasks/:id/files`, `/files/read` | Repo file tree + read-only preview |
-| **Browser** | Embedded iframe of `previewUrl` | Full CDP takeover is future work |
+| **Browser** | Embedded iframe when a legacy `previewUrl` exists | Preview deploy is not supported — Devin pushes to GitHub only |
 
 ## Durable sessions (Postgres)
 
@@ -82,7 +82,7 @@ OpenAI plan → control-plane scaffold push → `nextjs` snapshot verify. Kept f
 |----------------------------|---------------------------|
 | Task queue, Postgres sessions | Shell, git, npm, agent CLI |
 | GitHub API (create repo, open PR) | `git clone`, commit, push |
-| SSE event bus + DB replay | File writes, preview server |
+| SSE event bus + DB replay | File writes |
 | Orchestrator sandbox CR | `/workspace` on tmpfs |
 
 ## Settings

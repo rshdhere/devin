@@ -19,7 +19,6 @@ import {
   GitBranch,
   GitCommit,
   GitPullRequest,
-  Globe,
   Loader2,
   Server,
   Terminal,
@@ -826,118 +825,6 @@ function GitHubProgressBanner({
   );
 }
 
-function PreviewDeployBanner({
-  task,
-  events,
-}: {
-  task: Task;
-  events: TaskEvent[];
-}) {
-  const building = events.some((event) => event.type === "deploy.building");
-  const deployFailed = events.some((event) => event.type === "deploy.failed");
-  const deployReady = events.find((event) => event.type === "deploy.ready");
-  const taskCompleted = events.some((event) => event.type === "task.completed");
-  const taskFailed =
-    task.status === "failed" || events.some((e) => e.type === "task.failed");
-  const latestAgentPush = events
-    .filter(
-      (event) => event.type === "git.push" && event.data?.controlPlane !== true,
-    )
-    .at(-1);
-  const previewUrl =
-    task.previewUrl ||
-    (deployReady?.data?.previewUrl as string | undefined) ||
-    undefined;
-
-  const deployPhaseStarted =
-    building || deployFailed || Boolean(deployReady) || taskCompleted;
-
-  if (taskFailed && !previewUrl) {
-    return (
-      <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 px-4 py-3">
-        <p className="text-[13px] font-medium text-amber-100">
-          Preview deploy skipped
-        </p>
-        <p className="mt-0.5 text-[12px] text-amber-100/70">
-          The agent did not finish successfully, so no live preview was
-          deployed.
-          {task.message ? ` ${task.message}` : ""}
-        </p>
-      </div>
-    );
-  }
-
-  if (!deployPhaseStarted && !latestAgentPush) {
-    return null;
-  }
-
-  if (!deployPhaseStarted) {
-    return null;
-  }
-
-  const isBuilding = building && !previewUrl && !deployFailed;
-  const isLive = Boolean(previewUrl);
-
-  return (
-    <div
-      className={cn(
-        "mb-4 rounded-xl border px-4 py-3",
-        isLive
-          ? "border-emerald-500/30 bg-emerald-500/5"
-          : deployFailed
-            ? "border-amber-500/30 bg-amber-500/5"
-            : "border-[#2a2a2a] bg-[#111]",
-      )}
-    >
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="min-w-0">
-          <p className="text-[13px] font-medium text-gray-200">
-            {isLive
-              ? "Work completed — preview deployed"
-              : isBuilding
-                ? "Building production preview…"
-                : taskCompleted
-                  ? "Work completed and pushed to GitHub"
-                  : "Preparing deployment"}
-          </p>
-          <p className="mt-0.5 text-[12px] text-gray-500">
-            {isLive
-              ? "Production build finished. Your app is live on a preview subdomain."
-              : isBuilding
-                ? "Running npm install, production build, and starting the app in the sandbox."
-                : deployFailed
-                  ? "Preview deploy failed — code was still pushed to GitHub."
-                  : taskCompleted && !previewUrl
-                    ? "Task finished but preview URL is not available yet."
-                    : latestAgentPush
-                      ? "Agent pushed changes — building production preview."
-                      : "Waiting for agent to finish before deploy."}
-          </p>
-        </div>
-        <div className="flex shrink-0 flex-wrap items-center gap-2">
-          {isBuilding ? (
-            <span className="inline-flex items-center gap-1.5 rounded-lg border border-[#333] bg-[#1a1a1a] px-3 py-1.5 text-[12px] text-gray-300">
-              <Loader2 className="size-3.5 animate-spin" />
-              Building…
-            </span>
-          ) : null}
-          {isLive && previewUrl ? (
-            <a
-              href={previewUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-500/40 bg-emerald-500/15 px-3 py-1.5 text-[12px] text-emerald-300 transition-colors hover:bg-emerald-500/25"
-            >
-              Open preview
-              <Globe className="size-3.5" />
-            </a>
-          ) : null}
-        </div>
-      </div>
-    </div>
-  );
-}
-
 function PhaseTimeline({ task, events }: { task: Task; events: TaskEvent[] }) {
   const runtimeAgent = usesRuntimeAgent(task.agent);
   const draftCompleted = events.some(
@@ -1338,14 +1225,6 @@ export function SessionDetail({
             }
           });
         }
-
-        if (event.type === "deploy.ready") {
-          void fetchTask(taskId).then((updated) => {
-            if (!cancelled) {
-              setTask(updated);
-            }
-          });
-        }
       },
       (error) => {
         if (!cancelled) {
@@ -1647,8 +1526,6 @@ export function SessionDetail({
             branch={task.branch}
           />
         ) : null}
-
-        <PreviewDeployBanner task={task} events={events} />
 
         {showDiagnostics ? (
           <DiagnosticsPanel
