@@ -128,15 +128,6 @@
         "typescript": "^5",
       },
     },
-    "packages/config": {
-      "name": "@devin/config",
-      "devDependencies": {
-        "@types/bun": "latest",
-      },
-      "peerDependencies": {
-        "typescript": "^5",
-      },
-    },
     "packages/drizzle": {
       "name": "@devin/drizzle",
       "dependencies": {
@@ -350,8 +341,6 @@
     "@devin/api-v2": ["@devin/api-v2@workspace:packages/api/v2"],
 
     "@devin/brain": ["@devin/brain@workspace:apps/brain"],
-
-    "@devin/config": ["@devin/config@workspace:packages/config"],
 
     "@devin/drizzle": ["@devin/drizzle@workspace:packages/drizzle"],
 
