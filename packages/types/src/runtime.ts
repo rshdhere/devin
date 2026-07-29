@@ -1,5 +1,5 @@
-import type { AgentProvider } from "./agents.js";
-import { usesRuntimeAgent } from "./agents.js";
+import type { AgentProvider } from "./agents";
+import { usesRuntimeAgent } from "./agents";
 
 /** Firecracker golden snapshot names under /var/lib/devin/snapshots/ */
 export const SANDBOX_RUNTIMES = [
