@@ -12,8 +12,6 @@ import (
 	"github.com/containernetworking/plugins/pkg/ns"
 )
 
-// staticFCNetConflist is the canonical fcnet config. Keep in sync with
-// apps/firecracker/config/cni/fcnet.conflist.
 const staticFCNetConflist = `{
   "cniVersion": "0.4.0",
   "name": "fcnet",
@@ -46,8 +44,6 @@ const staticFCNetConflist = `{
 }
 `
 
-// PrepareCNIEnvironment migrates legacy host-local IPAM config to static IPAM,
-// clears obsolete host-local allocation state, and removes stale container dirs.
 func PrepareCNIEnvironment(confDir, networkName string) error {
 	confDir = firstNonEmpty(confDir, "/etc/cni/conf.d")
 	networkName = firstNonEmpty(networkName, "fcnet")

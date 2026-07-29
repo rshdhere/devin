@@ -19,8 +19,6 @@ import (
 	"github.com/rshdhere/devin/apps/firecracker/internal/snapshot"
 )
 
-// restoreNetworkMu serializes CNI setup. Static fcnet IPAM uses a single host-side
-// peer address, so only one microVM network can be provisioned at a time.
 var restoreNetworkMu sync.Mutex
 
 type Launcher struct {

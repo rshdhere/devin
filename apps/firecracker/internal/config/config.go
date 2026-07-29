@@ -15,18 +15,18 @@ type Config struct {
 	PoolSize        int
 	DefaultRuntime  string
 
-	KernelPath      string
-	SnapshotDir     string
-	VMMDir          string
-	FirecrackerBin  string
-	CNINetworkName  string
-	CNIConfDir      string
-	CNIBinPath      string
-	RuntimePort     int
-	WarmVCPU        int32
-	WarmMemoryMiB   int64
-	CapacityCPU     int32
-	CapacityMemory  string
+	KernelPath     string
+	SnapshotDir    string
+	VMMDir         string
+	FirecrackerBin string
+	CNINetworkName string
+	CNIConfDir     string
+	CNIBinPath     string
+	RuntimePort    int
+	WarmVCPU       int32
+	WarmMemoryMiB  int64
+	CapacityCPU    int32
+	CapacityMemory string
 }
 
 func LoadFromEnv() Config {
@@ -35,8 +35,7 @@ func LoadFromEnv() Config {
 		Port:            envInt("FIRECRACKER_HOST_PORT", 9092),
 		DryRun:          envBool("FIRECRACKER_DRY_RUN", true),
 		RuntimeFallback: envString("RUNTIME_URL", "http://localhost:8081"),
-		// Static CNI IPAM pins one host-side peer IP; warm only the default runtime.
-		PoolSize: envInt("FIRECRACKER_POOL_SIZE", 1),
+		PoolSize:        envInt("FIRECRACKER_POOL_SIZE", 1),
 		DefaultRuntime:  envString("FIRECRACKER_DEFAULT_RUNTIME", "nextjs"),
 		KernelPath:      envString("FIRECRACKER_KERNEL_PATH", "/var/lib/devin/linux/vmlinux"),
 		SnapshotDir:     envString("FIRECRACKER_SNAPSHOT_DIR", "/var/lib/devin/snapshots"),
@@ -46,12 +45,10 @@ func LoadFromEnv() Config {
 		CNIConfDir:      envString("FIRECRACKER_CNI_CONF_DIR", "/etc/cni/conf.d"),
 		CNIBinPath:      envString("FIRECRACKER_CNI_BIN_PATH", "/opt/cni/bin"),
 		RuntimePort:     envInt("FIRECRACKER_RUNTIME_PORT", 8081),
-		// Agent sandboxes (cursor CLI + cargo/npm) OOM at 512MiB; keep warm
-		// pool / golden snapshots at 8Gi so restores match scheduler requests.
-		WarmVCPU:       int32(envInt("FIRECRACKER_WARM_VCPU", 2)),
-		WarmMemoryMiB:  int64(envInt("FIRECRACKER_WARM_MEMORY_MIB", 8192)),
-		CapacityCPU:    int32(envInt("FIRECRACKER_CAPACITY_CPU", 32)),
-		CapacityMemory: envString("FIRECRACKER_CAPACITY_MEMORY", "64Gi"),
+		WarmVCPU:        int32(envInt("FIRECRACKER_WARM_VCPU", 2)),
+		WarmMemoryMiB:   int64(envInt("FIRECRACKER_WARM_MEMORY_MIB", 8192)),
+		CapacityCPU:     int32(envInt("FIRECRACKER_CAPACITY_CPU", 32)),
+		CapacityMemory:  envString("FIRECRACKER_CAPACITY_MEMORY", "64Gi"),
 	}
 }
 

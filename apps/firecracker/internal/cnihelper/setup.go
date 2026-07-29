@@ -230,11 +230,8 @@ func setLinkUp(args []string) error {
 	return nil
 }
 
-// SnapshotGuestIP is the guest address baked into golden snapshots. Each microVM
-// runs in an isolated network namespace, so every restore can reuse this IP.
 const SnapshotGuestIP = "192.168.127.8"
 
-// GuestIPArgs converts a stored guest IP into CNI runtime args.
 func GuestIPArgs(guestIP string) [][2]string {
 	ip := strings.TrimSpace(guestIP)
 	if ip == "" {
@@ -246,9 +243,6 @@ func GuestIPArgs(guestIP string) [][2]string {
 	return [][2]string{{"IP", ip}}
 }
 
-// CleanupStaleAllocations removes orphaned CNI state from /var/lib/cni.
-// This is useful when VMs crash or timeout without proper cleanup, leaving
-// host-local IPAM to think IPs are still allocated.
 func CleanupStaleAllocations(networkName string) error {
 	cniStateDir := "/var/lib/cni"
 
@@ -324,5 +318,4 @@ func cleanupOrphanedHostLocalIPs(stateDir, netNSDir string) error {
 	return nil
 }
 
-// Ensure types.Result is referenced for libcni compatibility.
 var _ types.Result

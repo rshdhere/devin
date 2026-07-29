@@ -116,8 +116,6 @@ func (m *Manager) Start(ctx context.Context) {
 	m.availableRuntimes = append([]string(nil), runtimes...)
 	m.mu.Unlock()
 
-	// Static CNI IPAM pins the host-side ptp peer to 192.168.127.1, so only one
-	// microVM network can be active per host. Warm the default runtime only.
 	warmRuntime := m.cfg.DefaultRuntime
 	if !containsRuntime(runtimes, warmRuntime) {
 		warmRuntime = runtimes[0]
@@ -157,8 +155,6 @@ func (m *Manager) warmRuntimePool(ctx context.Context, runtime string, queue cha
 			continue
 		}
 
-		// Static CNI IPAM allows only one networked microVM. Never warm while
-		// an assigned/provisioning VM holds (or is about to hold) the fcnet IP.
 		if m.networkBusy() {
 			time.Sleep(time.Second)
 			continue
@@ -174,8 +170,6 @@ func (m *Manager) warmRuntimePool(ctx context.Context, runtime string, queue cha
 			continue
 		}
 
-		// A cold create may have started while we were restoring; discard the
-		// warm VM so it cannot steal the static CNI address.
 		if m.networkBusy() {
 			slog.Info("discarding warm microVM; network claimed by active VM",
 				"runtime", runtime, "vmId", instance.ID)
@@ -201,16 +195,12 @@ func (m *Manager) warmRuntimePool(ctx context.Context, runtime string, queue cha
 	}
 }
 
-// networkBusy reports whether any assigned or in-flight VM owns the static
-// fcnet address (warm queue VMs are tracked separately in ready channels).
 func (m *Manager) networkBusy() bool {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return len(m.assigned) > 0 || len(m.vms) > 0
 }
 
-// drainWarmPool shuts down every warmed microVM so cold provision can claim
-// the single static CNI IP without colliding with a warm nextjs/agent guest.
 func (m *Manager) drainWarmPool() {
 	m.mu.RLock()
 	queues := make([]chan *vm.Instance, 0, len(m.ready))
@@ -325,7 +315,6 @@ func (m *Manager) Create(name, runtime, taskID string, cpu int32, memory string)
 			return existing, nil
 		}
 		if err := m.reserveCPULocked(chargeCPU); err != nil {
-			// Put the warm VM back so the pool stays populated.
 			if queue := m.ready[runtime]; queue != nil {
 				select {
 				case queue <- warm:
@@ -361,8 +350,6 @@ func (m *Manager) Create(name, runtime, taskID string, cpu int32, memory string)
 		Message: "restoring snapshot",
 	}
 
-	// Reserve first so networkBusy() becomes true and the warmer stops
-	// launching new guests before we free the static CNI IP.
 	m.mu.Lock()
 	if existing := m.findByNameLocked(name); existing != nil {
 		m.mu.Unlock()
@@ -520,7 +507,6 @@ func (m *Manager) provisionCold(vmID, name, runtime string, cpu int32, memory st
 		if err == nil {
 			_ = instance.Shutdown(ctx)
 		}
-		// Reservation was already released by Delete; nothing else to do.
 		return
 	}
 
@@ -534,7 +520,6 @@ func (m *Manager) provisionCold(vmID, name, runtime string, cpu int32, memory st
 		return
 	}
 
-	// CPU was reserved when Create queued this cold provision.
 	m.assigned[instance.ID] = instance
 	m.vms[instance.ID] = instance
 	if instance.ID != vmID {
@@ -640,8 +625,6 @@ func (m *Manager) recordFromInstance(instance *vm.Instance) *VMRecord {
 	}
 }
 
-// estimatedUsedMemoryMiB approximates guest RAM from charged vCPUs using the
-// warm-pool shape (WarmMemoryMiB / WarmVCPU). Capacity is still CPU-gated.
 func (m *Manager) estimatedUsedMemoryMiB() int32 {
 	vcpu := m.cfg.WarmVCPU
 	if vcpu < 1 {
