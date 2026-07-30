@@ -112,6 +112,40 @@ func TestTruncateMessageBoundsLongPayloads(t *testing.T) {
 	}
 }
 
+// Regression: an unknown event type used to return no events at all, so a CLI
+// schema change would silently produce a run with zero visible output.
+func TestSummarizeUnknownTypeStillPublishes(t *testing.T) {
+	evt, ok := parseCursorEvent(`{"type":"assistant_delta","subtype":"token"}`)
+	if !ok {
+		t.Fatal("expected stream event")
+	}
+	events := summarizeCursorEvent(evt)
+	if len(events) != 1 {
+		t.Fatalf("expected 1 event, got %d", len(events))
+	}
+	if events[0].Type != "agent.output" {
+		t.Errorf("expected agent.output, got %s", events[0].Type)
+	}
+	if events[0].Message != "assistant_delta: token" {
+		t.Errorf("unexpected message %q", events[0].Message)
+	}
+}
+
+func TestSummarizeQuietTypesAreSkipped(t *testing.T) {
+	for _, line := range []string{
+		`{"type":"system","subtype":"init"}`,
+		`{"type":"user","message":{"content":[]}}`,
+	} {
+		evt, ok := parseCursorEvent(line)
+		if !ok {
+			t.Fatalf("expected stream event for %s", line)
+		}
+		if events := summarizeCursorEvent(evt); len(events) != 0 {
+			t.Errorf("expected %s to be quiet, got %+v", line, events)
+		}
+	}
+}
+
 // Regression: rapid short lines used to be dropped by a 100ms/200-char gate,
 // which made active runs look frozen in the UI.
 func TestEveryStreamLineProducesOutput(t *testing.T) {

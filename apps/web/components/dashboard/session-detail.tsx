@@ -638,9 +638,15 @@ function AgentTerminalPanel({
   const [isExpanded, setIsExpanded] = useState(true);
 
   const outputLines = events
-    .filter((event) => event.type === "agent.output")
+    .filter(
+      (event) =>
+        event.type === "agent.output" ||
+        // Tool calls the agent made. The scheduler also emits agent.tool for its
+        // own setup commands; those carry no `tool` field and belong in Activity.
+        (event.type === "agent.tool" && Boolean(event.data?.tool)),
+    )
     .map((event) => ({
-      line: event.message,
+      line: event.type === "agent.tool" ? `$ ${event.message}` : event.message,
       stream: (event.data?.stream as string) ?? "stdout",
       time: event.timestamp,
     }));
@@ -1566,7 +1572,12 @@ export function SessionDetail({
             </div>
           ) : (
             events
-              .filter((event) => event.type !== "agent.output")
+              .filter(
+                (event) =>
+                  event.type !== "agent.output" &&
+                  // Agent tool calls render in the output panel instead.
+                  !(event.type === "agent.tool" && Boolean(event.data?.tool)),
+              )
               .map((event) => <EventRow key={event.id} event={event} />)
           )}
         </div>

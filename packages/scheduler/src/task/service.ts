@@ -3121,27 +3121,39 @@ export class TaskService {
     runtime: RuntimeClient,
     taskId: string,
   ): Promise<string | null> {
+    // Do not invoke --version here: a corrupted/overwritten CLI can hang forever
+    // on that call (or exec-loop). Identify by resolved path + size instead.
     const findCmd = [
       "set +e",
       'export HOME="${HOME:-/root}"',
       'export PATH="/usr/local/bin:/root/.local/bin:$HOME/.local/bin:/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin:$PATH"',
+      "is_wrapper() {",
+      '  [ -f "$1" ] || return 1',
+      '  head -n 1 "$1" 2>/dev/null | grep -q "^#!/bin/sh$" || return 1',
+      '  grep -q "agent.real" "$1" 2>/dev/null',
+      "}",
       "for candidate in \\",
+      // Prefer versioned binaries first — PATH entries may be wrappers/symlinks.
+      "  $(ls -1 /root/.local/share/cursor-agent/versions/*/cursor-agent 2>/dev/null | sort -r) \\",
+      '  $(ls -1 "$HOME/.local/share/cursor-agent/versions/"*/cursor-agent 2>/dev/null | sort -r) \\',
+      "  /root/.local/bin/agent.real \\",
       "  /usr/local/bin/agent \\",
       "  /root/.local/bin/agent \\",
       '  "$HOME/.local/bin/agent" \\',
       "  $(command -v agent 2>/dev/null) \\",
-      "  $(command -v cursor-agent 2>/dev/null) \\",
-      "  $(ls -1 /root/.local/share/cursor-agent/versions/*/cursor-agent 2>/dev/null | sort | tail -1) \\",
-      '  $(ls -1 "$HOME/.local/share/cursor-agent/versions/"*/cursor-agent 2>/dev/null | sort | tail -1)',
+      "  $(command -v cursor-agent 2>/dev/null)",
       "do",
       '  [ -n "$candidate" ] || continue',
       '  [ -e "$candidate" ] || continue',
-      // Accept a present executable even if --version is flaky in the guest.
-      '  if [ -x "$candidate" ] || [ -L "$candidate" ]; then',
-      '    if "$candidate" --version >/dev/null 2>&1 || [ -x "$candidate" ]; then',
-      '      printf "%s\\n" "$candidate"',
-      "      exit 0",
-      "    fi",
+      '  resolved=$(readlink -f "$candidate" 2>/dev/null || printf "%s" "$candidate")',
+      '  [ -e "$resolved" ] || continue',
+      '  if is_wrapper "$resolved"; then continue; fi',
+      '  size=$(wc -c < "$resolved" 2>/dev/null || echo 0)',
+      // Real cursor-agent payloads are tens of MB; reject stubs/wrappers.
+      '  [ "$size" -gt 1000000 ] || continue',
+      '  if [ -x "$resolved" ] || [ -L "$candidate" ]; then',
+      '    printf "%s\\n" "$resolved"',
+      "    exit 0",
       "  fi",
       "done",
       "exit 1",
@@ -3167,6 +3179,13 @@ export class TaskService {
     taskId: string,
     bin: string,
   ): Promise<void> {
+    // Critical: /usr/local/bin/agent is often a symlink into the versioned
+    // cursor-agent binary. Writing the PATH wrapper with `cat >` would follow
+    // that symlink and overwrite the real CLI with a 140-byte script that
+    // exec-loops forever — which is exactly the "agent running, no output"
+    // failure mode. Always resolve a real non-wrapper binary first, refuse to
+    // proceed if it looks like our wrapper, then replace the symlink with a
+    // regular file before writing.
     await runtime.terminalAllowFailure({
       taskId,
       command: [
@@ -3176,33 +3195,47 @@ export class TaskService {
         `target='${escapeShell(bin)}'`,
         'if [ -z "$target" ] || [ ! -e "$target" ]; then target=$(command -v agent 2>/dev/null); fi',
         'if [ -z "$target" ] || [ ! -e "$target" ]; then exit 0; fi',
-        // Prefer a previously saved real binary so re-linking does not wrap our
-        // own PATH wrapper (which would recurse on exec).
+        "is_wrapper() {",
+        '  [ -f "$1" ] || return 1',
+        '  head -n 1 "$1" 2>/dev/null | grep -q "^#!/bin/sh$" || return 1',
+        '  grep -q "agent.real" "$1" 2>/dev/null',
+        "}",
+        "resolve_real() {",
+        '  candidate="$1"',
+        '  [ -n "$candidate" ] || return 1',
+        '  [ -e "$candidate" ] || return 1',
+        '  resolved=$(readlink -f "$candidate" 2>/dev/null || printf "%s" "$candidate")',
+        '  if is_wrapper "$resolved"; then return 1; fi',
+        // Reject tiny stubs — the real cursor-agent payload is tens of MB.
+        '  size=$(wc -c < "$resolved" 2>/dev/null || echo 0)',
+        '  [ "$size" -gt 1000000 ] || return 1',
+        '  printf "%s\\n" "$resolved"',
+        "}",
         "real=''",
+        // Prefer a previously saved pointer only if it still resolves to a
+        // real binary (not the wrapper that once overwrote it).
         "if [ -e /root/.local/bin/agent.real ]; then",
-        "  real=$(readlink -f /root/.local/bin/agent.real 2>/dev/null || printf '%s' /root/.local/bin/agent.real)",
+        "  real=$(resolve_real /root/.local/bin/agent.real || true)",
+        "fi",
+        'if [ -z "$real" ]; then real=$(resolve_real "$target" || true); fi',
+        'if [ -z "$real" ]; then',
+        "  for candidate in \\",
+        "    $(ls -1 /root/.local/share/cursor-agent/versions/*/cursor-agent 2>/dev/null | sort -r) \\",
+        '    $(ls -1 "$HOME/.local/share/cursor-agent/versions/"*/cursor-agent 2>/dev/null | sort -r)',
+        "  do",
+        '    real=$(resolve_real "$candidate" || true)',
+        '    [ -n "$real" ] && break',
+        "  done",
         "fi",
         'if [ -z "$real" ] || [ ! -e "$real" ]; then',
-        '  real=$(readlink -f "$target" 2>/dev/null || printf "%s" "$target")',
+        '  echo "linkCursorAgentBinary: no usable cursor-agent binary found" >&2',
+        "  exit 1",
         "fi",
-        // If target already is our wrapper, dig out the exec line fallback.
-        'if [ -f "$real" ] && head -n 1 "$real" 2>/dev/null | grep -q "^#!/bin/sh$" \\',
-        '   && grep -q "agent.real" "$real" 2>/dev/null; then',
-        "  if [ -e /root/.local/bin/agent.real ]; then",
-        "    real=$(readlink -f /root/.local/bin/agent.real 2>/dev/null || printf '%s' /root/.local/bin/agent.real)",
-        "  fi",
-        "fi",
-        'if [ -z "$real" ] || [ ! -e "$real" ]; then exit 0; fi',
+        // Point agent.real at the real binary BEFORE replacing /usr/local/bin/agent.
         'ln -sfn "$real" /root/.local/bin/agent.real',
-        // Prefer real system bash; /usr/local/bin/bash may be a stub symlink.
-        "bash_abs=''",
-        "[ -x /bin/bash ] && bash_abs=/bin/bash",
-        '[ -z "$bash_abs" ] && [ -x /usr/bin/bash ] && bash_abs=/usr/bin/bash',
-        '[ -z "$bash_abs" ] && [ -x /usr/local/bin/bash ] && bash_abs=/usr/local/bin/bash',
-        '[ -z "$bash_abs" ] && bash_abs=/bin/bash',
-        'bash_abs=$(readlink -f "$bash_abs" 2>/dev/null || printf "%s" "$bash_abs")',
-        // Wrapper forces a full PATH before exec so nested #!/usr/bin/env bash
-        // shebangs resolve even on old snapshots with stripped guest PATH.
+        // Drop any symlink at the wrapper path so the write cannot follow into
+        // the versioned binary and destroy it.
+        "rm -f /usr/local/bin/agent",
         "cat > /usr/local/bin/agent <<'WRAP'",
         "#!/bin/sh",
         'export PATH="/usr/local/bin:/root/.local/bin:/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin"',
@@ -3210,6 +3243,12 @@ export class TaskService {
         "WRAP",
         "chmod +x /usr/local/bin/agent",
         "ln -sfn /usr/local/bin/agent /root/.local/bin/agent",
+        // Prefer real system bash; /usr/local/bin/bash may be a stub symlink.
+        "bash_abs=''",
+        "[ -x /bin/bash ] && bash_abs=/bin/bash",
+        '[ -z "$bash_abs" ] && [ -x /usr/bin/bash ] && bash_abs=/usr/bin/bash',
+        '[ -z "$bash_abs" ] && bash_abs=/bin/bash',
+        'bash_abs=$(readlink -f "$bash_abs" 2>/dev/null || printf "%s" "$bash_abs")',
         'if [ -f "$real" ] && [ ! -L "$real" ]; then',
         '  first=$(head -n 1 "$real" 2>/dev/null || true)',
         '  case "$first" in',
@@ -3218,6 +3257,11 @@ export class TaskService {
         '    chmod +x "$real" 2>/dev/null || true',
         "    ;;",
         "  esac",
+        "fi",
+        // Refuse to leave a wrapper that would recurse.
+        'if is_wrapper "$(readlink -f /root/.local/bin/agent.real 2>/dev/null)"; then',
+        '  echo "linkCursorAgentBinary: agent.real still points at a wrapper" >&2',
+        "  exit 1",
         "fi",
         'PATH="/usr/local/bin:/root/.local/bin" /usr/bin/env bash -c "true" || exit 1',
         "exit 0",

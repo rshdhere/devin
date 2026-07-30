@@ -15,6 +15,9 @@ func main() {
 	port := envInt("RUNTIME_PORT", 8081)
 	workspacePath := envString("RUNTIME_WORKSPACE", workspace.DefaultPath())
 
+	// This process is PID 1 inside the microVM, so it owns the init duties.
+	workspace.EnsurePseudoFilesystems()
+
 	if err := workspace.Prepare(workspacePath); err != nil {
 		slog.Error("failed to prepare workspace", "error", err)
 		os.Exit(1)

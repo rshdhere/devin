@@ -3,9 +3,25 @@ package agent
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
+	"sync/atomic"
+	"time"
 
 	"github.com/rshdhere/devin/apps/runtime/internal/executil"
+)
+
+// A healthy Cursor CLI answers --version in well under a second. Anything slower
+// means the guest is broken (for example a missing /proc), and failing here turns
+// a silent multi-hour hang into an actionable error.
+const cursorVersionTimeoutSec = 45
+
+// Heartbeats keep the activity feed alive while the agent is thinking, and the
+// stall limit aborts runs where the CLI never produces a single line.
+const (
+	cursorHeartbeatInterval = 30 * time.Second
+	cursorWatchdogTick      = 10 * time.Second
+	cursorStartupStallLimit = 5 * time.Minute
 )
 
 type CursorRunner struct {
@@ -76,7 +92,50 @@ func (r *CursorRunner) Run(
 	var sawToolCall bool
 	var durationMs int64
 
-	result, runErr := executil.RunStreamingUntil(ctx, workDir, command, env, func(line executil.OutputLine) (bool, error) {
+	runCtx, cancelRun := context.WithCancel(ctx)
+	defer cancelRun()
+
+	var lastOutputNano atomic.Int64
+	var sawOutput atomic.Bool
+	var stalled atomic.Bool
+	lastOutputNano.Store(time.Now().UnixNano())
+
+	stallLimit := cursorStallLimit(req)
+	go func() {
+		ticker := time.NewTicker(cursorWatchdogTick)
+		defer ticker.Stop()
+		lastBeat := time.Now()
+		for {
+			select {
+			case <-runCtx.Done():
+				return
+			case now := <-ticker.C:
+				idle := now.Sub(time.Unix(0, lastOutputNano.Load()))
+				if !sawOutput.Load() && stallLimit > 0 && idle >= stallLimit {
+					stalled.Store(true)
+					cancelRun()
+					return
+				}
+				if idle < cursorHeartbeatInterval || now.Sub(lastBeat) < cursorHeartbeatInterval {
+					continue
+				}
+				lastBeat = now
+				publish(
+					"agent.log",
+					fmt.Sprintf("cursor agent working — no output for %ds", int(idle.Seconds())),
+					map[string]any{
+						"idleSeconds": int(idle.Seconds()),
+						"model":       model,
+					},
+				)
+			}
+		}
+	}()
+
+	result, runErr := executil.RunStreamingUntil(runCtx, workDir, command, env, func(line executil.OutputLine) (bool, error) {
+		lastOutputNano.Store(time.Now().UnixNano())
+		sawOutput.Store(true)
+
 		evt, isStreamEvent := parseCursorEvent(line.Line)
 		if !isStreamEvent {
 			// Non-JSON output (stderr, installer progress). Forward verbatim —
@@ -120,6 +179,17 @@ func (r *CursorRunner) Run(
 
 		return true, nil
 	})
+	if stalled.Load() {
+		return &RunResult{
+			Status: "failed",
+			Message: fmt.Sprintf(
+				"cursor agent produced no output for %s after starting — the CLI never came up in the sandbox. "+
+					"Rebuild the agent Firecracker snapshot (runtime/agent/Dockerfile) and verify /proc is mounted in the guest.",
+				stallLimit,
+			),
+			Agent: r.Name(),
+		}, nil
+	}
 	if runErr != nil {
 		return nil, runErr
 	}
@@ -190,6 +260,9 @@ func ensureCursorBin(
 	bin := resolveCursorBin(cfg, req)
 	resolved, err := whichCursorBin(ctx, workDir, bin, env)
 	if err == nil {
+		if verifyErr := verifyCursorBin(ctx, workDir, resolved, env); verifyErr != nil {
+			return "", verifyErr
+		}
 		return resolved, nil
 	}
 
@@ -247,8 +320,90 @@ exit 1
 			err,
 		)
 	}
+	if verifyErr := verifyCursorBin(ctx, workDir, resolved, env); verifyErr != nil {
+		return "", verifyErr
+	}
 	publish("agent.log", "cursor agent CLI installed in guest", map[string]any{"bin": resolved})
 	return resolved, nil
+}
+
+// verifyCursorBin proves the CLI can actually execute. Checking only that the file
+// exists let a guest whose /proc was missing report "cursor agent CLI ready" and then
+// hang for the whole run without emitting a single event.
+func verifyCursorBin(ctx context.Context, workDir, bin string, env []string) error {
+	script := `set +e
+export HOME="${HOME:-/root}"
+export PATH="` + guestPathPrefix + `:$PATH"
+if [ -r /proc/self/status ]; then printf 'probe:proc=mounted\n'; else printf 'probe:proc=missing\n'; fi
+timeout ` + strconv.Itoa(cursorVersionTimeoutSec) + ` ` + shellQuote(bin) + ` --version 2>&1
+printf 'probe:rc=%s\n' "$?"
+`
+	result, err := executil.Run(ctx, workDir, script, env)
+	if err != nil {
+		return fmt.Errorf("cursor agent CLI smoke test could not run: %w", err)
+	}
+
+	rc := probeValue(result.Stdout, "probe:rc=")
+	procMissing := probeValue(result.Stdout, "probe:proc=") == "missing"
+	detail := truncateMessage(stripProbeLines(executil.CombinedOutput(result)))
+
+	if rc == "0" && !procMissing {
+		return nil
+	}
+	if procMissing {
+		return fmt.Errorf(
+			"sandbox has no /proc mounted, so the cursor agent CLI cannot start (it is a Node binary). "+
+				"Rebuild the agent Firecracker snapshot so the runtime supervisor mounts /proc. detail=%s",
+			detail,
+		)
+	}
+	if rc == "124" {
+		return fmt.Errorf(
+			"cursor agent CLI did not respond to --version within %ds. Rebuild the agent Firecracker snapshot. detail=%s",
+			cursorVersionTimeoutSec,
+			detail,
+		)
+	}
+	return fmt.Errorf("cursor agent CLI is not runnable (exit %s). detail=%s", rc, detail)
+}
+
+func probeValue(output, prefix string) string {
+	for _, line := range strings.Split(output, "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, prefix) {
+			return strings.TrimPrefix(line, prefix)
+		}
+	}
+	return ""
+}
+
+func stripProbeLines(output string) string {
+	kept := make([]string, 0, 8)
+	for _, line := range strings.Split(output, "\n") {
+		if strings.HasPrefix(strings.TrimSpace(line), "probe:") {
+			continue
+		}
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		kept = append(kept, line)
+	}
+	if len(kept) == 0 {
+		return "no output"
+	}
+	return strings.Join(kept, " | ")
+}
+
+func cursorStallLimit(req RunRequest) time.Duration {
+	raw := strings.TrimSpace(envValue(req, "AGENT_STARTUP_STALL_MIN"))
+	if raw == "" {
+		return cursorStartupStallLimit
+	}
+	minutes, err := strconv.Atoi(raw)
+	if err != nil || minutes < 0 {
+		return cursorStartupStallLimit
+	}
+	return time.Duration(minutes) * time.Minute
 }
 
 func whichCursorBin(ctx context.Context, workDir, bin string, env []string) (string, error) {

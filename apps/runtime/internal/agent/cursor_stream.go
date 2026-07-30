@@ -172,14 +172,54 @@ func summarizeCursorEvent(evt cursorStreamEvent) []publishedEvent {
 		if message == "" {
 			message = "cursor agent finished"
 		}
-		data := map[string]any{"durationMs": evt.Duration}
+		stream := "assistant"
 		if evt.IsError {
-			return []publishedEvent{{Type: "agent.output", Message: message, Data: data}}
+			stream = "stderr"
 		}
-		return []publishedEvent{{Type: "agent.output", Message: message, Data: data}}
+		return []publishedEvent{{
+			Type:    "agent.output",
+			Message: message,
+			Data:    map[string]any{"durationMs": evt.Duration, "stream": stream},
+		}}
 	}
 
+	// Unrecognized event types must still surface something. Silently discarding
+	// stream lines is what made runs look frozen, so fall back to the raw type.
+	if _, quiet := quietStreamTypes[evt.Type]; quiet {
+		return nil
+	}
+	if text := truncateMessage(evt.textFallback()); text != "" {
+		return []publishedEvent{{
+			Type:    "agent.output",
+			Message: text,
+			Data:    map[string]any{"stream": "assistant", "eventType": evt.Type},
+		}}
+	}
 	return nil
+}
+
+// quietStreamTypes carry no user-facing content and would only add noise.
+var quietStreamTypes = map[string]struct{}{
+	"system": {},
+	"user":   {},
+}
+
+// textFallback collects any readable text from an event whose shape we do not
+// model explicitly, so schema changes in the CLI degrade instead of going silent.
+func (e cursorStreamEvent) textFallback() string {
+	parts := make([]string, 0, 4)
+	for _, part := range e.contentParts() {
+		if text := strings.TrimSpace(part.Text); text != "" {
+			parts = append(parts, text)
+		}
+	}
+	if len(parts) > 0 {
+		return strings.Join(parts, " ")
+	}
+	if subtype := strings.TrimSpace(e.Subtype); subtype != "" {
+		return e.Type + ": " + subtype
+	}
+	return e.Type
 }
 
 func toolEvent(name, detail string) publishedEvent {
