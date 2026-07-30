@@ -1250,18 +1250,26 @@ export class TaskService {
         return;
       }
 
+      let pushedToGitHub = false;
       if (repository && cloneUrl) {
         if (job.testCommand) {
           await this.runTests(runtime, task, job.testCommand, repoCwd);
         }
 
         if (job.permissions) {
-          await this.finalizeGitWork(runtime, task, job, repoCwd, githubToken, {
-            greenfield: createdNewRepo,
-            createPullRequest:
-              job.requireReviewBeforePush === true ||
-              !(createdNewRepo && runtimeAgentTask),
-          });
+          pushedToGitHub = await this.finalizeGitWork(
+            runtime,
+            task,
+            job,
+            repoCwd,
+            githubToken,
+            {
+              greenfield: createdNewRepo,
+              createPullRequest:
+                job.requireReviewBeforePush === true ||
+                !(createdNewRepo && runtimeAgentTask),
+            },
+          );
         }
 
         if (
@@ -1276,7 +1284,9 @@ export class TaskService {
 
       const completionMessage =
         repository && cloneUrl
-          ? "Work completed — pushed to GitHub"
+          ? pushedToGitHub
+            ? "Work completed — pushed to GitHub"
+            : "Work completed — local commits not pushed to GitHub"
           : runResult.message || "Task completed";
       this.updateTask(task.id, "completed", completionMessage);
       this.emit("task.completed", task.id, completionMessage, {
@@ -1284,7 +1294,7 @@ export class TaskService {
         agent: runResult.agent ?? task.agent,
         prUrl: task.prUrl,
         branch: task.branch,
-        pushedToGitHub: Boolean(repository && cloneUrl),
+        pushedToGitHub,
         sessionActive: usesRuntimeAgent(task.agent),
       });
 
@@ -1375,11 +1385,19 @@ export class TaskService {
         await this.runTests(runtime, task, job.testCommand, repoCwd);
       }
 
+      let pushedToGitHub = false;
       if (job.permissions && job.repository) {
-        await this.finalizeGitWork(runtime, task, job, repoCwd, githubToken, {
-          greenfield: createdNewRepo,
-          createPullRequest: opts.createPullRequest,
-        });
+        pushedToGitHub = await this.finalizeGitWork(
+          runtime,
+          task,
+          job,
+          repoCwd,
+          githubToken,
+          {
+            greenfield: createdNewRepo,
+            createPullRequest: opts.createPullRequest,
+          },
+        );
       }
 
       if (
@@ -1391,18 +1409,20 @@ export class TaskService {
         await this.createTaskIssue(task, job.repository, githubToken, job);
       }
 
-      const completionMessage = opts.createPullRequest
-        ? task.prUrl
-          ? "Changes pushed and pull request opened"
-          : "Changes pushed to GitHub"
-        : "Changes committed and pushed to GitHub";
+      const completionMessage = !pushedToGitHub
+        ? "Changes ready — push to GitHub failed"
+        : opts.createPullRequest
+          ? task.prUrl
+            ? "Changes pushed and pull request opened"
+            : "Changes pushed to GitHub"
+          : "Changes committed and pushed to GitHub";
 
       this.updateTask(task.id, "completed", completionMessage);
       this.emit("task.completed", task.id, completionMessage, {
         agent: task.agent,
         prUrl: task.prUrl,
         branch: task.branch,
-        pushedToGitHub: Boolean(job.repository && job.cloneUrl),
+        pushedToGitHub,
         userApproved: true,
         createPullRequest: opts.createPullRequest,
       });
@@ -2355,19 +2375,25 @@ export class TaskService {
       env: gitEnv,
     });
 
-    if (!status.stdout.trim()) {
+    const dirty = Boolean(status.stdout.trim());
+    // Greenfield agents often finish with a clean tree (already committed) but
+    // divergent hydrate history — still push those commits. Non-greenfield with
+    // nothing dirty has nothing new to publish.
+    if (!dirty && !opts?.greenfield) {
       return;
     }
 
-    await runtime.gitCommit({
-      taskId: task.id,
-      message: buildCommitMessage(
-        `devin: partial work — ${task.title ?? "task incomplete"}`,
-      ),
-      paths: ["."],
-      cwd: repoCwd,
-      env: gitEnv,
-    });
+    if (dirty) {
+      await runtime.gitCommit({
+        taskId: task.id,
+        message: buildCommitMessage(
+          `devin: partial work — ${task.title ?? "task incomplete"}`,
+        ),
+        paths: ["."],
+        cwd: repoCwd,
+        env: gitEnv,
+      });
+    }
 
     if (opts?.greenfield) {
       const pushed = await this.pushGreenfieldMain(
@@ -2387,6 +2413,12 @@ export class TaskService {
             recovery: true,
           },
         );
+      } else {
+        this.emit("git.push", task.id, "Push skipped or failed", {
+          branch: "main",
+          recovery: true,
+          failed: true,
+        });
       }
       return;
     }
@@ -2486,6 +2518,7 @@ export class TaskService {
           branch: "main",
           recovery: true,
           timeout: true,
+          failed: true,
         });
         return false;
       }
@@ -2602,6 +2635,14 @@ export class TaskService {
     }
   }
 
+  /**
+   * Commit any remaining dirty files and push agent work to GitHub.
+   * Returns true when a push to the remote succeeded.
+   *
+   * Important: Cursor agents usually leave a *clean* tree (they already
+   * committed). Previously we returned early on a clean tree and never pushed,
+   * so greenfield repos stayed on the scaffold while the UI claimed success.
+   */
   private async finalizeGitWork(
     runtime: RuntimeClient,
     task: Task,
@@ -2609,10 +2650,10 @@ export class TaskService {
     repoCwd: string,
     githubToken?: string,
     opts?: { greenfield?: boolean; createPullRequest?: boolean },
-  ): Promise<void> {
+  ): Promise<boolean> {
     const permissions = job.permissions;
     if (!permissions || !job.repository) {
-      return;
+      return false;
     }
 
     const createPullRequest = opts?.createPullRequest ?? true;
@@ -2625,14 +2666,11 @@ export class TaskService {
       env: gitEnv,
     });
 
+    const dirty = Boolean(status.stdout.trim());
     const useMainBranch =
       opts?.greenfield === true && createPullRequest === false;
     const branchName = useMainBranch ? "main" : `devin/${task.id.slice(0, 8)}`;
     task.branch = branchName;
-
-    if (!status.stdout.trim()) {
-      return;
-    }
 
     if (!useMainBranch && permissions.canPush) {
       await runtime.terminalAllowFailure({
@@ -2643,7 +2681,7 @@ export class TaskService {
       });
     }
 
-    if (permissions.canCommit) {
+    if (dirty && permissions.canCommit) {
       await runtime.gitCommit({
         taskId: task.id,
         message: buildCommitMessage(`devin: ${task.title ?? "agent changes"}`),
@@ -2658,9 +2696,11 @@ export class TaskService {
     }
 
     if (!permissions.canPush) {
-      return;
+      return false;
     }
 
+    // Nothing dirty and not greenfield-to-main: still push when the agent
+    // already committed on this HEAD (common for runtime agents).
     await this.ensureGitPushAuth(
       runtime,
       task.id,
@@ -2680,8 +2720,9 @@ export class TaskService {
       if (!pushed) {
         this.emit("git.push", task.id, "Push skipped or failed", {
           branch: branchName,
+          failed: true,
         });
-        return;
+        return false;
       }
     } else {
       const pushResult = await runtime.gitPush({
@@ -2694,8 +2735,9 @@ export class TaskService {
       if (pushResult.status !== "completed") {
         this.emit("git.push", task.id, "Push skipped or failed", {
           branch: branchName,
+          failed: true,
         });
-        return;
+        return false;
       }
     }
 
@@ -2705,12 +2747,12 @@ export class TaskService {
     });
 
     if (!createPullRequest || !permissions.canCreatePr || !job.githubToken) {
-      return;
+      return true;
     }
 
     const [owner, repo] = job.repository.split("/");
     if (!owner || !repo) {
-      return;
+      return true;
     }
 
     try {
@@ -2738,6 +2780,8 @@ export class TaskService {
           : "Failed to create pull request";
       this.emit("git.pr", task.id, message, { error: message });
     }
+
+    return true;
   }
 
   private async initializeEmptyRepository(

@@ -776,7 +776,21 @@ function GitHubProgressBanner({
 
   const commitEvents = events.filter((event) => event.type === "git.commit");
   const pushEvents = events.filter((event) => event.type === "git.push");
-  const latestPush = pushEvents[pushEvents.length - 1];
+  const successfulPush = [...pushEvents]
+    .reverse()
+    .find(
+      (event) =>
+        event.data?.failed !== true &&
+        !/skipped or failed|push failed/i.test(event.message),
+    );
+  const failedPush = [...pushEvents]
+    .reverse()
+    .find(
+      (event) =>
+        event.data?.failed === true ||
+        /skipped or failed|push failed/i.test(event.message),
+    );
+  const pushOk = Boolean(successfulPush);
   const failedBootstrap = commitEvents.some(
     (event) => event.data?.bootstrap && event.data?.error,
   );
@@ -792,17 +806,19 @@ function GitHubProgressBanner({
             GitHub: {repository}
           </p>
           <p className="mt-0.5 text-[12px] text-gray-500">
-            {latestPush
+            {pushOk
               ? `Pushed to ${targetBranch} — commits should be visible on GitHub`
-              : commitEvents.length > 0
-                ? `${commitEvents.length} commit(s) recorded — waiting for push`
-                : "Waiting for initial commit and push…"}
+              : failedPush
+                ? `Push to ${targetBranch} failed — commits may not be on GitHub yet`
+                : commitEvents.length > 0
+                  ? `${commitEvents.length} commit(s) recorded — waiting for push`
+                  : "Waiting for initial commit and push…"}
           </p>
           {failedBootstrap ? (
             <p className="mt-1 text-[12px] text-red-400">
               Bootstrap failed — check activity log for details
             </p>
-          ) : latestPush ? (
+          ) : pushOk ? (
             <BotCoAuthorNote compact />
           ) : null}
         </div>

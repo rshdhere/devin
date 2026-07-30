@@ -25,12 +25,13 @@ describe("greenfield-git-sync", () => {
     const script = buildAlignHydratedRepoScript();
     expect(script).toContain("git fetch --depth 1");
     expect(script).toContain("git reset --hard FETCH_HEAD");
-    expect(script).toContain("timeout 8");
+    expect(script).toContain("timeout 15");
   });
 
   test("buildPushGreenfieldMainScript uses force-with-lease by default", () => {
     const script = buildPushGreenfieldMainScript();
     expect(script).toContain("git fetch --depth 1");
     expect(script).toContain("git push --force-with-lease");
+    expect(script).toContain("max=3");
   });
 });
