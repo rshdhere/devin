@@ -1077,6 +1077,30 @@ export class TaskService {
           ? await this.readGitHead(runtime, task.id, repoCwd, githubToken)
           : "";
 
+      if (!runtime || !runtimeBaseUrl || !sandboxName) {
+        throw new Error("devbox session is not available before agent start");
+      }
+
+      // Register the session before the agent starts so Shell / Files / Browser
+      // proxy routes work during the run (not only after completion).
+      this.activeSessions.set(task.id, {
+        runtime,
+        sandboxName,
+        runtimeBaseUrl,
+        repoCwd,
+        job,
+        githubToken,
+        createdNewRepo,
+        guestHost,
+      });
+      void this.persistSession(
+        task.id,
+        this.activeSessions.get(task.id)!,
+        "active",
+      );
+      task.sessionActive = true;
+      this.patchTask(task.id, { sessionActive: true, sandboxName });
+
       this.updateTask(
         task.id,
         "running",
@@ -1084,6 +1108,11 @@ export class TaskService {
           ? "Verifying scaffold in sandbox"
           : `${task.agent} agent executing task`,
       );
+      this.emit("task.phase_changed", task.id, "Agent executing in devbox", {
+        phase: "running",
+        sessionActive: true,
+        agent: task.agent,
+      });
       this.emit(
         "agent.running",
         task.id,
@@ -1095,6 +1124,7 @@ export class TaskService {
           agent: task.agent,
           repository,
           templateGreenfield: isTemplateGreenfield,
+          sessionActive: true,
         },
       );
 
@@ -1348,6 +1378,9 @@ export class TaskService {
       }
       this.updateTask(task.id, "failed", message);
       task.sessionActive = false;
+      this.activeSessions.delete(task.id);
+      this.reviewSessions.delete(task.id);
+      void this.taskStore.deleteSession(task.id);
       this.emit("task.failed", task.id, message);
       throw error;
     } finally {

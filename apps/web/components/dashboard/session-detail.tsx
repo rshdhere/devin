@@ -865,6 +865,28 @@ function PhaseTimeline({ task, events }: { task: Task; events: TaskEvent[] }) {
     events.some((event) => event.data?.awaitingReview === true);
 
   const currentPhase = (() => {
+    if (executeDone || task.status === "completed") {
+      return "complete";
+    }
+    if (task.status === "awaiting_review") {
+      return "review";
+    }
+    // Prefer live agent/runtime signals over historical sandbox.* events —
+    // provisioning events stay in the feed forever and used to pin the
+    // timeline on "Sandbox" while the agent was already running.
+    if (
+      task.status === "running" ||
+      task.status === "runtime_ready" ||
+      events.some(
+        (event) =>
+          event.type === "agent.running" ||
+          event.type === "agent.output" ||
+          event.type === "agent.tool" ||
+          event.type === "runtime.ready",
+      )
+    ) {
+      return "execute";
+    }
     if (
       !runtimeAgent &&
       ["queued", "scheduling", "drafting"].includes(task.status)
@@ -874,24 +896,12 @@ function PhaseTimeline({ task, events }: { task: Task; events: TaskEvent[] }) {
     if (
       task.status === "draft_ready" ||
       task.status === "sandbox_starting" ||
-      events.some(
-        (event) =>
-          event.type.startsWith("sandbox.") && event.type !== "sandbox.started",
-      )
+      (!sandboxDone &&
+        events.some((event) => event.type.startsWith("sandbox.")))
     ) {
       return "sandbox";
     }
-    if (
-      task.status === "running" ||
-      task.status === "runtime_ready" ||
-      task.status === "awaiting_review"
-    ) {
-      return task.status === "awaiting_review" ? "review" : "execute";
-    }
-    if (executeDone) {
-      return "complete";
-    }
-    return draftDone ? "sandbox" : "draft";
+    return draftDone ? (sandboxDone ? "execute" : "sandbox") : "draft";
   })();
 
   const phases = runtimeAgent
@@ -1239,11 +1249,28 @@ export function SessionDetail({
           void loadDiagnostics(taskId);
         }
 
-        if (event.type === "task.completed" || event.type === "task.failed") {
+        // Status lives on the task record; SSE only carries events. Refresh on
+        // phase transitions so the header does not stay on "Booting devbox"
+        // after the agent has already started.
+        if (
+          event.type === "task.completed" ||
+          event.type === "task.failed" ||
+          event.type === "task.phase_changed" ||
+          event.type === "agent.running" ||
+          event.type === "sandbox.started" ||
+          event.type === "runtime.ready" ||
+          event.type === "git.push" ||
+          event.type === "git.pr"
+        ) {
           void fetchTask(taskId).then((updated) => {
             if (!cancelled) {
               setTask(updated);
-              void refreshTasks();
+              if (
+                event.type === "task.completed" ||
+                event.type === "task.failed"
+              ) {
+                void refreshTasks();
+              }
             }
           });
         }
@@ -1274,6 +1301,37 @@ export function SessionDetail({
       unsubscribe();
     };
   }, [task.id, refreshTasks, loadDiagnostics]);
+
+  // Poll task status while non-terminal so a dropped SSE stream cannot leave
+  // the header stuck on "Booting devbox".
+  useEffect(() => {
+    const terminal =
+      task.status === "completed" ||
+      task.status === "failed" ||
+      task.status === "cancelled";
+    if (terminal) {
+      return;
+    }
+
+    let cancelled = false;
+    const tick = () => {
+      void fetchTask(task.id)
+        .then((updated) => {
+          if (!cancelled) {
+            setTask(updated);
+          }
+        })
+        .catch(() => {
+          // SSE / history remain the primary feed.
+        });
+    };
+
+    const interval = setInterval(tick, 12_000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [task.id, task.status]);
 
   useEffect(() => {
     feedRef.current?.scrollTo({

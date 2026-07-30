@@ -62,9 +62,11 @@ export async function handleTaskEvents(
         }, 750)
       : undefined;
 
+  // Keep under common proxy idle limits (often ~30–60s) so long agent runs
+  // do not surface "Error in input stream" to the browser.
   const keepalive = setInterval(() => {
     res.write(": keepalive\n\n");
-  }, 15_000);
+  }, 10_000);
 
   req.on("close", () => {
     clearInterval(keepalive);

@@ -1,6 +1,17 @@
 import type { TaskEvent } from "@devin/types";
 import { tasksApiUrl } from "./http";
 
+function isTransientStreamError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error ?? "");
+  return (
+    /Error in input stream/i.test(message) ||
+    /network error/i.test(message) ||
+    /Failed to fetch/i.test(message) ||
+    /Load failed/i.test(message) ||
+    /The operation was aborted/i.test(message)
+  );
+}
+
 export function subscribeToTaskEvents(
   taskId: string,
   onEvent: (event: TaskEvent) => void,
@@ -11,6 +22,8 @@ export function subscribeToTaskEvents(
   let reconnectAttempts = 0;
   let shouldReconnect = options?.reconnect ?? true;
   const seenEventIds = new Set<string>();
+  // Long cursor runs routinely exceed proxy idle limits; keep retrying.
+  const maxReconnectAttempts = 40;
 
   const connect = async () => {
     while (!controller.signal.aborted && shouldReconnect) {
@@ -79,6 +92,8 @@ export function subscribeToTaskEvents(
         if (!shouldReconnect || controller.signal.aborted) {
           return;
         }
+        // Clean EOF mid-run (proxy idle close) — reconnect without counting as hard error.
+        reconnectAttempts = 0;
       } catch (error) {
         if (controller.signal.aborted) {
           return;
@@ -88,7 +103,12 @@ export function subscribeToTaskEvents(
         }
 
         reconnectAttempts += 1;
-        if (!shouldReconnect || reconnectAttempts > 8) {
+        const transient = isTransientStreamError(error);
+        if (
+          !shouldReconnect ||
+          (!transient && reconnectAttempts > 8) ||
+          (transient && reconnectAttempts > maxReconnectAttempts)
+        ) {
           onError?.(
             error instanceof Error ? error : new Error("Event stream error"),
           );
@@ -96,7 +116,10 @@ export function subscribeToTaskEvents(
         }
 
         await new Promise((resolve) =>
-          setTimeout(resolve, Math.min(1000 * reconnectAttempts, 8000)),
+          setTimeout(
+            resolve,
+            Math.min(1000 * Math.min(reconnectAttempts, 8), 8000),
+          ),
         );
       }
     }
