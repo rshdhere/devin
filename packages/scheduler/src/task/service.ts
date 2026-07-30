@@ -41,6 +41,7 @@ import {
   type DraftPlan,
 } from "../greenfield/draft-planner.js";
 import { scaffoldFilesFromDraft } from "../greenfield/scaffold-from-draft.js";
+import { buildAgentAttributionOptOutScript } from "./attribution.js";
 import type {
   AgentProvider,
   CreateTaskInput,
@@ -2866,6 +2867,29 @@ export class TaskService {
       env: this.gitRuntimeEnv(opts?.githubToken),
       command: commands.join(" && "),
     });
+
+    await this.disableAgentCommitAttribution(runtime, taskId);
+  }
+
+  private async disableAgentCommitAttribution(
+    runtime: RuntimeClient,
+    taskId: string,
+  ): Promise<void> {
+    const result = await runtime.terminalAllowFailure({
+      taskId,
+      command: buildAgentAttributionOptOutScript(),
+    });
+
+    if (result.exitCode !== 0) {
+      this.emit(
+        "agent.log",
+        taskId,
+        "could not disable agent commit attribution in sandbox",
+        {
+          detail: (result.stderr || result.stdout || "").trim().slice(0, 240),
+        },
+      );
+    }
   }
 
   private async ensureGitPushAuth(
@@ -4646,6 +4670,9 @@ function buildAgentPrompt(
     "- Make at least 3 focused commits beyond the scaffold — multiple commits are required",
     "- Push to the working branch as you go when possible",
     `- Every commit MUST include this trailer on a new line in the commit message body: Co-authored-by: ${bot.name} <${bot.email}>`,
+    `- ${bot.name} is the ONLY allowed co-author. Never attribute a commit or pull ` +
+      "request to Cursor, Claude, an AI, an assistant, or an agent — no " +
+      "`Co-authored-by: Cursor Agent`, no `Generated with ...` lines",
     "- If git push is rejected, stop retrying — the control plane finalizes and pushes on completion or timeout",
     "",
     "Sandbox resilience:",

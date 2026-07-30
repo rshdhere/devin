@@ -26,6 +26,13 @@ RUN curl https://cursor.com/install -fsS | bash \
     && ln -sfn /root/.local/bin/agent /usr/local/bin/agent \
     && /usr/local/bin/agent --version
 
+# The CLI credits itself as a commit co-author by default, which would list
+# cursoragent as a contributor on every repository this product ships. No auth
+# state exists at build time, so a plain write is safe here.
+RUN mkdir -p /root/.cursor \
+    && printf '%s\n' '{"version":1,"attribution":{"attributeCommitsToAgent":false,"attributePRsToAgent":false}}' \
+      > /root/.cursor/cli-config.json
+
 RUN npm install -g @anthropic-ai/claude-code@latest \
     && ln -sf "$(npm root -g)/@anthropic-ai/claude-code/cli.js" /usr/local/bin/claude || true
 
