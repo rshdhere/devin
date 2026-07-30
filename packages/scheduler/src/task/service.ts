@@ -3127,13 +3127,15 @@ export class TaskService {
       "set +e",
       'export HOME="${HOME:-/root}"',
       'export PATH="/usr/local/bin:/root/.local/bin:$HOME/.local/bin:/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin:$PATH"',
+      // The genuine cursor-agent is a ~1KB bash launcher that execs a sibling
+      // node binary, so size is not a usable signal. Only reject the PATH wrapper
+      // this scheduler writes, which would exec-loop back into itself.
       "is_wrapper() {",
       '  [ -f "$1" ] || return 1',
-      '  head -n 1 "$1" 2>/dev/null | grep -q "^#!/bin/sh$" || return 1',
-      '  grep -q "agent.real" "$1" 2>/dev/null',
+      '  grep -q "agent\\.real" "$1" 2>/dev/null',
       "}",
       "for candidate in \\",
-      // Prefer versioned binaries first — PATH entries may be wrappers/symlinks.
+      // Prefer versioned launchers first — PATH entries may be wrappers/symlinks.
       "  $(ls -1 /root/.local/share/cursor-agent/versions/*/cursor-agent 2>/dev/null | sort -r) \\",
       '  $(ls -1 "$HOME/.local/share/cursor-agent/versions/"*/cursor-agent 2>/dev/null | sort -r) \\',
       "  /root/.local/bin/agent.real \\",
@@ -3148,9 +3150,6 @@ export class TaskService {
       '  resolved=$(readlink -f "$candidate" 2>/dev/null || printf "%s" "$candidate")',
       '  [ -e "$resolved" ] || continue',
       '  if is_wrapper "$resolved"; then continue; fi',
-      '  size=$(wc -c < "$resolved" 2>/dev/null || echo 0)',
-      // Real cursor-agent payloads are tens of MB; reject stubs/wrappers.
-      '  [ "$size" -gt 1000000 ] || continue',
       '  if [ -x "$resolved" ] || [ -L "$candidate" ]; then',
       '    printf "%s\\n" "$resolved"',
       "    exit 0",
@@ -3195,20 +3194,20 @@ export class TaskService {
         `target='${escapeShell(bin)}'`,
         'if [ -z "$target" ] || [ ! -e "$target" ]; then target=$(command -v agent 2>/dev/null); fi',
         'if [ -z "$target" ] || [ ! -e "$target" ]; then exit 0; fi',
+        // The genuine cursor-agent is a ~1KB bash launcher that execs a sibling
+        // node binary, so size is not a usable signal. Only reject the wrapper
+        // written below, which would otherwise exec-loop back into itself.
         "is_wrapper() {",
         '  [ -f "$1" ] || return 1',
-        '  head -n 1 "$1" 2>/dev/null | grep -q "^#!/bin/sh$" || return 1',
-        '  grep -q "agent.real" "$1" 2>/dev/null',
+        '  grep -q "agent\\.real" "$1" 2>/dev/null',
         "}",
         "resolve_real() {",
         '  candidate="$1"',
         '  [ -n "$candidate" ] || return 1',
         '  [ -e "$candidate" ] || return 1',
         '  resolved=$(readlink -f "$candidate" 2>/dev/null || printf "%s" "$candidate")',
+        '  [ -e "$resolved" ] || return 1',
         '  if is_wrapper "$resolved"; then return 1; fi',
-        // Reject tiny stubs — the real cursor-agent payload is tens of MB.
-        '  size=$(wc -c < "$resolved" 2>/dev/null || echo 0)',
-        '  [ "$size" -gt 1000000 ] || return 1',
         '  printf "%s\\n" "$resolved"',
         "}",
         "real=''",
