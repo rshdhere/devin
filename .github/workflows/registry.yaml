@@ -21,6 +21,8 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
+      # Fewer parallel jobs reduces flaky "Failed to resolve action download info" on setup.
+      max-parallel: 4
       matrix:
         include:
           - app: web
@@ -47,14 +49,14 @@ jobs:
             context: infra
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@f7ce87c1d6bead3e36075b2ce75da1f6cc28aaca # v3.9.0
 
       - name: Log in to Docker Hub
         if: github.event_name != 'pull_request'
-        uses: docker/login-action@v3
+        uses: docker/login-action@74a5d142397b4f367a81961eba4e8cd7edddf772 # v3.4.0
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
@@ -62,7 +64,7 @@ jobs:
       - name: Docker metadata
         if: matrix.app != 'web'
         id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@369eb591f429131d6889c46b94e711f089e6ca96 # v5.6.1
         with:
           images: ${{ secrets.DOCKERHUB_USERNAME }}/${{ matrix.image }}
           tags: |
@@ -73,7 +75,7 @@ jobs:
       - name: Docker metadata (web)
         if: matrix.app == 'web'
         id: meta_web
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@369eb591f429131d6889c46b94e711f089e6ca96 # v5.6.1
         with:
           images: ${{ secrets.DOCKERHUB_USERNAME }}/${{ matrix.image }}
           tags: |
@@ -115,7 +117,7 @@ jobs:
 
       - name: Build and push web
         if: matrix.app == 'web'
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@ca877d9245402d1537745e0e356eab47c3520991 # v6.13.0
         with:
           context: .
           file: ${{ matrix.dockerfile }}
@@ -130,7 +132,7 @@ jobs:
 
       - name: Build and push
         if: matrix.app != 'web'
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@ca877d9245402d1537745e0e356eab47c3520991 # v6.13.0
         with:
           context: ${{ matrix.context || '.' }}
           file: ${{ matrix.dockerfile }}
@@ -168,7 +170,7 @@ jobs:
           } >> "${GITHUB_OUTPUT}"
 
       - name: Checkout ops (GitOps) repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           repository: rshdhere/ops
           token: ${{ secrets.OPS_REPO_TOKEN }}
