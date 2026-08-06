@@ -86,7 +86,7 @@ For greenfield work without Cursor, omit `agent` or set `"agent":"mock"`. With `
 ```
 devin/
 ├── apps/
-│   ├── web/                 # Dashboard
+│   ├── web/                 # Dashboard (sessions list + split chat/workspace UI)
 │   ├── server/              # API gateway (auth + task proxy)
 │   ├── scheduler/           # Task queue worker + SSE events
 │   ├── orchestrator/        # Sandbox CRD controller + internal API
@@ -208,6 +208,15 @@ Sync the control plane from GitOps:
 - **Path A (in-cluster KVM):** `apps/devin-baby/overlays/<env>-in-cluster` + label workers `devin.baby/firecracker-host=true`
 
 Set on server: `DATABASE_URL` to your Neon connection string; `SCHEDULER_URL` to your execution host scheduler URL (`http://<private-ip>:9091`).
+
+### Web dashboard
+
+The Next.js app at `apps/web` is the primary surface for tasks:
+
+- **Sessions** — create work from a prompt and browse history.
+- **Session view** (`/s/{taskId}`) — chat on the left (prompt, agent replies, follow-ups) and a **workspace** panel on the right (files, shell, live agent stream) while the devbox is active.
+
+Staging and production URLs are set via `NEXT_PUBLIC_API_URL` and `NEXT_PUBLIC_WEB_APP_URL` at image build time (see the `registry` workflow).
 
 ## Scripts
 
