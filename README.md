@@ -1,5 +1,9 @@
 # Devin (devin.baby)
 
+![Argo CD: devin application resource graph](docs/devin-infra.gif)
+
+![Argo CD: GitOps applications (devin, devin-staging, external-secrets)](docs/gitops-applications.png)
+
 **devin.baby** is a mini Devin focused on the core software-engineering loop: submit work, get an isolated runtime, run the agent, stream progress, and persist results in `/workspace`.
 
 Sandboxes are an internal implementation detail. Users submit **Tasks**.
