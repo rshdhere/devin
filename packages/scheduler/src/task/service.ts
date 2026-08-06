@@ -133,7 +133,7 @@ export class TaskService {
       resolveTimeoutMs("SANDBOX_READY_TIMEOUT_SECONDS", 300);
     this.runtimeReadyTimeoutMs =
       options.runtimeReadyTimeoutMs ??
-      resolveTimeoutMs("RUNTIME_READY_TIMEOUT_SECONDS", 60);
+      resolveTimeoutMs("RUNTIME_READY_TIMEOUT_SECONDS", 120);
     this.eventBus = options.eventBus ?? new EventBus();
     this.queue = options.queue ?? createQueue<ScheduleJob>();
     this.taskStore = new TaskStore(options.databaseUrl);

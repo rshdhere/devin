@@ -471,6 +471,13 @@ func (m *Manager) takeWarm(runtime, name string) (*vm.Instance, bool) {
 		m.mu.Unlock()
 		warm.Name = name
 		warm.Message = "assigned from warm pool"
+		cnihelper.FlushGuestConntrack()
+		if err := warm.HealthCheck(context.Background()); err != nil {
+			slog.Warn("warm microVM failed post-assign health check; shutting down",
+				"vmId", warm.ID, "runtime", runtime, "error", err)
+			_ = warm.Shutdown(context.Background())
+			return nil, false
+		}
 		return warm, true
 	default:
 		return nil, false

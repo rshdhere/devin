@@ -196,12 +196,14 @@ func cleanupStaleCNIChains() error {
 
 	// Shared static guest IP (192.168.127.8) leaves ESTABLISHED conntrack entries
 	// that poison NAT for the next microVM. Flush them whenever we tidy CNI.
-	flushGuestConntrack()
+	FlushGuestConntrack()
 	ensureSubnetMasquerade()
 	return nil
 }
 
-func flushGuestConntrack() {
+// FlushGuestConntrack drops NAT/conntrack state for the shared static guest
+// subnet so a newly restored microVM at 192.168.127.8 is reachable from the host.
+func FlushGuestConntrack() {
 	if _, err := exec.LookPath("conntrack"); err != nil {
 		return
 	}

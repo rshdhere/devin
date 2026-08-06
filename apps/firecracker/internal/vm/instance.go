@@ -65,5 +65,6 @@ func (i *Instance) Shutdown(ctx context.Context) error {
 		}
 	}
 	_ = os.Remove(filepath.Join("/var/run/netns", i.ID))
+	cnihelper.FlushGuestConntrack()
 	return stopErr
 }

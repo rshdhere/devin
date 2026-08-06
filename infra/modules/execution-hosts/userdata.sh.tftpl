@@ -95,7 +95,7 @@ ExecStart=/usr/bin/docker run --rm --name firecracker \\
   -e FIRECRACKER_HOST_PORT=9092 \\
   -e FIRECRACKER_HOST_NAME=${host_name} \\
   -e FIRECRACKER_POOL_SIZE=1 \\
-  -e FIRECRACKER_DEFAULT_RUNTIME=nextjs \\
+  -e FIRECRACKER_DEFAULT_RUNTIME=agent \\
   -e FIRECRACKER_SNAPSHOT_DIR=/var/lib/devin/snapshots \\
   -e FIRECRACKER_KERNEL_PATH=/var/lib/devin/linux/vmlinux \\
   -e FIRECRACKER_VMM_DIR=/var/lib/devin/vms \\
@@ -138,7 +138,7 @@ ExecStart=/usr/bin/docker run --rm --name scheduler \\
   -e AWS_REGION=${aws_region} \\
   -e DEFAULT_AGENT=cursor \\
   -e SANDBOX_READY_TIMEOUT_SECONDS=300 \\
-  -e RUNTIME_READY_TIMEOUT_SECONDS=60 \\
+  -e RUNTIME_READY_TIMEOUT_SECONDS=120 \\
   -e AGENT_RUN_TIMEOUT_MIN=60 \\
   ${container_registry}/devin-scheduler:${image_tag}
 ExecStop=/usr/bin/docker stop scheduler

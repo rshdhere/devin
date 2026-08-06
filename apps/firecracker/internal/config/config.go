@@ -36,7 +36,7 @@ func LoadFromEnv() Config {
 		DryRun:          envBool("FIRECRACKER_DRY_RUN", true),
 		RuntimeFallback: envString("RUNTIME_URL", "http://localhost:8081"),
 		PoolSize:        envInt("FIRECRACKER_POOL_SIZE", 1),
-		DefaultRuntime:  envString("FIRECRACKER_DEFAULT_RUNTIME", "nextjs"),
+		DefaultRuntime:  envString("FIRECRACKER_DEFAULT_RUNTIME", "agent"),
 		KernelPath:      envString("FIRECRACKER_KERNEL_PATH", "/var/lib/devin/linux/vmlinux"),
 		SnapshotDir:     envString("FIRECRACKER_SNAPSHOT_DIR", "/var/lib/devin/snapshots"),
 		VMMDir:          envString("FIRECRACKER_VMM_DIR", "/var/lib/devin/vms"),
