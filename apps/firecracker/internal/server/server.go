@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/rshdhere/devin/apps/firecracker/internal/cnihelper"
 	"github.com/rshdhere/devin/apps/firecracker/internal/pool"
 )
 
@@ -25,6 +26,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/status", s.handleStatus)
 	mux.HandleFunc("GET /v1/vms", s.handleListVMs)
 	mux.HandleFunc("POST /v1/vms", s.handleCreateVM)
+	mux.HandleFunc("POST /v1/network/flush", s.handleFlushGuestNetwork)
 	mux.HandleFunc("GET /v1/vms/{id}", s.handleGetVM)
 	mux.HandleFunc("DELETE /v1/vms/{id}", s.handleDeleteVM)
 	return mux
@@ -93,6 +95,11 @@ func (s *Server) handleDeleteVM(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusAccepted, map[string]string{"status": "deleted"})
+}
+
+func (s *Server) handleFlushGuestNetwork(w http.ResponseWriter, _ *http.Request) {
+	cnihelper.FlushGuestConntrack()
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
 func writeJSON(w http.ResponseWriter, status int, payload any) {

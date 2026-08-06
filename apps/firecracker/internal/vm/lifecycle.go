@@ -119,9 +119,11 @@ func (l *Launcher) Restore(ctx context.Context, vmID, name, runtime string, cpu 
 		return nil, fmt.Errorf("create firecracker machine: %w", err)
 	}
 
+	// Single static guest IP (192.168.127.8): only one restore + health probe at a time.
 	restoreNetworkMu.Lock()
+	defer restoreNetworkMu.Unlock()
+
 	startErr := machine.Start(vmmCtx)
-	restoreNetworkMu.Unlock()
 	if startErr != nil {
 		cancel()
 		_ = machine.StopVMM()

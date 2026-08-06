@@ -150,12 +150,12 @@ func (m *Manager) warmRuntimePool(ctx context.Context, runtime string, queue cha
 		default:
 		}
 
-		if len(queue) >= m.cfg.PoolSize {
+		if m.networkBusy() {
 			time.Sleep(time.Second)
 			continue
 		}
 
-		if m.networkBusy() {
+		if len(queue) >= m.cfg.PoolSize {
 			time.Sleep(time.Second)
 			continue
 		}

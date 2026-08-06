@@ -827,6 +827,7 @@ export class TaskService {
         }
         guestHost = new URL(runtimeBaseUrl).hostname;
         runtime = new RuntimeClient({ baseUrl: runtimeBaseUrl });
+        await this.flushGuestNetworkBeforeRuntimeProbe(task.id);
         this.emit(
           "runtime.waiting",
           task.id,
@@ -4174,6 +4175,29 @@ export class TaskService {
       reprovisionAttempts,
     });
     throw new Error(timeoutMessage);
+  }
+
+  private async flushGuestNetworkBeforeRuntimeProbe(
+    taskId: string,
+  ): Promise<void> {
+    const base = this.firecrackerHostUrl?.trim().replace(/\/$/, "");
+    if (!base) {
+      return;
+    }
+    try {
+      await fetch(`${base}/v1/network/flush`, {
+        method: "POST",
+        signal: AbortSignal.timeout(5_000),
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.emit(
+        "agent.log",
+        taskId,
+        `Guest network flush skipped (${message})`,
+        { firecrackerHostUrl: base },
+      );
+    }
   }
 
   private async waitForRuntime(

@@ -84,12 +84,13 @@ WantedBy=multi-user.target
 	}
 	ensureExecutionHostIP()
 	_ = sysutil.Systemctl(ctx, "daemon-reload")
+	_ = sysutil.Systemctl(ctx, "disable", "--now", "devin-firecracker-host.service")
 	// Stop first and force-remove leftover containers. A previous failed restart
 	// can leave "scheduler"/"firecracker" names claimed so `docker run --name`
 	// fails with Conflict and systemd flaps forever.
 	_ = sysutil.Systemctl(ctx, "stop", "devin-scheduler.service")
 	_ = sysutil.Systemctl(ctx, "stop", "devin-firecracker.service")
-	_ = sysutil.Command(ctx, "docker", "rm", "-f", "scheduler", "firecracker")
+	_ = sysutil.Command(ctx, "docker", "rm", "-f", "scheduler", "firecracker", "firecracker-host")
 	if err := sysutil.Systemctl(ctx, "start", "devin-firecracker.service"); err != nil {
 		_ = sysutil.Command(ctx, "journalctl", "-u", "devin-firecracker.service", "-n", "30", "--no-pager")
 		return err
