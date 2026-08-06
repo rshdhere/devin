@@ -12,6 +12,10 @@ concurrency:
   group: registry-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+  actions: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -119,7 +123,7 @@ jobs:
           tags: ${{ steps.meta_web.outputs.tags }}
           labels: ${{ steps.meta_web.outputs.labels }}
           cache-from: type=gha,scope=web-${{ steps.web_build_args.outputs.environment || 'pr' }}
-          cache-to: type=gha,mode=max,scope=web-${{ steps.web_build_args.outputs.environment || 'pr' }}
+          cache-to: type=gha,mode=max,scope=web-${{ steps.web_build_args.outputs.environment || 'pr' }},ignore-error=true
           build-args: |
             NEXT_PUBLIC_API_URL=${{ steps.web_build_args.outputs.api_url || vars.NEXT_PUBLIC_API_URL }}
             NEXT_PUBLIC_WEB_APP_URL=${{ steps.web_build_args.outputs.web_app_url || vars.NEXT_PUBLIC_WEB_APP_URL }}
@@ -134,12 +138,14 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha,scope=${{ matrix.app }}
-          cache-to: type=gha,mode=max,scope=${{ matrix.app }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.app }},ignore-error=true
 
   bump-gitops:
     needs: build
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - name: Resolve target overlay and image tag
         id: target
