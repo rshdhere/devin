@@ -19,6 +19,8 @@ type WorkspaceTab = "shell" | "files" | "browser";
 interface DevboxWorkspaceProps {
   task: Task;
   onTaskChange?: (task: Task) => void;
+  layout?: "card" | "panel";
+  defaultTab?: WorkspaceTab;
 }
 
 interface FileEntry {
@@ -28,10 +30,15 @@ interface FileEntry {
   size: number;
 }
 
-export function DevboxWorkspace({ task, onTaskChange }: DevboxWorkspaceProps) {
+export function DevboxWorkspace({
+  task,
+  onTaskChange,
+  layout = "card",
+  defaultTab = "shell",
+}: DevboxWorkspaceProps) {
   const canUse = canUseDevbox(task);
 
-  const [tab, setTab] = useState<WorkspaceTab>("shell");
+  const [tab, setTab] = useState<WorkspaceTab>(defaultTab);
   const [waking, setWaking] = useState(false);
   const [wakeError, setWakeError] = useState<string | null>(null);
 
@@ -49,15 +56,40 @@ export function DevboxWorkspace({ task, onTaskChange }: DevboxWorkspaceProps) {
     } finally {
       setWaking(false);
     }
-  }, [task.id]);
+  }, [task.id, onTaskChange]);
 
   if (!canUse) {
-    return null;
+    return (
+      <div
+        className={cn(
+          "flex flex-col items-center justify-center rounded-xl border border-dashed border-white/[0.08] bg-white/[0.02] px-6 py-12 text-center",
+          layout === "panel" ? "min-h-[200px] flex-1" : "mb-4",
+        )}
+      >
+        <FileCode2 className="mb-3 size-8 text-zinc-600" />
+        <p className="text-[13px] text-zinc-400">Devbox workspace</p>
+        <p className="mt-1 max-w-sm text-[12px] text-zinc-600">
+          Files and shell unlock once the sandbox is running.
+        </p>
+      </div>
+    );
   }
 
   return (
-    <div className="mb-4 overflow-hidden rounded-xl border border-[#2a2a2a] bg-[#0a0a0a]">
-      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#252525] px-4 py-2.5">
+    <div
+      className={cn(
+        "flex min-h-0 flex-col overflow-hidden",
+        layout === "panel"
+          ? "min-h-[240px] flex-1 rounded-xl border border-white/[0.06] bg-[#08080a]"
+          : "mb-4 rounded-xl border border-[#2a2a2a] bg-[#0a0a0a]",
+      )}
+    >
+      <div
+        className={cn(
+          "flex flex-wrap items-center justify-between gap-2 border-b px-4 py-2.5",
+          layout === "panel" ? "border-white/[0.06]" : "border-[#252525]",
+        )}
+      >
         <div className="flex items-center gap-1">
           <WorkspaceTabButton
             active={tab === "shell"}
@@ -308,8 +340,8 @@ function FileExplorer({
   );
 
   return (
-    <div className="grid min-h-[280px] grid-cols-1 md:grid-cols-2">
-      <div className="border-b border-[#252525] md:border-r md:border-b-0 md:border-[#252525]">
+    <div className="grid min-h-[280px] flex-1 grid-cols-1 lg:grid-cols-[minmax(140px,34%)_1fr]">
+      <div className="border-b border-white/[0.06] lg:border-r lg:border-b-0">
         <div className="flex items-center justify-between border-b border-[#252525] px-3 py-2">
           <span className="truncate font-mono text-[11px] text-gray-500">
             /workspace/{path}
@@ -318,7 +350,7 @@ function FileExplorer({
             <Loader2 className="size-3.5 animate-spin text-gray-500" />
           ) : null}
         </div>
-        <div className="max-h-[240px] overflow-auto p-2">
+        <div className="max-h-none min-h-[200px] flex-1 overflow-auto p-2 lg:max-h-[min(50vh,420px)]">
           {disabled ? (
             <p className="px-2 py-3 text-[12px] text-gray-600">
               Wake devbox to browse files.
@@ -346,9 +378,9 @@ function FileExplorer({
           )}
         </div>
       </div>
-      <div className="max-h-[280px] overflow-auto p-3">
+      <div className="min-h-[200px] flex-1 overflow-auto bg-[#0a0a0c] p-3 lg:max-h-[min(50vh,420px)]">
         {selected ? (
-          <pre className="font-mono text-[11px] leading-relaxed whitespace-pre-wrap text-gray-300">
+          <pre className="font-mono text-[12px] leading-relaxed whitespace-pre-wrap text-zinc-300">
             {content}
           </pre>
         ) : (

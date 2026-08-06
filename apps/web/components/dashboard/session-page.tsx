@@ -77,7 +77,7 @@ export function SessionPage({ sessionId }: SessionPageProps) {
   }
 
   return (
-    <div className="flex min-h-0 w-full max-w-[900px] flex-1 flex-col self-center overflow-hidden">
+    <div className="flex min-h-0 w-full flex-1 flex-col overflow-hidden">
       <SessionDetail
         key={task.id}
         task={task}

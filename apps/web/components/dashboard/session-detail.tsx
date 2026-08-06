@@ -1,19 +1,11 @@
 "use client";
 
-import {
-  useCallback,
-  useEffect,
-  useRef,
-  useState,
-  type ReactNode,
-} from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 import {
   AlertTriangle,
-  ArrowLeft,
   CheckCircle2,
   ChevronDown,
   ChevronRight,
-  Clock,
   ExternalLink,
   FolderPlus,
   GitBranch,
@@ -33,11 +25,7 @@ import type {
   TaskDiagnostics,
   TaskEvent,
 } from "@devin/types";
-import {
-  resolveRuntimeForTask,
-  runtimeLabel,
-  usesRuntimeAgent,
-} from "@devin/types";
+import { usesRuntimeAgent } from "@devin/types";
 import {
   eventTypeLabel,
   fetchInfraDiagnostics,
@@ -52,10 +40,13 @@ import {
   continueTask,
   terminateSession,
   subscribeToTaskEvents,
-  taskStatusLabel,
 } from "@/lib/tasks-api";
 import { cn } from "@/lib/utils";
-import { DevboxWorkspace } from "@/components/dashboard/devbox-workspace";
+import {
+  SessionChatColumn,
+  SessionPhaseStrip,
+} from "@/components/dashboard/session-chat-column";
+import { SessionCodeColumn } from "@/components/dashboard/session-code-column";
 
 interface SessionDetailProps {
   task: Task;
@@ -627,114 +618,6 @@ function DiagnosticsPanel({
   );
 }
 
-function AgentTerminalPanel({
-  events,
-  isActive,
-}: {
-  events: TaskEvent[];
-  isActive: boolean;
-}) {
-  const terminalRef = useRef<HTMLDivElement>(null);
-  const [isExpanded, setIsExpanded] = useState(true);
-
-  const outputLines = events
-    .filter(
-      (event) =>
-        event.type === "agent.output" ||
-        // Tool calls the agent made. The scheduler also emits agent.tool for its
-        // own setup commands; those carry no `tool` field and belong in Activity.
-        (event.type === "agent.tool" && Boolean(event.data?.tool)),
-    )
-    .map((event) => ({
-      line: event.type === "agent.tool" ? `$ ${event.message}` : event.message,
-      stream: (event.data?.stream as string) ?? "stdout",
-      time: event.timestamp,
-    }));
-
-  useEffect(() => {
-    if (terminalRef.current && isExpanded) {
-      terminalRef.current.scrollTop = terminalRef.current.scrollHeight;
-    }
-  }, [outputLines.length, isExpanded]);
-
-  if (outputLines.length === 0 && !isActive) {
-    return null;
-  }
-
-  return (
-    <div className="mb-4 overflow-hidden rounded-xl border border-[#2a2a2a] bg-[#0a0a0a]">
-      <button
-        type="button"
-        onClick={() => setIsExpanded((prev) => !prev)}
-        className="flex w-full cursor-pointer items-center justify-between border-b border-[#252525] px-4 py-2.5 text-left transition-colors hover:bg-[#111]"
-      >
-        <div className="flex items-center gap-2">
-          <Terminal className="size-4 text-green-400" />
-          <h2 className="text-[13px] font-medium text-gray-300">
-            Agent Output
-          </h2>
-          {isActive ? (
-            <span className="flex items-center gap-1 text-[11px] text-green-400">
-              <span className="size-1.5 animate-pulse rounded-full bg-green-400" />
-              Live
-            </span>
-          ) : null}
-        </div>
-        <div className="flex items-center gap-2">
-          <span className="text-[11px] text-gray-500">
-            {outputLines.length} lines
-          </span>
-          {isExpanded ? (
-            <ChevronDown className="size-4 text-gray-500" />
-          ) : (
-            <ChevronRight className="size-4 text-gray-500" />
-          )}
-        </div>
-      </button>
-
-      {isExpanded ? (
-        <div
-          ref={terminalRef}
-          className="max-h-[400px] overflow-auto p-3 font-mono text-[12px] leading-relaxed"
-        >
-          {outputLines.length === 0 ? (
-            <div className="flex items-center gap-2 text-gray-500">
-              {isActive ? (
-                <>
-                  <Loader2 className="size-3 animate-spin" />
-                  <span>Agent is running — output will appear here…</span>
-                </>
-              ) : (
-                <span>No agent output captured for this task.</span>
-              )}
-            </div>
-          ) : (
-            outputLines.map((output, index) => (
-              <div
-                key={index}
-                className={cn(
-                  "break-all whitespace-pre-wrap",
-                  output.stream === "stderr"
-                    ? "text-red-400"
-                    : "text-green-300",
-                )}
-              >
-                {output.line}
-              </div>
-            ))
-          )}
-          {isActive && outputLines.length > 0 ? (
-            <div className="mt-1 flex items-center gap-1 text-gray-500">
-              <Loader2 className="size-3 animate-spin" />
-              <span>Waiting for output...</span>
-            </div>
-          ) : null}
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
 function BotCoAuthorNote({ compact = false }: { compact?: boolean }) {
   return (
     <p
@@ -743,6 +626,7 @@ function BotCoAuthorNote({ compact = false }: { compact?: boolean }) {
         compact ? "text-[11px]" : "text-[12px]",
       )}
     >
+      {/* eslint-disable-next-line @next/next/no-img-element -- bot avatar is a static external URL */}
       <img
         src={DEVIN_BOT.avatarUrl}
         alt=""
@@ -842,110 +726,6 @@ function GitHubProgressBanner({
             <GitCommit className="size-3" />
           </a>
         </div>
-      </div>
-    </div>
-  );
-}
-
-function PhaseTimeline({ task, events }: { task: Task; events: TaskEvent[] }) {
-  const runtimeAgent = usesRuntimeAgent(task.agent);
-  const draftCompleted = events.some(
-    (event) => event.type === "draft.completed",
-  );
-  const draftDone =
-    runtimeAgent ||
-    draftCompleted ||
-    events.some((event) => event.type === "execution.started") ||
-    events.some((event) => event.type.startsWith("sandbox."));
-  const sandboxDone = events.some((event) => event.type === "sandbox.started");
-  const executeDone =
-    task.status === "completed" ||
-    task.status === "awaiting_review" ||
-    events.some((event) => event.type === "task.completed") ||
-    events.some((event) => event.data?.awaitingReview === true);
-
-  const currentPhase = (() => {
-    if (executeDone || task.status === "completed") {
-      return "complete";
-    }
-    if (task.status === "awaiting_review") {
-      return "review";
-    }
-    // Prefer live agent/runtime signals over historical sandbox.* events —
-    // provisioning events stay in the feed forever and used to pin the
-    // timeline on "Sandbox" while the agent was already running.
-    if (
-      task.status === "running" ||
-      task.status === "runtime_ready" ||
-      events.some(
-        (event) =>
-          event.type === "agent.running" ||
-          event.type === "agent.output" ||
-          event.type === "agent.tool" ||
-          event.type === "runtime.ready",
-      )
-    ) {
-      return "execute";
-    }
-    if (
-      !runtimeAgent &&
-      ["queued", "scheduling", "drafting"].includes(task.status)
-    ) {
-      return "draft";
-    }
-    if (
-      task.status === "draft_ready" ||
-      task.status === "sandbox_starting" ||
-      (!sandboxDone &&
-        events.some((event) => event.type.startsWith("sandbox.")))
-    ) {
-      return "sandbox";
-    }
-    return draftDone ? (sandboxDone ? "execute" : "sandbox") : "draft";
-  })();
-
-  const phases = runtimeAgent
-    ? ([
-        { id: "sandbox", label: "Sandbox", done: sandboxDone },
-        { id: "execute", label: "Execute", done: executeDone },
-        {
-          id: "review",
-          label: "Review",
-          done: task.status === "completed",
-        },
-        { id: "complete", label: "Done", done: task.status === "completed" },
-      ] as const)
-    : ([
-        { id: "draft", label: "Draft plan", done: draftDone },
-        { id: "sandbox", label: "Sandbox", done: sandboxDone },
-        { id: "execute", label: "Execute", done: executeDone },
-        { id: "complete", label: "Done", done: executeDone },
-      ] as const);
-
-  return (
-    <div className="mb-4 rounded-xl border border-[#2a2a2a] bg-[#111] px-4 py-3">
-      <p className="mb-2 text-[11px] font-medium tracking-wide text-gray-500 uppercase">
-        Progress
-      </p>
-      <div className="grid grid-cols-4 gap-2">
-        {phases.map((phase) => {
-          const isActive = phase.id === currentPhase;
-          return (
-            <div
-              key={phase.id}
-              className={cn(
-                "rounded-lg border px-2 py-1.5 text-center text-[11px]",
-                phase.done
-                  ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-300"
-                  : isActive
-                    ? "border-indigo-500/40 bg-indigo-500/10 text-indigo-200"
-                    : "border-[#2a2a2a] bg-[#0d0d0d] text-gray-500",
-              )}
-            >
-              {phase.label}
-            </div>
-          );
-        })}
       </div>
     </div>
   );
@@ -1053,20 +833,13 @@ export function SessionDetail({
   const [followUpPrompt, setFollowUpPrompt] = useState("");
   const [continuingSession, setContinuingSession] = useState(false);
   const [terminatingSession, setTerminatingSession] = useState(false);
-  const feedRef = useRef<HTMLDivElement>(null);
 
   const isActive =
     task.status !== "completed" &&
     task.status !== "failed" &&
     task.status !== "cancelled";
 
-  const runtimeAgent = usesRuntimeAgent(task.agent);
-  const devboxRuntime =
-    task.runtime ?? resolveRuntimeForTask(task.agent, task.prompt);
-
   const elapsedTime = useElapsedTime(task.createdAt, isActive);
-  const isLongRunning =
-    isActive && Date.now() - new Date(task.createdAt).getTime() > 5 * 60 * 1000;
 
   const awaitingSandboxApproval =
     task.status === "draft_ready" &&
@@ -1300,7 +1073,7 @@ export function SessionDetail({
       cancelled = true;
       unsubscribe();
     };
-  }, [task.id, refreshTasks, loadDiagnostics]);
+  }, [task.id, task.status, refreshTasks, loadDiagnostics]);
 
   // Poll task status while non-terminal so a dropped SSE stream cannot leave
   // the header stuck on "Booting devbox".
@@ -1333,335 +1106,151 @@ export function SessionDetail({
     };
   }, [task.id, task.status]);
 
-  useEffect(() => {
-    feedRef.current?.scrollTo({
-      top: feedRef.current.scrollHeight,
-      behavior: "smooth",
-    });
-  }, [events.length]);
-
   const showDiagnostics =
     task.status === "failed" ||
     task.status === "sandbox_starting" ||
     task.status === "scheduling" ||
     events.some((event) => event.type === "sandbox.failed");
 
+  const actionBanner = (
+    <>
+      <SessionPhaseStrip task={task} events={events} />
+      {task.status === "failed" ? (
+        <div className="mt-3 flex items-center justify-between gap-3 rounded-xl border border-rose-500/25 bg-rose-500/10 px-3 py-2.5">
+          <p className="text-[12px] text-rose-100">
+            {task.message ?? "Task failed — retry or check workspace logs."}
+          </p>
+          <MotionButton
+            type="button"
+            onClick={() => void handleRetryTask()}
+            disabled={retryingTask}
+            className="inline-flex shrink-0 cursor-pointer items-center gap-1.5 rounded-lg bg-rose-500/20 px-2.5 py-1 text-[11px] text-rose-50 hover:bg-rose-500/30 disabled:opacity-60"
+          >
+            {retryingTask ? <Loader2 className="size-3 animate-spin" /> : null}
+            Retry
+          </MotionButton>
+        </div>
+      ) : null}
+      {awaitingSandboxApproval ? (
+        <div className="mt-3 flex items-center justify-between gap-3 rounded-xl border border-violet-500/25 bg-violet-500/10 px-3 py-2.5">
+          <p className="text-[12px] text-violet-100">
+            Draft ready — run in devbox
+          </p>
+          <MotionButton
+            type="button"
+            onClick={() => void handleStartSandbox()}
+            disabled={startingSandbox}
+            className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg bg-violet-600 px-2.5 py-1 text-[11px] text-white hover:bg-violet-500 disabled:opacity-60"
+          >
+            {startingSandbox ? (
+              <Loader2 className="size-3 animate-spin" />
+            ) : null}
+            Run
+          </MotionButton>
+        </div>
+      ) : null}
+      {awaitingReview ? (
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <MotionButton
+            type="button"
+            onClick={() => void handleCommitNow()}
+            disabled={committingWork || raisingPr}
+            className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg border border-emerald-500/30 bg-emerald-500/15 px-2.5 py-1 text-[11px] text-emerald-100"
+          >
+            Commit
+          </MotionButton>
+          <MotionButton
+            type="button"
+            onClick={() => void handleRaisePr()}
+            disabled={committingWork || raisingPr}
+            className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg border border-violet-500/30 bg-violet-500/15 px-2.5 py-1 text-[11px] text-violet-100"
+          >
+            Open PR
+          </MotionButton>
+        </div>
+      ) : null}
+      {sessionActive && !awaitingReview ? (
+        <div className="mt-3 flex justify-end">
+          <MotionButton
+            type="button"
+            onClick={() => void handleTerminateSession()}
+            disabled={terminatingSession}
+            className="cursor-pointer text-[11px] text-zinc-500 hover:text-zinc-300"
+          >
+            End session
+          </MotionButton>
+        </div>
+      ) : null}
+      {streamError ? (
+        <p className="mt-2 text-[11px] text-rose-400">{streamError}</p>
+      ) : null}
+    </>
+  );
+
   return (
     <div className="flex min-h-0 w-full flex-1 flex-col overflow-hidden">
-      <div className="mb-4 flex items-center gap-3">
-        <MotionButton
-          type="button"
-          pressStyle="icon"
-          onClick={onBack}
-          className="cursor-pointer rounded-lg p-2 text-gray-500 transition-colors hover:bg-[#1a1a1a] hover:text-gray-300"
-          aria-label="Back to composer"
-        >
-          <ArrowLeft className="size-4" />
-        </MotionButton>
-
-        <div className="min-w-0 flex-1">
-          <h1 className="truncate text-[15px] font-medium text-white">
-            {task.title ?? task.prompt}
-          </h1>
-          <div className="mt-0.5 flex flex-wrap items-center gap-2 text-[12px] text-gray-500">
-            <span
-              className={cn(
-                "inline-flex items-center gap-1",
-                isActive ? "text-[#5a9fd4]" : "text-gray-500",
-                task.status === "failed" ? "text-red-400" : null,
-              )}
-            >
-              {isActive ? <Loader2 className="size-3 animate-spin" /> : null}
-              {taskStatusLabel(task.status)}
-            </span>
-            <span
-              className={cn(
-                "inline-flex items-center gap-1",
-                isLongRunning ? "text-amber-400" : "text-gray-500",
-              )}
-            >
-              <Clock className="size-3" />
-              {elapsedTime}
-            </span>
-            {task.repository ? (
-              <>
-                <span>•</span>
-                <span>{task.repository}</span>
-              </>
-            ) : null}
-            <span>•</span>
-            <span className="text-gray-400 capitalize">{task.agent} agent</span>
-            {task.branch ? (
-              <>
-                <span>•</span>
-                <span className="text-gray-600">{task.branch}</span>
-              </>
-            ) : null}
-            {devboxRuntime ? (
-              <>
-                <span>•</span>
-                <span className="text-indigo-300/80">
-                  {runtimeLabel(devboxRuntime)}
-                </span>
-              </>
-            ) : null}
-          </div>
-        </div>
-
-        {task.prUrl ? (
-          <a
-            href={task.prUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-[#333] bg-[#1a1a1a] px-3 py-1.5 text-[12px] text-[#5a9fd4] transition-colors hover:bg-[#222]"
-          >
-            View PR
-            <ExternalLink className="size-3" />
-          </a>
-        ) : task.repository ? (
-          <a
-            href={`https://github.com/${task.repository}/commits/${task.branch ?? "main"}`}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-[#333] bg-[#1a1a1a] px-3 py-1.5 text-[12px] text-emerald-400 transition-colors hover:bg-[#222]"
-          >
-            View commits
-            <GitCommit className="size-3" />
-          </a>
-        ) : null}
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-white/[0.07] bg-[#0a0a0b] shadow-[0_0_0_1px_rgba(255,255,255,0.02),0_24px_80px_rgba(0,0,0,0.45)] lg:flex-row">
+        <SessionChatColumn
+          task={task}
+          events={events}
+          elapsedTime={elapsedTime}
+          isActive={isActive}
+          onBack={onBack}
+          followUpPrompt={followUpPrompt}
+          onFollowUpChange={setFollowUpPrompt}
+          onSendFollowUp={() => void handleContinueSession()}
+          continuingSession={continuingSession}
+          sessionActive={sessionActive}
+          banner={actionBanner}
+          composerDisabled={
+            !sessionActive && !isActive && task.status !== "awaiting_review"
+          }
+        />
+        <SessionCodeColumn
+          task={task}
+          events={events}
+          isActive={isActive}
+          onTaskChange={setTask}
+        />
       </div>
 
-      <div className="mb-4 max-h-[38vh] shrink-0 space-y-4 overflow-y-auto">
-        <div className="rounded-xl border border-[#2a2a2a] bg-[#141414] px-4 py-3">
-          <p className="text-[13px] leading-relaxed text-gray-300">
-            {task.prompt}
-          </p>
-        </div>
-
-        {isLongRunning ? (
-          <p className="text-[12px] text-amber-300/90">
-            Still running ({elapsedTime}) — complex tasks can take 30+ minutes.
-          </p>
-        ) : null}
-
-        <PhaseTimeline task={task} events={events} />
-
-        {task.status === "failed" ? (
-          <div className="flex items-center justify-between gap-3 rounded-xl border border-red-500/30 bg-red-500/5 px-4 py-3">
-            <div>
-              <p className="text-[13px] font-medium text-red-100">
-                Task failed
-              </p>
-              <p className="text-[12px] text-red-100/70">
-                {task.message ??
-                  "Check activity and sandbox diagnostics below, then retry."}
-              </p>
-            </div>
-            <MotionButton
-              type="button"
-              onClick={() => void handleRetryTask()}
-              disabled={retryingTask}
-              className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-red-400/40 bg-red-500/20 px-3 py-1.5 text-[12px] text-red-100 transition-colors hover:bg-red-500/30 disabled:opacity-60"
-            >
-              {retryingTask ? (
-                <Loader2 className="size-3.5 animate-spin" />
-              ) : (
-                <Server className="size-3.5" />
-              )}
-              Retry
-            </MotionButton>
-          </div>
-        ) : null}
-
-        {awaitingSandboxApproval ? (
-          <div className="flex items-center justify-between gap-3 rounded-xl border border-indigo-500/30 bg-indigo-500/5 px-4 py-3">
-            <div>
-              <p className="text-[13px] font-medium text-indigo-100">
-                Draft is ready
-              </p>
-              <p className="text-[12px] text-indigo-100/70">
-                Review planned files below, then start sandbox execution.
-              </p>
-            </div>
-            <MotionButton
-              type="button"
-              onClick={() => void handleStartSandbox()}
-              disabled={startingSandbox}
-              className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-indigo-400/40 bg-indigo-500/20 px-3 py-1.5 text-[12px] text-indigo-100 transition-colors hover:bg-indigo-500/30 disabled:opacity-60"
-            >
-              {startingSandbox ? (
-                <Loader2 className="size-3.5 animate-spin" />
-              ) : (
-                <Server className="size-3.5" />
-              )}
-              Run in devbox
-            </MotionButton>
-          </div>
-        ) : null}
-
-        {awaitingReview ? (
-          <div className="flex flex-col gap-3 rounded-xl border border-emerald-500/30 bg-emerald-500/5 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <p className="text-[13px] font-medium text-emerald-100">
-                Review changes
-              </p>
-              <p className="text-[12px] text-emerald-100/70">
-                Manual review is enabled for your account. Commit or open a PR
-                when you are satisfied with the devbox work.
-              </p>
-            </div>
-            <div className="flex flex-wrap items-center gap-2">
-              <MotionButton
-                type="button"
-                onClick={() => void handleCommitNow()}
-                disabled={committingWork || raisingPr}
-                className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-emerald-400/40 bg-emerald-500/20 px-3 py-1.5 text-[12px] text-emerald-100 transition-colors hover:bg-emerald-500/30 disabled:opacity-60"
-              >
-                {committingWork ? (
-                  <Loader2 className="size-3.5 animate-spin" />
-                ) : (
-                  <GitCommit className="size-3.5" />
-                )}
-                Commit now
-              </MotionButton>
-              <MotionButton
-                type="button"
-                onClick={() => void handleRaisePr()}
-                disabled={committingWork || raisingPr}
-                className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-indigo-400/40 bg-indigo-500/20 px-3 py-1.5 text-[12px] text-indigo-100 transition-colors hover:bg-indigo-500/30 disabled:opacity-60"
-              >
-                {raisingPr ? (
-                  <Loader2 className="size-3.5 animate-spin" />
-                ) : (
-                  <GitPullRequest className="size-3.5" />
-                )}
-                Raise a PR
-              </MotionButton>
-            </div>
-          </div>
-        ) : null}
-
-        {sessionActive && !awaitingReview && task.status !== "running" ? (
-          <div className="space-y-3 rounded-xl border border-[#2a2a2a] bg-[#141414] px-4 py-3">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <div>
-                <p className="text-[13px] font-medium text-gray-200">
-                  Devbox session active
-                </p>
-                <p className="text-[12px] text-gray-500">
-                  Send a follow-up prompt in the same environment, use Shell /
-                  Files / Browser below, or end the session to tear down the
-                  microVM.
-                </p>
-              </div>
-              <MotionButton
-                type="button"
-                onClick={() => void handleTerminateSession()}
-                disabled={terminatingSession || continuingSession}
-                className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-[#333] bg-[#1a1a1a] px-3 py-1.5 text-[12px] text-gray-300 transition-colors hover:bg-[#222] disabled:opacity-60"
-              >
-                {terminatingSession ? (
-                  <Loader2 className="size-3.5 animate-spin" />
-                ) : null}
-                End session
-              </MotionButton>
-            </div>
-            <div className="flex gap-2">
-              <input
-                value={followUpPrompt}
-                onChange={(event) => setFollowUpPrompt(event.target.value)}
-                placeholder="Ask for a follow-up change in this devbox…"
-                className="min-w-0 flex-1 rounded-lg border border-[#333] bg-[#0d0d0d] px-3 py-2 text-[13px] text-gray-200 outline-none placeholder:text-gray-600 focus:border-[#444]"
-              />
-              <MotionButton
-                type="button"
-                onClick={() => void handleContinueSession()}
-                disabled={!followUpPrompt.trim() || continuingSession}
-                className="inline-flex shrink-0 cursor-pointer items-center gap-2 rounded-lg border border-indigo-400/40 bg-indigo-500/20 px-3 py-2 text-[12px] text-indigo-100 transition-colors hover:bg-indigo-500/30 disabled:opacity-60"
-              >
-                {continuingSession ? (
-                  <Loader2 className="size-3.5 animate-spin" />
-                ) : null}
-                Send follow-up
-              </MotionButton>
-            </div>
-          </div>
-        ) : null}
-
-        <DevboxWorkspace task={task} onTaskChange={setTask} />
-
-        {runtimeAgent ? (
-          <p className="text-[12px] text-gray-500">
-            Shell, Files, and Browser are available while the devbox is booting
-            or the agent is running.
-          </p>
-        ) : null}
-
-        <LiveWorkPanel task={task} events={events} />
-
-        {task.repository ? (
-          <GitHubProgressBanner
-            repository={task.repository}
-            events={events}
-            branch={task.branch}
-          />
-        ) : null}
-
-        {showDiagnostics ? (
-          <DiagnosticsPanel
-            task={task}
-            taskDiagnostics={taskDiagnostics}
-            infraDiagnostics={infraDiagnostics}
-            loading={diagnosticsLoading}
-            error={diagnosticsError}
-            onRefresh={() => void loadDiagnostics(task.id)}
-            defaultExpanded={task.status === "failed"}
-          />
-        ) : null}
-      </div>
-
-      <AgentTerminalPanel events={events} isActive={isActive} />
-
-      <div className="mt-4 flex min-h-0 min-h-[min(42vh,480px)] flex-1 flex-col overflow-hidden rounded-xl border border-[#2a2a2a] bg-[#111]">
-        <div className="border-b border-[#252525] px-4 py-2.5">
-          <h2 className="text-[13px] font-medium text-gray-400">Activity</h2>
-        </div>
-
-        <div
-          ref={feedRef}
-          className="min-h-0 flex-1 space-y-1 overflow-y-auto px-3 py-3"
-        >
-          {events.length === 0 ? (
-            <div className="space-y-2 px-2 py-4">
-              {task.status === "failed" && task.message ? (
-                <p className="text-[13px] leading-relaxed text-red-300">
-                  {task.message}
-                </p>
-              ) : (
-                <div className="flex items-center gap-2 text-[13px] text-gray-600">
-                  <Loader2 className="size-4 animate-spin" />
-                  Waiting for sandbox and agent activity…
-                </div>
-              )}
-            </div>
-          ) : (
-            events
+      <details className="mt-3 shrink-0 rounded-xl border border-white/[0.06] bg-[#111] px-4 py-2">
+        <summary className="cursor-pointer text-[12px] text-zinc-500 hover:text-zinc-300">
+          Technical activity & diagnostics
+        </summary>
+        <div className="mt-3 max-h-[280px] space-y-3 overflow-y-auto pb-2">
+          <LiveWorkPanel task={task} events={events} />
+          {task.repository ? (
+            <GitHubProgressBanner
+              repository={task.repository}
+              events={events}
+              branch={task.branch}
+            />
+          ) : null}
+          {showDiagnostics ? (
+            <DiagnosticsPanel
+              task={task}
+              taskDiagnostics={taskDiagnostics}
+              infraDiagnostics={infraDiagnostics}
+              loading={diagnosticsLoading}
+              error={diagnosticsError}
+              onRefresh={() => void loadDiagnostics(task.id)}
+              defaultExpanded={task.status === "failed"}
+            />
+          ) : null}
+          <div className="space-y-1">
+            {events
               .filter(
                 (event) =>
                   event.type !== "agent.output" &&
-                  // Agent tool calls render in the output panel instead.
                   !(event.type === "agent.tool" && Boolean(event.data?.tool)),
               )
-              .map((event) => <EventRow key={event.id} event={event} />)
-          )}
+              .map((event) => (
+                <EventRow key={event.id} event={event} />
+              ))}
+          </div>
         </div>
-
-        {streamError ? (
-          <p className="border-t border-[#252525] px-4 py-2 text-[12px] text-red-400">
-            Event stream error: {streamError}
-          </p>
-        ) : null}
-      </div>
+      </details>
     </div>
   );
 }
