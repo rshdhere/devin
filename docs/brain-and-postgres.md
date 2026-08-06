@@ -139,6 +139,8 @@ curl -s http://<execution-host>:9091/health | jq .
 | `production/devin/overlays/external/patch-server-database.yaml` | Server `DATABASE_URL` from postgres secret |
 | `staging/devin/overlays/external/` | Same stack in `devin-staging` namespace |
 
+When staging shares the production EC2 execution host, the staging `FirecrackerHost` CR **`metadata.name` must match `SCHEDULER_HOST_NAME` on the worker** (e.g. `devin-production-fc-01`). A staging-only name such as `devin-staging-fc-01` causes sandbox host / scheduler pin mismatches.
+
 ---
 
 ## This repo (devin)

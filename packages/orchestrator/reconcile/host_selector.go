@@ -3,7 +3,7 @@ package reconcile
 import (
 	"context"
 	"fmt"
-	"log/slog"
+	"strings"
 
 	devinv1 "github.com/rshdhere/devin/packages/sandbox/api/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -67,22 +67,11 @@ func selectFirecrackerHost(ctx context.Context, c client.Client, namespace strin
 			}
 			return host, nil
 		}
-		if len(list.Items) == 1 {
-			host := &list.Items[0]
-			if host.Spec.Address == "" {
-				return nil, fmt.Errorf("preferred firecracker host %q not found", preferredHost)
-			}
-			if hostLacksCapacity(host, cpu) {
-				return nil, hostCapacityError(preferredHost, host, cpu)
-			}
-			slog.Warn(
-				"preferred firecracker host not found; using sole registered host",
-				"preferredHost", preferredHost,
-				"selectedHost", host.Name,
-			)
-			return host, nil
-		}
-		return nil, fmt.Errorf("preferred firecracker host %q not found", preferredHost)
+		return nil, fmt.Errorf(
+			"preferred firecracker host %q not found (registered: %s)",
+			preferredHost,
+			firecrackerHostNames(list.Items),
+		)
 	}
 
 	var selected *devinv1.FirecrackerHost
@@ -103,4 +92,15 @@ func selectFirecrackerHost(ctx context.Context, c client.Client, namespace strin
 		return nil, fmt.Errorf("no firecracker host with capacity for %d cpu", cpu)
 	}
 	return selected, nil
+}
+
+func firecrackerHostNames(hosts []devinv1.FirecrackerHost) string {
+	if len(hosts) == 0 {
+		return "none"
+	}
+	names := make([]string, 0, len(hosts))
+	for i := range hosts {
+		names = append(names, hosts[i].Name)
+	}
+	return strings.Join(names, ", ")
 }
