@@ -22,6 +22,7 @@ func mergeEnv(req RunRequest, extra ...string) []string {
 		path = os.Getenv("PATH")
 	}
 	merged := []string{
+		"HOME=/root",
 		"PATH=" + guestPathPrefix + pathSuffix(path),
 	}
 	merged = append(merged, extra...)
@@ -29,7 +30,7 @@ func mergeEnv(req RunRequest, extra ...string) []string {
 		return merged
 	}
 	for key, value := range req.Env {
-		if value == "" || strings.EqualFold(key, "PATH") {
+		if value == "" || strings.EqualFold(key, "PATH") || strings.EqualFold(key, "HOME") {
 			continue
 		}
 		merged = append(merged, key+"="+value)

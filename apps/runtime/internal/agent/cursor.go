@@ -273,7 +273,7 @@ func ensureCursorBin(
 	})
 
 	install := `set +e
-export HOME="${HOME:-/root}"
+export HOME="/root"
 export PATH="/usr/local/bin:/root/.local/bin:$HOME/.local/bin:/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin:$PATH"
 curl https://cursor.com/install -fsS | bash
 # Re-resolve after install — do not trust a single hard-coded path.
@@ -333,7 +333,7 @@ exit 1
 // hang for the whole run without emitting a single event.
 func verifyCursorBin(ctx context.Context, workDir, bin string, env []string) error {
 	script := `set +e
-export HOME="${HOME:-/root}"
+export HOME="/root"
 export PATH="` + guestPathPrefix + `:$PATH"
 if [ -r /proc/self/status ]; then printf 'probe:proc=mounted\n'; else printf 'probe:proc=missing\n'; fi
 timeout ` + strconv.Itoa(cursorVersionTimeoutSec) + ` ` + shellQuote(bin) + ` --version 2>&1
@@ -409,7 +409,7 @@ func cursorStallLimit(req RunRequest) time.Duration {
 
 func whichCursorBin(ctx context.Context, workDir, bin string, env []string) (string, error) {
 	script := `set +e
-export HOME="${HOME:-/root}"
+export HOME="/root"
 export PATH="/usr/local/bin:/root/.local/bin:$HOME/.local/bin:/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin:$PATH"
 for candidate in \
   ` + shellQuote(bin) + ` \

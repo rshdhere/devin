@@ -97,11 +97,22 @@ func mergeProcessEnv(overrides []string) []string {
 		add(entry)
 	}
 	for _, entry := range overrides {
+		key, value, ok := strings.Cut(entry, "=")
+		if !ok || key == "" {
+			continue
+		}
+		if key == "HOME" && strings.TrimSpace(value) == "" {
+			continue
+		}
 		add(entry)
 	}
 	out := make([]string, 0, len(order))
 	for _, key := range order {
-		out = append(out, key+"="+envMap[key])
+		val := envMap[key]
+		if key == "HOME" && strings.TrimSpace(val) == "" {
+			val = "/root"
+		}
+		out = append(out, key+"="+val)
 	}
 	return out
 }

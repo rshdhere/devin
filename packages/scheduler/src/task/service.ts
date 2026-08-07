@@ -2854,6 +2854,7 @@ export class TaskService {
       owner?.email || `${owner?.login ?? "devin"}@users.noreply.github.com`;
 
     const commands = [
+      "export HOME=/root",
       `git config --global user.name '${escapeShell(name)}'`,
       `git config --global user.email '${escapeShell(email)}'`,
     ];
@@ -2922,13 +2923,12 @@ export class TaskService {
     });
   }
 
-  private gitRuntimeEnv(
-    githubToken?: string,
-  ): Record<string, string> | undefined {
-    if (!githubToken) {
-      return undefined;
+  private gitRuntimeEnv(githubToken?: string): Record<string, string> {
+    const env: Record<string, string> = { HOME: "/root" };
+    if (githubToken) {
+      env.GITHUB_TOKEN = githubToken;
     }
-    return { GITHUB_TOKEN: githubToken };
+    return env;
   }
 
   private startAutoCommitWatcher(
@@ -3178,7 +3178,7 @@ export class TaskService {
       taskId,
       command: [
         "set +e",
-        'export HOME="${HOME:-/root}"',
+        "export HOME=/root",
         'export PATH="/usr/local/bin:/root/.local/bin:$HOME/.local/bin:/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin:$PATH"',
         "curl https://cursor.com/install -fsS | bash",
         "ec=$?",
@@ -3234,7 +3234,7 @@ export class TaskService {
     // on that call (or exec-loop). Identify by resolved path + size instead.
     const findCmd = [
       "set +e",
-      'export HOME="${HOME:-/root}"',
+      'if [ -z "${HOME}" ]; then export HOME=/root; fi',
       'export PATH="/usr/local/bin:/root/.local/bin:$HOME/.local/bin:/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin:$PATH"',
       // The genuine cursor-agent is a ~1KB bash launcher that execs a sibling
       // node binary, so size is not a usable signal. Only reject the PATH wrapper
