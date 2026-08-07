@@ -42,6 +42,11 @@ import {
   type DraftPlan,
 } from "../greenfield/draft-planner.js";
 import { scaffoldFilesFromDraft } from "../greenfield/scaffold-from-draft.js";
+import {
+  SANDBOX_WRITABLE_HOME,
+  sandboxProcessEnv,
+  shellPrepareWritableHome,
+} from "../sandbox/env.js";
 import { buildAgentAttributionOptOutScript } from "./attribution.js";
 import type {
   AgentProvider,
@@ -2834,6 +2839,7 @@ export class TaskService {
   ): Promise<void> {
     await runtime.terminal({
       taskId,
+      env: this.gitRuntimeEnv(),
       command: `mkdir -p ${repoCwd} && git -C ${repoCwd} init -b main && git -C ${repoCwd} remote add origin '${escapeShell(cloneUrl)}'`,
     });
   }
@@ -2854,7 +2860,7 @@ export class TaskService {
       owner?.email || `${owner?.login ?? "devin"}@users.noreply.github.com`;
 
     const commands = [
-      "export HOME=/root",
+      shellPrepareWritableHome(),
       `git config --global user.name '${escapeShell(name)}'`,
       `git config --global user.email '${escapeShell(email)}'`,
     ];
@@ -2886,6 +2892,7 @@ export class TaskService {
   ): Promise<void> {
     const result = await runtime.terminalAllowFailure({
       taskId,
+      env: this.gitRuntimeEnv(),
       command: buildAgentAttributionOptOutScript(),
     });
 
@@ -2924,11 +2931,7 @@ export class TaskService {
   }
 
   private gitRuntimeEnv(githubToken?: string): Record<string, string> {
-    const env: Record<string, string> = { HOME: "/root" };
-    if (githubToken) {
-      env.GITHUB_TOKEN = githubToken;
-    }
-    return env;
+    return sandboxProcessEnv(githubToken);
   }
 
   private startAutoCommitWatcher(
@@ -3176,9 +3179,10 @@ export class TaskService {
     // be /root inside the guest.
     const install = await runtime.terminalAllowFailure({
       taskId,
+      env: this.gitRuntimeEnv(),
       command: [
         "set +e",
-        "export HOME=/root",
+        shellPrepareWritableHome(),
         'export PATH="/usr/local/bin:/root/.local/bin:$HOME/.local/bin:/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin:$PATH"',
         "curl https://cursor.com/install -fsS | bash",
         "ec=$?",
@@ -3234,7 +3238,7 @@ export class TaskService {
     // on that call (or exec-loop). Identify by resolved path + size instead.
     const findCmd = [
       "set +e",
-      'if [ -z "${HOME}" ]; then export HOME=/root; fi',
+      'if [ -z "${HOME}" ]; then export HOME=' + SANDBOX_WRITABLE_HOME + "; fi",
       'export PATH="/usr/local/bin:/root/.local/bin:$HOME/.local/bin:/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin:$PATH"',
       // The genuine cursor-agent is a ~1KB bash launcher that execs a sibling
       // node binary, so size is not a usable signal. Only reject the PATH wrapper

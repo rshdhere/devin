@@ -37,7 +37,7 @@ func (s *Server) handleGitClone(w http.ResponseWriter, r *http.Request) {
 	)
 	s.appendLog("git clone " + req.URL)
 
-	result, err := executil.Run(r.Context(), s.workspace, command, nil)
+	result, err := executil.RunGuest(r.Context(), s.workspace, command, workspace.DevinProcessEnv(s.workspace), nil)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -90,7 +90,7 @@ func (s *Server) handleGitCommit(w http.ResponseWriter, r *http.Request) {
 	)
 	s.appendLog("git commit: " + req.Message)
 
-	result, err := executil.Run(r.Context(), cwd, command, parseRequestEnv(r))
+	result, err := executil.RunGuest(r.Context(), cwd, command, workspace.DevinProcessEnv(s.workspace), parseRequestEnv(r))
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -137,7 +137,7 @@ func (s *Server) handleGitPush(w http.ResponseWriter, r *http.Request) {
 	}
 	s.appendLog("git push: " + command)
 
-	result, err := executil.Run(r.Context(), cwd, command, parseRequestEnv(r))
+	result, err := executil.RunGuest(r.Context(), cwd, command, workspace.DevinProcessEnv(s.workspace), parseRequestEnv(r))
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return

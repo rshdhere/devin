@@ -2,7 +2,9 @@ package agent
 
 import (
 	"os"
-	"strings"
+
+	"github.com/rshdhere/devin/apps/runtime/internal/executil"
+	"github.com/rshdhere/devin/apps/runtime/internal/workspace"
 )
 
 const guestPathPrefix = "/usr/local/bin:/root/.local/bin:/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin"
@@ -13,37 +15,29 @@ func envValue(req RunRequest, key string) string {
 			return value
 		}
 	}
-	return os.Getenv(key)
+	return ""
 }
 
-func mergeEnv(req RunRequest, extra ...string) []string {
-	path := envValue(req, "PATH")
-	if path == "" {
-		path = os.Getenv("PATH")
+func mergeEnv(req RunRequest, workspaceRoot string, extra ...string) []string {
+	overrides := envMapToSlice(req.Env)
+	if len(extra) > 0 {
+		overrides = append(overrides, extra...)
 	}
-	merged := []string{
-		"HOME=/root",
-		"PATH=" + guestPathPrefix + pathSuffix(path),
+	return executil.GuestCommandEnv(workspace.DevinProcessEnv(workspaceRoot), overrides)
+}
+
+func envMapToSlice(env map[string]string) []string {
+	if env == nil {
+		return nil
 	}
-	merged = append(merged, extra...)
-	if req.Env == nil {
-		return merged
-	}
-	for key, value := range req.Env {
-		if value == "" || strings.EqualFold(key, "PATH") || strings.EqualFold(key, "HOME") {
+	out := make([]string, 0, len(env))
+	for key, value := range env {
+		if value == "" {
 			continue
 		}
-		merged = append(merged, key+"="+value)
+		out = append(out, key+"="+value)
 	}
-	return merged
-}
-
-func pathSuffix(path string) string {
-	path = strings.TrimSpace(path)
-	if path == "" {
-		return ""
-	}
-	return ":" + path
+	return out
 }
 
 func resolveCursorBin(cfg Config, req RunRequest) string {

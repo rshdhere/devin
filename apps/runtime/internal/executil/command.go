@@ -27,6 +27,18 @@ type OutputLine struct {
 }
 
 func Run(ctx context.Context, cwd, command string, env []string) (*Result, error) {
+	return runShell(ctx, cwd, command, mergeProcessEnv(env))
+}
+
+func RunGuest(ctx context.Context, cwd, command string, base, overrides []string) (*Result, error) {
+	return runShell(ctx, cwd, command, GuestCommandEnv(base, overrides))
+}
+
+func RunExact(ctx context.Context, cwd, command string, env []string) (*Result, error) {
+	return runShell(ctx, cwd, command, env)
+}
+
+func runShell(ctx context.Context, cwd, command string, env []string) (*Result, error) {
 	if cwd == "" {
 		cwd = "."
 	}
@@ -36,7 +48,7 @@ func Run(ctx context.Context, cwd, command string, env []string) (*Result, error
 
 	cmd := exec.CommandContext(ctx, "/bin/sh", "-c", command)
 	cmd.Dir = filepath.Clean(cwd)
-	cmd.Env = mergeProcessEnv(env)
+	cmd.Env = env
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -107,10 +119,11 @@ func mergeProcessEnv(overrides []string) []string {
 		add(entry)
 	}
 	out := make([]string, 0, len(order))
+	const guestWritableHome = "/workspace/.home"
 	for _, key := range order {
 		val := envMap[key]
 		if key == "HOME" && strings.TrimSpace(val) == "" {
-			val = "/root"
+			val = guestWritableHome
 		}
 		out = append(out, key+"="+val)
 	}
@@ -137,6 +150,24 @@ func RunStreamingUntil(
 	env []string,
 	onLine StreamLineHandler,
 ) (*Result, error) {
+	return runStreamingShell(ctx, cwd, command, mergeProcessEnv(env), onLine)
+}
+
+func RunStreamingUntilGuest(
+	ctx context.Context,
+	cwd, command string,
+	base, overrides []string,
+	onLine StreamLineHandler,
+) (*Result, error) {
+	return runStreamingShell(ctx, cwd, command, GuestCommandEnv(base, overrides), onLine)
+}
+
+func runStreamingShell(
+	ctx context.Context,
+	cwd, command string,
+	env []string,
+	onLine StreamLineHandler,
+) (*Result, error) {
 	if cwd == "" {
 		cwd = "."
 	}
@@ -146,7 +177,7 @@ func RunStreamingUntil(
 
 	cmd := exec.CommandContext(ctx, "/bin/sh", "-c", command)
 	cmd.Dir = filepath.Clean(cwd)
-	cmd.Env = mergeProcessEnv(env)
+	cmd.Env = env
 
 	stdoutPipe, err := cmd.StdoutPipe()
 	if err != nil {
@@ -232,6 +263,15 @@ func RunStreamingUntil(
 		Stderr:   strings.TrimSpace(stderr.String()),
 		ExitCode: exitCode,
 	}, nil
+}
+
+func RunStreamingExact(ctx context.Context, cwd, command string, env []string, onOutput OnOutputFunc) (*Result, error) {
+	return runStreamingShell(ctx, cwd, command, env, func(line OutputLine) (bool, error) {
+		if onOutput != nil {
+			onOutput(line)
+		}
+		return false, nil
+	})
 }
 
 func RunStreaming(ctx context.Context, cwd, command string, env []string, onOutput OnOutputFunc) (*Result, error) {

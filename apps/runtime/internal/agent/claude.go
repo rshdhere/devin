@@ -57,7 +57,7 @@ func (r *ClaudeRunner) Run(
 		})
 	}
 
-	result, err := executil.RunStreaming(ctx, workDir, command, mergeEnv(req), onOutput)
+	result, err := executil.RunStreamingExact(ctx, workDir, command, mergeEnv(req, r.cfg.Workspace), onOutput)
 	if err != nil {
 		return nil, err
 	}

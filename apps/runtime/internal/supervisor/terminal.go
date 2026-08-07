@@ -28,7 +28,7 @@ func (s *Server) handleTerminal(w http.ResponseWriter, r *http.Request) {
 	cwd := s.resolveCWD(req.CWD)
 	s.appendLog("terminal: " + req.Command)
 
-	result, err := executil.Run(r.Context(), cwd, req.Command, parseRequestEnv(r))
+	result, err := executil.RunGuest(r.Context(), cwd, req.Command, workspace.DevinProcessEnv(s.workspace), parseRequestEnv(r))
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -77,15 +77,22 @@ func (s *Server) handleTerminalStream(w http.ResponseWriter, r *http.Request) {
 	cwd := s.resolveCWD(req.CWD)
 	s.appendLog("terminal stream: " + req.Command)
 
-	result, err := executil.RunStreaming(r.Context(), cwd, req.Command, parseRequestEnv(r), func(line executil.OutputLine) {
-		payload, _ := json.Marshal(map[string]any{
-			"stream": line.Stream,
-			"line":   line.Line,
-			"time":   line.Time.UTC().Format(time.RFC3339Nano),
+	result, err := executil.RunStreamingUntilGuest(
+		r.Context(),
+		cwd,
+		req.Command,
+		workspace.DevinProcessEnv(s.workspace),
+		parseRequestEnv(r),
+		func(line executil.OutputLine) (bool, error) {
+			payload, _ := json.Marshal(map[string]any{
+				"stream": line.Stream,
+				"line":   line.Line,
+				"time":   line.Time.UTC().Format(time.RFC3339Nano),
+			})
+			_, _ = fmt.Fprintf(w, "event: terminal.output\ndata: %s\n\n", payload)
+			flusher.Flush()
+			return false, nil
 		})
-		_, _ = fmt.Fprintf(w, "event: terminal.output\ndata: %s\n\n", payload)
-		flusher.Flush()
-	})
 	if err != nil {
 		payload, _ := json.Marshal(map[string]any{"error": err.Error()})
 		_, _ = fmt.Fprintf(w, "event: terminal.error\ndata: %s\n\n", payload)

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/rshdhere/devin/apps/runtime/internal/executil"
+	"github.com/rshdhere/devin/apps/runtime/internal/workspace"
 )
 
 // A healthy Cursor CLI answers --version in well under a second. Anything slower
@@ -46,7 +47,7 @@ func (r *CursorRunner) Run(
 	}
 
 	workDir := resolveWorkDir(r.cfg, req)
-	env := mergeEnv(req)
+	env := mergeEnv(req, r.cfg.Workspace)
 
 	bin, err := ensureCursorBin(ctx, r.cfg, req, workDir, env, publish)
 	if err != nil {
@@ -132,7 +133,7 @@ func (r *CursorRunner) Run(
 		}
 	}()
 
-	result, runErr := executil.RunStreamingUntil(runCtx, workDir, command, env, func(line executil.OutputLine) (bool, error) {
+	result, runErr := executil.RunStreamingUntilGuest(runCtx, workDir, command, workspace.DevinProcessEnv(r.cfg.Workspace), envMapToSlice(req.Env), func(line executil.OutputLine) (bool, error) {
 		lastOutputNano.Store(time.Now().UnixNano())
 		sawOutput.Store(true)
 
@@ -273,7 +274,8 @@ func ensureCursorBin(
 	})
 
 	install := `set +e
-export HOME="/root"
+export HOME="/workspace/.home"
+mkdir -p "$HOME/.local/bin" 2>/dev/null || true
 export PATH="/usr/local/bin:/root/.local/bin:$HOME/.local/bin:/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin:$PATH"
 curl https://cursor.com/install -fsS | bash
 # Re-resolve after install — do not trust a single hard-coded path.
@@ -296,7 +298,7 @@ do
 done
 exit 1
 `
-	installResult, installErr := executil.Run(ctx, workDir, install, env)
+	installResult, installErr := executil.RunExact(ctx, workDir, install, env)
 	if installErr != nil {
 		return "", fmt.Errorf(
 			"cursor agent CLI not found and install failed: %w (rebuild the agent Firecracker snapshot)",
@@ -333,13 +335,14 @@ exit 1
 // hang for the whole run without emitting a single event.
 func verifyCursorBin(ctx context.Context, workDir, bin string, env []string) error {
 	script := `set +e
-export HOME="/root"
+export HOME="/workspace/.home"
+mkdir -p "$HOME/.local/bin" 2>/dev/null || true
 export PATH="` + guestPathPrefix + `:$PATH"
 if [ -r /proc/self/status ]; then printf 'probe:proc=mounted\n'; else printf 'probe:proc=missing\n'; fi
 timeout ` + strconv.Itoa(cursorVersionTimeoutSec) + ` ` + shellQuote(bin) + ` --version 2>&1
 printf 'probe:rc=%s\n' "$?"
 `
-	result, err := executil.Run(ctx, workDir, script, env)
+	result, err := executil.RunExact(ctx, workDir, script, env)
 	if err != nil {
 		return fmt.Errorf("cursor agent CLI smoke test could not run: %w", err)
 	}
@@ -409,7 +412,8 @@ func cursorStallLimit(req RunRequest) time.Duration {
 
 func whichCursorBin(ctx context.Context, workDir, bin string, env []string) (string, error) {
 	script := `set +e
-export HOME="/root"
+export HOME="/workspace/.home"
+mkdir -p "$HOME/.local/bin" 2>/dev/null || true
 export PATH="/usr/local/bin:/root/.local/bin:$HOME/.local/bin:/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin:$PATH"
 for candidate in \
   ` + shellQuote(bin) + ` \
@@ -430,7 +434,7 @@ do
 done
 exit 1
 `
-	result, err := executil.Run(ctx, workDir, script, env)
+	result, err := executil.RunExact(ctx, workDir, script, env)
 	if err != nil {
 		return "", err
 	}

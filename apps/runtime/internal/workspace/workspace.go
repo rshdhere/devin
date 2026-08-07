@@ -20,5 +20,9 @@ func Prepare(path string) error {
 		return fmt.Errorf("create workspace mount point: %w", err)
 	}
 
-	return ensureTmpfs(path)
+	if err := ensureTmpfs(path); err != nil {
+		return err
+	}
+
+	return EnsureWritableHome(path)
 }

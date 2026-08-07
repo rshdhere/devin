@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/rshdhere/devin/apps/runtime/internal/executil"
+	"github.com/rshdhere/devin/apps/runtime/internal/workspace"
 )
 
 type MockRunner struct {
@@ -40,7 +41,7 @@ func (r *MockRunner) Run(
 	}
 	publish("agent.tool", "wrote AGENT_TASK.md", map[string]any{"path": "AGENT_TASK.md"})
 
-	gitInit, err := executil.Run(ctx, workDir, "git init -q", nil)
+	gitInit, err := executil.RunGuest(ctx, workDir, "git init -q", workspace.DevinProcessEnv(r.cfg.Workspace), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -53,7 +54,7 @@ func (r *MockRunner) Run(
 		}, nil
 	}
 
-	commitResult, err := executil.Run(ctx, workDir, "git add AGENT_TASK.md && git commit -m 'mock agent: capture task plan'", []string{
+	commitResult, err := executil.RunGuest(ctx, workDir, "git add AGENT_TASK.md && git commit -m 'mock agent: capture task plan'", workspace.DevinProcessEnv(r.cfg.Workspace), []string{
 		"GIT_AUTHOR_NAME=devin-agent",
 		"GIT_AUTHOR_EMAIL=agent@devin.baby",
 		"GIT_COMMITTER_NAME=devin-agent",

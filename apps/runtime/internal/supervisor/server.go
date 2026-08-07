@@ -10,6 +10,7 @@ import (
 
 	"github.com/rshdhere/devin/apps/runtime/internal/agent"
 	"github.com/rshdhere/devin/apps/runtime/internal/events"
+	"github.com/rshdhere/devin/apps/runtime/internal/executil"
 	"github.com/rshdhere/devin/apps/runtime/internal/workspace"
 )
 
@@ -101,6 +102,10 @@ func parseRequestEnv(r *http.Request) []string {
 		env = append(env, key+"="+value)
 	}
 	return env
+}
+
+func (s *Server) guestEnv(headerEnv []string) []string {
+	return executil.GuestCommandEnv(workspace.DevinProcessEnv(s.workspace), headerEnv)
 }
 
 func shellQuote(value string) string {

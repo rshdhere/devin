@@ -54,7 +54,7 @@ export function buildCommitMsgHook(): string {
 export function buildAgentAttributionOptOutScript(): string {
   return [
     "set -e",
-    'if [ -z "${HOME}" ]; then export HOME=/root; fi',
+    'if [ -z "${HOME}" ]; then export HOME=/workspace/.home; fi',
     `mkdir -p "$HOME/.cursor" "$HOME/${HOOKS_RELATIVE_PATH}"`,
     `config="$HOME/${CLI_CONFIG_RELATIVE_PATH}"`,
     'if [ -s "$config" ] && command -v node >/dev/null 2>&1; then',
