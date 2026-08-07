@@ -21,6 +21,7 @@ type cursorStreamEvent struct {
 	Tool     string          `json:"tool"`
 	ToolName string          `json:"tool_name"`
 	Input    json.RawMessage `json:"input"`
+	ToolCall json.RawMessage `json:"tool_call"`
 }
 
 type cursorMessage struct {
@@ -48,6 +49,63 @@ func truncateMessage(value string) string {
 		return value
 	}
 	return value[:maxPublishedMessage] + "… (truncated)"
+}
+
+// iterCursorJSONObjects splits a stdout line that may contain multiple
+// concatenated stream-json objects (Cursor sometimes emits `}{` without
+// newlines). A single non-JSON prefix returns the original line for verbatim
+// forwarding.
+func iterCursorJSONObjects(line string) []string {
+	s := strings.TrimSpace(line)
+	if s == "" {
+		return nil
+	}
+	var objects []string
+	for len(s) > 0 {
+		s = strings.TrimLeft(s, " \t")
+		if len(s) == 0 {
+			break
+		}
+		if !strings.HasPrefix(s, "{") {
+			return []string{line}
+		}
+		dec := json.NewDecoder(strings.NewReader(s))
+		var raw json.RawMessage
+		if err := dec.Decode(&raw); err != nil {
+			return []string{line}
+		}
+		objects = append(objects, string(raw))
+		s = s[dec.InputOffset():]
+	}
+	if len(objects) == 0 {
+		return []string{line}
+	}
+	return objects
+}
+
+func nestedToolFromToolCall(raw json.RawMessage) (name string, detail string) {
+	if len(raw) == 0 {
+		return "", ""
+	}
+	var outer map[string]json.RawMessage
+	if json.Unmarshal(raw, &outer) != nil {
+		return "", ""
+	}
+	for key, innerRaw := range outer {
+		label := strings.TrimSuffix(key, "ToolCall")
+		if label == "" {
+			label = key
+		}
+		var inner map[string]json.RawMessage
+		if json.Unmarshal(innerRaw, &inner) != nil {
+			return label, ""
+		}
+		if args, ok := inner["args"]; ok {
+			return label, toolDetail(args)
+		}
+		return label, ""
+	}
+	return "", ""
 }
 
 // parseCursorEvent decodes a stream-json line. ok is false for non-JSON lines
@@ -169,8 +227,43 @@ func summarizeCursorEvent(evt cursorStreamEvent) []publishedEvent {
 		}
 		return out
 
+	case "connection":
+		sub := strings.TrimSpace(evt.Subtype)
+		if sub == "reconnecting" {
+			return []publishedEvent{{
+				Type:    "agent.output",
+				Message: "connection: reconnecting",
+				Data:    map[string]any{"stream": "status"},
+			}}
+		}
+		return nil
+
+	case "retry":
+		if strings.TrimSpace(evt.Subtype) == "starting" {
+			return []publishedEvent{{
+				Type:    "agent.output",
+				Message: "retrying cursor agent session",
+				Data:    map[string]any{"stream": "status"},
+			}}
+		}
+		return nil
+
 	case "tool_call", "tool_use":
-		return []publishedEvent{toolEvent(evt.toolLabel(), toolDetail(evt.toolInput()))}
+		if evt.Subtype == "completed" {
+			return nil
+		}
+		label := evt.toolLabel()
+		detail := toolDetail(evt.toolInput())
+		if label == "" || label == "tool" {
+			n, d := nestedToolFromToolCall(evt.ToolCall)
+			if n != "" {
+				label = n
+				if d != "" {
+					detail = d
+				}
+			}
+		}
+		return []publishedEvent{toolEvent(label, detail)}
 
 	case "result":
 		message := truncateMessage(evt.Result)
@@ -205,8 +298,10 @@ func summarizeCursorEvent(evt cursorStreamEvent) []publishedEvent {
 
 // quietStreamTypes carry no user-facing content and would only add noise.
 var quietStreamTypes = map[string]struct{}{
-	"system": {},
-	"user":   {},
+	"system":     {},
+	"user":       {},
+	"connection": {},
+	"retry":      {},
 }
 
 // textFallback collects any readable text from an event whose shape we do not

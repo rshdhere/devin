@@ -1,13 +1,63 @@
 import type { Task, TaskEvent } from "@devin/types";
 
+/** Raw Cursor stream-json payloads should never appear in the session UI. */
+export function looksLikeCursorStreamJson(text: string | undefined): boolean {
+  const trimmed = text?.trim() ?? "";
+  if (!trimmed) return false;
+  if (trimmed.startsWith('{"type":')) return true;
+  if (trimmed.includes('{"type":"thinking"')) return true;
+  if (trimmed.includes('{"type":"tool_call"')) return true;
+  return false;
+}
+
+/** Collapse huge agent failure blobs into a short user-facing line. */
+export function formatAgentFailureMessage(
+  raw: string | undefined | null,
+): string {
+  const text = raw?.trim() ?? "";
+  if (!text) return "";
+  if (!looksLikeCursorStreamJson(text) && text.length <= 480) {
+    return text;
+  }
+
+  const retriable = text.match(
+    /RetriableError:\s*(?:\[[^\]]+\]\s*)?(.+?)(?:\s*$|\s*\{)/,
+  );
+  if (retriable?.[1]) {
+    const core = retriable[1].trim();
+    if (/database or disk is full/i.test(core)) {
+      return "Cursor agent failed: sandbox disk or agent database is full on the execution host. Free disk space (or remove old sandboxes), then retry the task.";
+    }
+    return `Cursor agent error: ${core.slice(0, 240)}`;
+  }
+
+  if (/database or disk is full/i.test(text)) {
+    return "Sandbox disk or agent database is full on the execution host. Free disk space and retry.";
+  }
+
+  const assistantTexts = [
+    ...text.matchAll(/"type":"text","text":"((?:\\.|[^"\\])*)"/g),
+  ];
+  if (assistantTexts.length > 0) {
+    const last = assistantTexts[assistantTexts.length - 1]?.[1];
+    if (last && last.length >= 24) {
+      return last.replace(/\\n/g, "\n").replace(/\\"/g, '"').slice(0, 320);
+    }
+  }
+
+  return text.length > 320 ? `${text.slice(0, 320)}…` : text;
+}
+
 /** Cursor stream-json heartbeats and token deltas — not user-facing. */
 export function isAgentStreamNoise(message: string | undefined): boolean {
   const text = message?.trim() ?? "";
   if (!text) return true;
+  if (looksLikeCursorStreamJson(text)) return true;
   const lower = text.toLowerCase();
   if (lower.startsWith("thinking:")) return true;
   if (lower.startsWith("assistant_delta:")) return true;
   if (/^cursor agent working — no output for \d+s$/i.test(text)) return true;
+  if (lower === "connection: reconnected") return true;
   return false;
 }
 
@@ -102,7 +152,9 @@ export function pickAssistantSummary(
 
   const outputs = filterAgentOutputEvents(events);
   const substantial = outputs.filter(
-    (event) => event.message.trim().length >= 60,
+    (event) =>
+      event.message.trim().length >= 60 &&
+      !looksLikeCursorStreamJson(event.message),
   );
   const candidate = substantial[substantial.length - 1] ?? outputs.at(-1);
   if (candidate?.message?.trim()) {
@@ -115,7 +167,10 @@ export function pickAssistantSummary(
       task.status === "failed" ||
       task.status === "awaiting_review")
   ) {
-    return task.message.trim();
+    const formatted = formatAgentFailureMessage(task.message);
+    if (formatted && !looksLikeCursorStreamJson(formatted)) {
+      return formatted;
+    }
   }
 
   return null;

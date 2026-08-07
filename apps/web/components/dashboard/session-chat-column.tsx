@@ -24,6 +24,7 @@ import {
   pickAssistantSummary,
   pickStatusLine,
   progressActivityLines,
+  formatAgentFailureMessage,
 } from "@/lib/sessions/agent-activity";
 import { cn } from "@/lib/utils";
 
@@ -66,6 +67,10 @@ export function buildChatMessages(
     ) {
       const text = event.message?.trim();
       if (!text) continue;
+      const display =
+        event.type === "task.failed" || event.type === "sandbox.failed"
+          ? formatAgentFailureMessage(text)
+          : text;
       if (
         summary &&
         terminal &&
@@ -77,7 +82,7 @@ export function buildChatMessages(
       messages.push({
         id: event.id,
         role: "system",
-        content: text,
+        content: display,
         timestamp: event.timestamp,
       });
     }

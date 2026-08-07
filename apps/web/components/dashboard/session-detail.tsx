@@ -51,7 +51,10 @@ import {
   SessionPhaseStrip,
 } from "@/components/dashboard/session-chat-column";
 import { SessionCodeColumn } from "@/components/dashboard/session-code-column";
-import { sumLineCounts } from "@/lib/sessions/agent-activity";
+import {
+  sumLineCounts,
+  formatAgentFailureMessage,
+} from "@/lib/sessions/agent-activity";
 
 interface SessionDetailProps {
   task: Task;
@@ -343,9 +346,17 @@ function DiagnosticsPanel({
     >
       {task.message ? (
         <div className="mb-3 space-y-2">
-          <p className="rounded-lg bg-[#120d0d] px-3 py-2 font-mono text-[12px] leading-relaxed text-red-300">
-            {task.message}
+          <p className="rounded-lg bg-[#120d0d] px-3 py-2 text-[12px] leading-relaxed text-red-300">
+            {formatAgentFailureMessage(task.message)}
           </p>
+          {/database or disk is full/i.test(task.message) ? (
+            <p className="text-[12px] leading-relaxed text-amber-200/90">
+              The Cursor CLI could not write its session database inside the
+              sandbox (disk full). On the execution host free space under{" "}
+              <span className="font-mono text-amber-100">/var/lib/devin</span>,
+              remove stale sandboxes, and retry. This is not a web or API bug.
+            </p>
+          ) : null}
           {/agent credentials are not configured/i.test(task.message) ? (
             <p className="text-[12px] leading-relaxed text-amber-200/90">
               Agent credentials are managed on the execution host, not in the
@@ -468,9 +479,17 @@ function DiagnosticsPanel({
                     : "text-amber-300",
                 )}
               >
-                {sandbox?.phase ?? "Not found"}
+                {sandbox?.phase ??
+                  (task.sandboxName ? "Ended or not tracked" : "Not found")}
               </dd>
             </div>
+            {!sandbox?.phase && task.sandboxName ? (
+              <p className="text-[11px] leading-relaxed text-gray-500">
+                The orchestrator no longer lists this sandbox (common after
+                failure or when the microVM was torn down). Infra below may
+                still show snapshot availability for the next run.
+              </p>
+            ) : null}
             {sandbox?.message ? (
               <div>
                 <dt className="mb-0.5 text-gray-500">Orchestrator message</dt>

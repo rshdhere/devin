@@ -136,48 +136,49 @@ func (r *CursorRunner) Run(
 		lastOutputNano.Store(time.Now().UnixNano())
 		sawOutput.Store(true)
 
-		evt, isStreamEvent := parseCursorEvent(line.Line)
-		if !isStreamEvent {
-			// Non-JSON output (stderr, installer progress). Forward verbatim —
-			// dropping it is what made runs look frozen in the UI.
-			if text := truncateMessage(line.Line); text != "" {
-				publish("agent.output", text, map[string]any{
-					"stream": line.Stream,
-				})
+		chunks := iterCursorJSONObjects(line.Line)
+		for _, chunk := range chunks {
+			evt, isStreamEvent := parseCursorEvent(chunk)
+			if !isStreamEvent {
+				if text := truncateMessage(chunk); text != "" {
+					publish("agent.output", text, map[string]any{
+						"stream": line.Stream,
+					})
+				}
+				continue
 			}
-			return false, nil
-		}
 
-		for _, published := range summarizeCursorEvent(evt) {
-			publish(published.Type, published.Message, published.Data)
-		}
+			for _, published := range summarizeCursorEvent(evt) {
+				publish(published.Type, published.Message, published.Data)
+			}
 
-		if evt.Type == "tool_call" || evt.Type == "tool_use" {
-			sawToolCall = true
-			return false, nil
-		}
-		for _, part := range evt.contentParts() {
-			if part.Type == "tool_use" {
+			if evt.Type == "tool_call" || evt.Type == "tool_use" {
 				sawToolCall = true
+				continue
 			}
-		}
-
-		if evt.Type != "result" {
-			return false, nil
-		}
-
-		resultText = strings.TrimSpace(evt.Result)
-		gotResult = true
-		durationMs = evt.Duration
-		if evt.IsError {
-			message := resultText
-			if message == "" {
-				message = "cursor agent returned an error result"
+			for _, part := range evt.contentParts() {
+				if part.Type == "tool_use" {
+					sawToolCall = true
+				}
 			}
-			return true, fmt.Errorf("%s", message)
-		}
 
-		return true, nil
+			if evt.Type != "result" {
+				continue
+			}
+
+			resultText = strings.TrimSpace(evt.Result)
+			gotResult = true
+			durationMs = evt.Duration
+			if evt.IsError {
+				message := resultText
+				if message == "" {
+					message = "cursor agent returned an error result"
+				}
+				return true, fmt.Errorf("%s", message)
+			}
+			return true, nil
+		}
+		return false, nil
 	})
 	if stalled.Load() {
 		return &RunResult{

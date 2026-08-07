@@ -164,6 +164,53 @@ func TestSummarizeQuietTypesAreSkipped(t *testing.T) {
 
 // Regression: rapid short lines used to be dropped by a 100ms/200-char gate,
 // which made active runs look frozen in the UI.
+func TestIterCursorJSONObjectsSplitsConcatenated(t *testing.T) {
+	line := `{"type":"system","subtype":"init"} {"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"hello"}]}}`
+	parts := iterCursorJSONObjects(line)
+	if len(parts) != 2 {
+		t.Fatalf("expected 2 objects, got %d", len(parts))
+	}
+	evt, ok := parseCursorEvent(parts[1])
+	if !ok {
+		t.Fatal("expected second chunk to parse")
+	}
+	events := summarizeCursorEvent(evt)
+	if len(events) != 1 || events[0].Message != "hello" {
+		t.Fatalf("unexpected summarize: %+v", events)
+	}
+}
+
+func TestSummarizeNestedToolCallStarted(t *testing.T) {
+	line := `{"type":"tool_call","subtype":"started","tool_call":{"readToolCall":{"args":{"path":"/workspace/repo/app.py"}}}}`
+	evt, ok := parseCursorEvent(line)
+	if !ok {
+		t.Fatal("expected stream event")
+	}
+	events := summarizeCursorEvent(evt)
+	if len(events) != 1 {
+		t.Fatalf("expected 1 event, got %d", len(events))
+	}
+	if events[0].Type != "agent.tool" {
+		t.Errorf("expected agent.tool, got %s", events[0].Type)
+	}
+	if !strings.Contains(events[0].Message, "read") {
+		t.Errorf("unexpected message %q", events[0].Message)
+	}
+	if !strings.Contains(events[0].Message, "app.py") {
+		t.Errorf("unexpected message %q", events[0].Message)
+	}
+}
+
+func TestSummarizeToolCallCompletedIsQuiet(t *testing.T) {
+	evt, ok := parseCursorEvent(`{"type":"tool_call","subtype":"completed","tool_call":{"readToolCall":{}}}`)
+	if !ok {
+		t.Fatal("expected stream event")
+	}
+	if events := summarizeCursorEvent(evt); len(events) != 0 {
+		t.Fatalf("expected quiet completed tool_call, got %+v", events)
+	}
+}
+
 func TestEveryStreamLineProducesOutput(t *testing.T) {
 	lines := []string{
 		`{"type":"assistant","message":{"content":[{"type":"text","text":"one"}]}}`,
