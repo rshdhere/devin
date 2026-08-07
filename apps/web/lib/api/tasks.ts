@@ -122,6 +122,28 @@ export async function readTaskFile(
   return parseJsonResponse(response);
 }
 
+export async function runTaskTerminal(
+  id: string,
+  command: string,
+  cwd?: string,
+): Promise<{
+  status: string;
+  exitCode: number;
+  stdout: string;
+  stderr: string;
+}> {
+  const response = await fetch(
+    tasksApiUrl(`/${encodeURIComponent(id)}/terminal`),
+    {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ command, cwd, stream: false }),
+    },
+  );
+  return parseJsonResponse(response);
+}
+
 export async function runTaskTerminalStream(
   id: string,
   command: string,

@@ -47,6 +47,7 @@ import {
   SessionPhaseStrip,
 } from "@/components/dashboard/session-chat-column";
 import { SessionCodeColumn } from "@/components/dashboard/session-code-column";
+import { sumLineCounts } from "@/lib/sessions/agent-activity";
 
 interface SessionDetailProps {
   task: Task;
@@ -833,6 +834,13 @@ export function SessionDetail({
   const [followUpPrompt, setFollowUpPrompt] = useState("");
   const [continuingSession, setContinuingSession] = useState(false);
   const [terminatingSession, setTerminatingSession] = useState(false);
+  const [workspaceTab, setWorkspaceTab] = useState<
+    "progress" | "changes" | "desktop"
+  >("changes");
+  const [selectedPath, setSelectedPath] = useState<string | null>(null);
+  const [fileLineCounts, setFileLineCounts] = useState<Record<string, number>>(
+    {},
+  );
 
   const isActive =
     task.status !== "completed" &&
@@ -1188,8 +1196,8 @@ export function SessionDetail({
   );
 
   return (
-    <div className="flex min-h-0 w-full flex-1 flex-col overflow-hidden">
-      <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-white/[0.07] bg-[#0a0a0b] shadow-[0_0_0_1px_rgba(255,255,255,0.02),0_24px_80px_rgba(0,0,0,0.45)] lg:flex-row">
+    <div className="flex min-h-0 w-full flex-1 flex-col overflow-hidden bg-[#0a0a0a]">
+      <div className="flex min-h-0 flex-1 overflow-hidden lg:flex-row">
         <SessionChatColumn
           task={task}
           events={events}
@@ -1205,32 +1213,33 @@ export function SessionDetail({
           composerDisabled={
             !sessionActive && !isActive && task.status !== "awaiting_review"
           }
+          addedLineCount={sumLineCounts(fileLineCounts)}
+          onOpenDesktop={() => setWorkspaceTab("desktop")}
         />
         <SessionCodeColumn
           task={task}
           events={events}
           isActive={isActive}
           onTaskChange={setTask}
+          workspaceTab={workspaceTab}
+          onWorkspaceTabChange={setWorkspaceTab}
+          selectedPath={selectedPath}
+          onSelectedPathChange={setSelectedPath}
+          onFileLineCount={(path, lineCount) =>
+            setFileLineCounts((prev) => ({ ...prev, [path]: lineCount }))
+          }
         />
       </div>
 
-      <details
-        className="mt-3 shrink-0 rounded-xl border border-white/[0.06] bg-[#0a0a0b] px-4 py-2.5"
-        open={false}
-      >
-        <summary className="cursor-pointer text-[11px] font-medium tracking-wide text-zinc-500 uppercase hover:text-zinc-300">
-          Activity log
-        </summary>
-        <div className="mt-3 max-h-[240px] space-y-2 overflow-y-auto pb-1">
-          <LiveWorkPanel task={task} events={events} />
-          {task.repository ? (
-            <GitHubProgressBanner
-              repository={task.repository}
-              events={events}
-              branch={task.branch}
-            />
-          ) : null}
-          {showDiagnostics ? (
+      {showDiagnostics && task.status === "failed" ? (
+        <details
+          className="shrink-0 border-t border-white/[0.06] bg-[#0a0a0a] px-4 py-2"
+          open
+        >
+          <summary className="cursor-pointer text-[11px] text-zinc-500 hover:text-zinc-300">
+            Diagnostics
+          </summary>
+          <div className="mt-2 max-h-[200px] overflow-y-auto pb-2">
             <DiagnosticsPanel
               task={task}
               taskDiagnostics={taskDiagnostics}
@@ -1238,27 +1247,11 @@ export function SessionDetail({
               loading={diagnosticsLoading}
               error={diagnosticsError}
               onRefresh={() => void loadDiagnostics(task.id)}
-              defaultExpanded={task.status === "failed"}
+              defaultExpanded
             />
-          ) : null}
-          <div className="space-y-0.5">
-            {events
-              .filter((event) => {
-                if (
-                  event.type === "agent.output" ||
-                  event.type === "agent.log" ||
-                  (event.type === "agent.tool" && Boolean(event.data?.tool))
-                ) {
-                  return false;
-                }
-                return true;
-              })
-              .map((event) => (
-                <EventRow key={event.id} event={event} />
-              ))}
           </div>
-        </div>
-      </details>
+        </details>
+      ) : null}
     </div>
   );
 }

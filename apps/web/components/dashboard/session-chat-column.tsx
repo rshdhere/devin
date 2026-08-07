@@ -1,21 +1,24 @@
 "use client";
 
-import { useEffect, useRef, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
   ArrowLeft,
-  Clock,
-  ExternalLink,
+  ArrowUp,
+  ChevronDown,
+  ChevronRight,
   GitCommit,
+  Lightbulb,
   Loader2,
-  Send,
+  Mic,
+  Monitor,
+  Plus,
 } from "lucide-react";
 import type { Task, TaskEvent } from "@devin/types";
-import { DEVIN_BOT } from "@/lib/devin-bot";
 import { MotionButton } from "@/components/dashboard/motion-button";
-import { taskStatusLabel } from "@/lib/tasks-api";
 import {
-  latestProgressLine,
   pickAssistantSummary,
+  pickStatusLine,
+  progressActivityLines,
 } from "@/lib/sessions/agent-activity";
 import { cn } from "@/lib/utils";
 
@@ -30,14 +33,7 @@ export function buildChatMessages(
   task: Task,
   events: TaskEvent[],
 ): ChatMessage[] {
-  const messages: ChatMessage[] = [
-    {
-      id: `user-${task.id}-initial`,
-      role: "user",
-      content: task.prompt,
-      timestamp: task.createdAt,
-    },
-  ];
+  const messages: ChatMessage[] = [];
 
   const terminal =
     task.status === "completed" ||
@@ -98,6 +94,8 @@ interface SessionChatColumnProps {
   sessionActive: boolean;
   banner?: ReactNode;
   composerDisabled?: boolean;
+  addedLineCount?: number;
+  onOpenDesktop?: () => void;
 }
 
 export function SessionChatColumn({
@@ -113,28 +111,32 @@ export function SessionChatColumn({
   sessionActive,
   banner,
   composerDisabled,
+  addedLineCount = 0,
+  onOpenDesktop,
 }: SessionChatColumnProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const messages = buildChatMessages(task, events);
-  const progressLine = isActive ? latestProgressLine(events) : null;
+  const statusLine = pickStatusLine(task, events, isActive);
+  const activityLines = progressActivityLines(events);
+  const [workExpanded, setWorkExpanded] = useState(false);
+  const summaryMessage = messages.find((m) => m.role === "assistant");
 
   useEffect(() => {
     scrollRef.current?.scrollTo({
       top: scrollRef.current.scrollHeight,
       behavior: "smooth",
     });
-  }, [messages.length, isActive, progressLine]);
+  }, [messages.length, isActive, statusLine, workExpanded]);
 
-  const statusColor =
-    task.status === "failed"
-      ? "text-rose-400 bg-rose-500/10 border-rose-500/20"
-      : isActive
-        ? "text-violet-300 bg-violet-500/10 border-violet-500/20"
-        : "text-zinc-400 bg-zinc-500/10 border-zinc-500/20";
+  const workLabel = isActive
+    ? `Working… ${elapsedTime}`
+    : `Worked for ${elapsedTime}${
+        addedLineCount > 0 ? ` · +${addedLineCount}` : ""
+      }`;
 
   return (
-    <div className="flex min-h-0 min-w-0 flex-1 flex-col border-b border-white/[0.06] bg-[#09090b] lg:max-w-[38%] lg:flex-none lg:border-r lg:border-b-0">
-      <header className="flex shrink-0 items-center gap-3 border-b border-white/[0.06] px-4 py-3">
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-[#0a0a0a] lg:w-[340px] lg:max-w-[340px] lg:flex-none lg:border-r lg:border-white/[0.06]">
+      <header className="flex shrink-0 items-center gap-2 border-b border-white/[0.06] px-3 py-3">
         <MotionButton
           type="button"
           pressStyle="icon"
@@ -144,78 +146,123 @@ export function SessionChatColumn({
         >
           <ArrowLeft className="size-4" />
         </MotionButton>
-        <div className="min-w-0 flex-1">
-          <p className="truncate text-[14px] font-medium text-zinc-100">
-            {task.title ?? "Session"}
-          </p>
-          <div className="mt-1 flex flex-wrap items-center gap-2">
-            <span
-              className={cn(
-                "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium",
-                statusColor,
-              )}
-            >
-              {isActive ? <Loader2 className="size-3 animate-spin" /> : null}
-              {taskStatusLabel(task.status)}
-            </span>
-            <span className="inline-flex items-center gap-1 text-[11px] text-zinc-500">
-              <Clock className="size-3" />
-              {elapsedTime}
-            </span>
-          </div>
-        </div>
-        {task.prUrl ? (
-          <a
-            href={task.prUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-white/[0.08] bg-white/[0.03] px-2.5 py-1.5 text-[11px] text-violet-300 hover:bg-white/[0.06]"
-          >
-            PR
-            <ExternalLink className="size-3" />
-          </a>
-        ) : task.repository ? (
+        <p className="min-w-0 flex-1 truncate text-[13px] font-medium text-zinc-100">
+          {task.title ?? task.prompt}
+        </p>
+        {task.repository ? (
           <a
             href={`https://github.com/${task.repository}`}
             target="_blank"
             rel="noopener noreferrer"
-            className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-white/[0.08] bg-white/[0.03] px-2.5 py-1.5 text-[11px] text-emerald-400 hover:bg-white/[0.06]"
+            className="shrink-0 text-zinc-500 hover:text-zinc-300"
+            aria-label="Open repository"
           >
-            <GitCommit className="size-3" />
-            Repo
+            <GitCommit className="size-4" />
           </a>
         ) : null}
       </header>
 
       {banner ? (
-        <div className="shrink-0 border-b border-white/[0.06] px-4 py-3">
+        <div className="shrink-0 border-b border-white/[0.06] px-4 py-2">
           {banner}
         </div>
       ) : null}
 
-      <div
-        ref={scrollRef}
-        className="min-h-0 flex-1 space-y-4 overflow-y-auto px-4 py-5"
-      >
-        {messages.map((message) => (
-          <ChatBubble key={message.id} message={message} />
-        ))}
-        {isActive ? (
-          <div className="flex items-start gap-3">
-            <AssistantAvatar />
-            <div className="rounded-2xl rounded-tl-md border border-white/[0.06] bg-white/[0.03] px-4 py-3">
-              <div className="flex items-center gap-2 text-[13px] text-zinc-400">
-                <Loader2 className="size-4 shrink-0 animate-spin text-violet-400" />
-                <span>{progressLine ?? "Working in the devbox…"}</span>
+      <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
+        <div className="mb-4 flex justify-end gap-2">
+          <div className="max-w-[88%] rounded-2xl rounded-tr-md bg-[#1a1a1a] px-3.5 py-2.5 text-[13px] leading-relaxed text-zinc-100">
+            {task.prompt}
+          </div>
+          <UserAvatar />
+        </div>
+
+        <TipCard />
+
+        {isActive && statusLine ? (
+          <p className="mb-3 text-[13px] leading-relaxed text-zinc-400">
+            {statusLine}
+          </p>
+        ) : null}
+
+        {(activityLines.length > 0 || isActive || !isActive) && (
+          <div className="mb-4">
+            <button
+              type="button"
+              onClick={() => setWorkExpanded((v) => !v)}
+              className="flex cursor-pointer items-center gap-1.5 text-[12px] text-zinc-500 transition-colors hover:text-zinc-300"
+            >
+              {workExpanded ? (
+                <ChevronDown className="size-3.5" />
+              ) : (
+                <ChevronRight className="size-3.5" />
+              )}
+              <span>{workLabel}</span>
+              {isActive ? (
+                <Loader2 className="size-3 animate-spin text-zinc-500" />
+              ) : null}
+            </button>
+            {workExpanded ? (
+              <div className="mt-2 space-y-1.5 rounded-lg border border-white/[0.06] bg-[#111] px-3 py-2">
+                {activityLines.length === 0 ? (
+                  <p className="text-[11px] text-zinc-600">No steps yet.</p>
+                ) : (
+                  activityLines.map((line, index) => (
+                    <p
+                      key={`${index}-${line.slice(0, 16)}`}
+                      className="font-mono text-[11px] leading-relaxed text-zinc-500"
+                    >
+                      {line}
+                    </p>
+                  ))
+                )}
               </div>
-            </div>
+            ) : null}
+          </div>
+        )}
+
+        {summaryMessage ? (
+          <div className="mb-4 space-y-3">
+            <AssistantMarkdown content={summaryMessage.content} />
           </div>
         ) : null}
+
+        {task.previewUrl ? (
+          <div className="mb-4 overflow-hidden rounded-xl border border-white/[0.08] bg-[#111]">
+            {/* eslint-disable-next-line @next/next/no-img-element -- preview is external */}
+            <img
+              src={task.previewUrl}
+              alt="App preview"
+              className="max-h-[200px] w-full object-cover object-top"
+            />
+          </div>
+        ) : null}
+
+        {onOpenDesktop ? (
+          <MotionButton
+            type="button"
+            onClick={onOpenDesktop}
+            className="mb-2 flex w-full cursor-pointer items-center justify-center gap-2 rounded-xl border border-white/[0.08] bg-[#141414] py-2.5 text-[13px] font-medium text-zinc-200 transition-colors hover:bg-[#1a1a1a]"
+          >
+            <Monitor className="size-4 text-zinc-400" />
+            Open Desktop
+          </MotionButton>
+        ) : null}
+
+        {messages
+          .filter((m) => m.role === "system")
+          .map((message) => (
+            <p
+              key={message.id}
+              className="mt-3 text-center text-[11px] text-zinc-600"
+            >
+              {message.content}
+            </p>
+          ))}
       </div>
 
-      <div className="shrink-0 border-t border-white/[0.06] bg-[#09090b]/95 p-4 backdrop-blur-md">
+      <div className="shrink-0 border-t border-white/[0.06] bg-[#0a0a0a] p-3">
         <form
-          className="relative"
+          className="rounded-2xl border border-white/[0.08] bg-[#111111] p-2"
           onSubmit={(event) => {
             event.preventDefault();
             if (!composerDisabled && followUpPrompt.trim()) {
@@ -228,14 +275,8 @@ export function SessionChatColumn({
             onChange={(event) => onFollowUpChange(event.target.value)}
             disabled={composerDisabled || continuingSession}
             rows={2}
-            placeholder={
-              sessionActive
-                ? "Ask Devin to build features, fix bugs, or work on your code"
-                : isActive
-                  ? "Working… you can send a follow-up when the session is ready"
-                  : "Start a new session from Sessions to continue building"
-            }
-            className="w-full resize-none rounded-2xl border border-white/[0.08] bg-[#121214] px-4 py-3 pr-12 text-[14px] leading-relaxed text-zinc-100 outline-none placeholder:text-zinc-600 focus:border-violet-500/40 focus:ring-1 focus:ring-violet-500/20 disabled:opacity-50"
+            placeholder="Ask Devin to build features, fix bugs, or work on your code"
+            className="w-full resize-none bg-transparent px-2 py-1 text-[13px] leading-relaxed text-zinc-100 outline-none placeholder:text-zinc-600 disabled:opacity-50"
             onKeyDown={(event) => {
               if (event.key === "Enter" && !event.shiftKey) {
                 event.preventDefault();
@@ -245,54 +286,76 @@ export function SessionChatColumn({
               }
             }}
           />
-          <MotionButton
-            type="submit"
-            disabled={
-              composerDisabled || continuingSession || !followUpPrompt.trim()
-            }
-            className="absolute right-2 bottom-2 inline-flex cursor-pointer items-center justify-center rounded-xl bg-violet-600 p-2 text-white transition-colors hover:bg-violet-500 disabled:opacity-40"
-            aria-label="Send message"
-          >
-            {continuingSession ? (
-              <Loader2 className="size-4 animate-spin" />
-            ) : (
-              <Send className="size-4" />
-            )}
-          </MotionButton>
+          <div className="mt-1 flex items-center justify-between px-1">
+            <div className="flex items-center gap-1">
+              <button
+                type="button"
+                className="rounded-lg p-1.5 text-zinc-500 hover:bg-white/[0.04] hover:text-zinc-300"
+                aria-label="Add attachment"
+              >
+                <Plus className="size-4" />
+              </button>
+              <button
+                type="button"
+                className="flex cursor-default items-center gap-1 rounded-lg px-2 py-1.5 text-[12px] text-zinc-500"
+              >
+                Normal
+                <ChevronDown className="size-3.5" />
+              </button>
+            </div>
+            <div className="flex items-center gap-1">
+              <button
+                type="button"
+                className="rounded-lg p-1.5 text-zinc-500 hover:bg-white/[0.04] hover:text-zinc-300"
+                aria-label="Voice input"
+              >
+                <Mic className="size-4" />
+              </button>
+              <MotionButton
+                type="submit"
+                disabled={
+                  composerDisabled ||
+                  continuingSession ||
+                  !followUpPrompt.trim()
+                }
+                className="inline-flex cursor-pointer items-center justify-center rounded-full bg-zinc-700 p-2 text-zinc-100 transition-colors hover:bg-zinc-600 disabled:opacity-40"
+                aria-label="Send message"
+              >
+                {continuingSession ? (
+                  <Loader2 className="size-4 animate-spin" />
+                ) : (
+                  <ArrowUp className="size-4" />
+                )}
+              </MotionButton>
+            </div>
+          </div>
         </form>
-        <p className="mt-2 text-center text-[10px] text-zinc-600">
-          Enter to send · Shift+Enter for newline
-        </p>
       </div>
     </div>
   );
 }
 
-function ChatBubble({ message }: { message: ChatMessage }) {
-  if (message.role === "system") {
-    return (
-      <p className="text-center text-[12px] leading-relaxed text-zinc-500">
-        {message.content}
-      </p>
-    );
-  }
-
-  if (message.role === "user") {
-    return (
-      <div className="flex justify-end">
-        <div className="max-w-[92%] rounded-2xl rounded-tr-md bg-gradient-to-br from-violet-600/90 to-indigo-600/80 px-4 py-2.5 text-[14px] leading-relaxed text-white shadow-lg shadow-violet-950/30">
-          {message.content}
-        </div>
-      </div>
-    );
-  }
-
+function TipCard() {
   return (
-    <div className="flex items-start gap-3">
-      <AssistantAvatar />
-      <div className="max-w-[92%] min-w-0 rounded-2xl rounded-tl-md border border-white/[0.06] bg-[#121214] px-4 py-2.5 text-[14px] leading-relaxed text-zinc-200">
-        <AssistantMarkdown content={message.content} />
+    <div className="mb-4 flex gap-2.5 rounded-xl border border-white/[0.06] bg-[#111111] px-3 py-2.5">
+      <div className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-violet-500/15">
+        <Lightbulb className="size-3.5 text-violet-400" />
       </div>
+      <p className="text-[12px] leading-relaxed text-zinc-500">
+        Tip: ask for a specific stack, tests, or a live preview — Devin works in
+        your repo and devbox.
+      </p>
+    </div>
+  );
+}
+
+function UserAvatar() {
+  return (
+    <div
+      className="flex size-8 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-rose-500 to-orange-600 text-[11px] font-semibold text-white"
+      aria-hidden
+    >
+      You
     </div>
   );
 }
@@ -300,11 +363,11 @@ function ChatBubble({ message }: { message: ChatMessage }) {
 function AssistantMarkdown({ content }: { content: string }) {
   const lines = content.split("\n");
   return (
-    <div className="space-y-1 font-sans text-[14px] leading-relaxed">
+    <div className="space-y-1.5 text-[13px] leading-relaxed text-zinc-300">
       {lines.map((line, index) => {
         const trimmed = line.trim();
         if (!trimmed) {
-          return <div key={index} className="h-2" />;
+          return <div key={index} className="h-1.5" />;
         }
         if (/^#{1,3}\s/.test(trimmed)) {
           return (
@@ -315,27 +378,18 @@ function AssistantMarkdown({ content }: { content: string }) {
         }
         if (/^[-*]\s/.test(trimmed)) {
           return (
-            <p key={index} className="text-zinc-300">
+            <p key={index}>
               <span className="text-zinc-500">· </span>
               {trimmed.replace(/^[-*]\s/, "")}
             </p>
           );
         }
         return (
-          <p key={index} className="whitespace-pre-wrap text-zinc-300">
+          <p key={index} className="whitespace-pre-wrap">
             {line}
           </p>
         );
       })}
-    </div>
-  );
-}
-
-function AssistantAvatar() {
-  return (
-    <div className="flex size-8 shrink-0 items-center justify-center rounded-full border border-violet-500/30 bg-gradient-to-br from-violet-600/30 to-indigo-900/50">
-      {/* eslint-disable-next-line @next/next/no-img-element -- bot avatar is a static external URL */}
-      <img src={DEVIN_BOT.avatarUrl} alt="" className="size-5 rounded-full" />
     </div>
   );
 }
@@ -373,7 +427,7 @@ export function SessionPhaseStrip({
             {step.label}
           </span>
           {index < steps.length - 1 ? (
-            <span className="h-px w-6 bg-white/[0.08]" />
+            <span className="h-px w-4 bg-white/[0.08]" />
           ) : null}
         </div>
       ))}

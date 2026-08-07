@@ -145,3 +145,49 @@ export function progressActivityLines(events: TaskEvent[]): string[] {
 
   return lines.slice(-12);
 }
+
+export function sumLineCounts(counts: Record<string, number>): number {
+  return Object.values(counts).reduce((sum, n) => sum + n, 0);
+}
+
+export function groupChangedFilesByFolder(
+  files: ChangedFile[],
+): Array<{ folder: string; files: ChangedFile[] }> {
+  const groups = new Map<string, ChangedFile[]>();
+  for (const file of files) {
+    const parts = file.path.split("/");
+    const folder = parts.length > 1 ? parts.slice(0, -1).join("/") : "";
+    const list = groups.get(folder) ?? [];
+    list.push(file);
+    groups.set(folder, list);
+  }
+  return Array.from(groups.entries())
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([folder, folderFiles]) => ({
+      folder,
+      files: folderFiles.sort((a, b) => a.path.localeCompare(b.path)),
+    }));
+}
+
+export function fileDisplayName(path: string): string {
+  const parts = path.split("/");
+  return parts[parts.length - 1] ?? path;
+}
+
+export function pickStatusLine(
+  task: Task,
+  events: TaskEvent[],
+  isActive: boolean,
+): string | null {
+  if (isActive) {
+    const progress = latestProgressLine(events);
+    if (progress) {
+      return progress;
+    }
+    return "Building now — will let you know once it's running.";
+  }
+  if (task.status === "completed") {
+    return null;
+  }
+  return null;
+}
