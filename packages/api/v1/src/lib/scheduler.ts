@@ -78,10 +78,11 @@ export async function raiseTaskPullRequest(id: string): Promise<Response> {
 export async function continueTask(
   id: string,
   prompt: string,
+  agentModel?: string,
 ): Promise<Response> {
   return proxyScheduler(`/api/v1/tasks/${encodeURIComponent(id)}/continue`, {
     method: "POST",
-    body: JSON.stringify({ prompt }),
+    body: JSON.stringify({ prompt, agentModel }),
   });
 }
 

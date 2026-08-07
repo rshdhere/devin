@@ -14,6 +14,11 @@ import {
   Plus,
 } from "lucide-react";
 import type { Task, TaskEvent } from "@devin/types";
+import {
+  CURSOR_AGENT_MODELS,
+  cursorAgentModelLabel,
+  type CursorAgentModelId,
+} from "@devin/types";
 import { MotionButton } from "@/components/dashboard/motion-button";
 import {
   pickAssistantSummary,
@@ -96,6 +101,8 @@ interface SessionChatColumnProps {
   composerDisabled?: boolean;
   addedLineCount?: number;
   onOpenDesktop?: () => void;
+  cursorAgentModel?: CursorAgentModelId;
+  onCursorAgentModelChange?: (model: CursorAgentModelId) => void;
 }
 
 export function SessionChatColumn({
@@ -113,13 +120,32 @@ export function SessionChatColumn({
   composerDisabled,
   addedLineCount = 0,
   onOpenDesktop,
+  cursorAgentModel,
+  onCursorAgentModelChange,
 }: SessionChatColumnProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
+  const modelMenuRef = useRef<HTMLDivElement>(null);
   const messages = buildChatMessages(task, events);
   const statusLine = pickStatusLine(task, events, isActive);
   const activityLines = progressActivityLines(events);
   const [workExpanded, setWorkExpanded] = useState(false);
+  const [showModelMenu, setShowModelMenu] = useState(false);
   const summaryMessage = messages.find((m) => m.role === "assistant");
+  const showModelPicker =
+    task.agent === "cursor" && cursorAgentModel && onCursorAgentModelChange;
+
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (
+        modelMenuRef.current &&
+        !modelMenuRef.current.contains(event.target as Node)
+      ) {
+        setShowModelMenu(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
 
   useEffect(() => {
     scrollRef.current?.scrollTo({
@@ -295,13 +321,53 @@ export function SessionChatColumn({
               >
                 <Plus className="size-4" />
               </button>
-              <button
-                type="button"
-                className="flex cursor-default items-center gap-1 rounded-lg px-2 py-1.5 text-[12px] text-zinc-500"
-              >
-                Normal
-                <ChevronDown className="size-3.5" />
-              </button>
+              {showModelPicker ? (
+                <div className="relative" ref={modelMenuRef}>
+                  <button
+                    type="button"
+                    onClick={() => setShowModelMenu((open) => !open)}
+                    className="flex cursor-pointer items-center gap-1 rounded-lg px-2 py-1.5 text-[12px] text-zinc-400 hover:bg-white/[0.04] hover:text-zinc-200"
+                  >
+                    {cursorAgentModelLabel(cursorAgentModel)}
+                    <ChevronDown
+                      className={cn(
+                        "size-3.5 transition-transform",
+                        showModelMenu && "rotate-180",
+                      )}
+                    />
+                  </button>
+                  {showModelMenu ? (
+                    <div className="absolute bottom-full left-0 z-50 mb-1 min-w-[180px] overflow-hidden rounded-xl border border-white/[0.08] bg-[#1a1a1a] py-1 shadow-xl">
+                      {CURSOR_AGENT_MODELS.map((option) => (
+                        <button
+                          key={option.id}
+                          type="button"
+                          onClick={() => {
+                            onCursorAgentModelChange(option.id);
+                            setShowModelMenu(false);
+                          }}
+                          className={cn(
+                            "flex w-full px-3 py-2 text-left text-[12px] hover:bg-white/[0.06]",
+                            cursorAgentModel === option.id
+                              ? "text-zinc-100"
+                              : "text-zinc-500",
+                          )}
+                        >
+                          {option.label}
+                        </button>
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  className="flex cursor-default items-center gap-1 rounded-lg px-2 py-1.5 text-[12px] text-zinc-500"
+                >
+                  Normal
+                  <ChevronDown className="size-3.5" />
+                </button>
+              )}
             </div>
             <div className="flex items-center gap-1">
               <button

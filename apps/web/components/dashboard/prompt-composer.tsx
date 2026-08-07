@@ -20,7 +20,14 @@ import { MotionButton } from "@/components/dashboard/motion-button";
 import { PromptMetadataBar } from "@/components/dashboard/prompt-metadata-bar";
 import { useSessions } from "@/components/dashboard/sessions-context";
 import { DEVIN_BOT } from "@/lib/devin-bot";
-import { resolveRuntimeForTask, runtimeLabel } from "@devin/types";
+import {
+  CURSOR_AGENT_MODELS,
+  DEFAULT_CURSOR_AGENT_MODEL,
+  cursorAgentModelLabel,
+  resolveRuntimeForTask,
+  runtimeLabel,
+  type CursorAgentModelId,
+} from "@devin/types";
 import { cn } from "@/lib/utils";
 
 const MIN_TEXTAREA_HEIGHT = 72;
@@ -55,6 +62,7 @@ export function PromptComposer({ selectedRepository }: PromptComposerProps) {
   const { startSession } = useSessions();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const agentMenuRef = useRef<HTMLDivElement>(null);
+  const modelMenuRef = useRef<HTMLDivElement>(null);
   const repoMenuRef = useRef<HTMLDivElement>(null);
   const [showTerminalBanner, setShowTerminalBanner] = useState(true);
   const [prompt, setPrompt] = useState("");
@@ -62,6 +70,10 @@ export function PromptComposer({ selectedRepository }: PromptComposerProps) {
   const [agent, setAgent] =
     useState<(typeof agentOptions)[number]["id"]>("cursor");
   const [showAgentMenu, setShowAgentMenu] = useState(false);
+  const [cursorModel, setCursorModel] = useState<CursorAgentModelId>(
+    DEFAULT_CURSOR_AGENT_MODEL,
+  );
+  const [showModelMenu, setShowModelMenu] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [repoMode, setRepoMode] = useState<RepoMode>(
@@ -83,6 +95,12 @@ export function PromptComposer({ selectedRepository }: PromptComposerProps) {
         !repoMenuRef.current.contains(event.target as Node)
       ) {
         setShowRepoOptions(false);
+      }
+      if (
+        modelMenuRef.current &&
+        !modelMenuRef.current.contains(event.target as Node)
+      ) {
+        setShowModelMenu(false);
       }
     }
 
@@ -129,6 +147,7 @@ export function PromptComposer({ selectedRepository }: PromptComposerProps) {
         autoCreateRepository:
           repoMode === "create" && !finalRepoName ? true : undefined,
         autoStartSandbox: true,
+        agentModel: agent === "cursor" ? cursorModel : undefined,
       });
       setPrompt("");
       setNewRepoName("");
@@ -226,6 +245,7 @@ export function PromptComposer({ selectedRepository }: PromptComposerProps) {
                 onClick={() => {
                   setShowAgentMenu((open) => !open);
                   setShowRepoOptions(false);
+                  setShowModelMenu(false);
                 }}
                 className="flex cursor-pointer items-center gap-1.5 rounded-full border border-[#333] bg-[#161616] px-2.5 py-1 text-[13px] text-gray-300 transition-colors hover:bg-[#222] hover:text-white"
               >
@@ -272,12 +292,66 @@ export function PromptComposer({ selectedRepository }: PromptComposerProps) {
               </AnimatePresence>
             </div>
 
+            {agent === "cursor" ? (
+              <div className="relative" ref={modelMenuRef}>
+                <MotionButton
+                  type="button"
+                  onClick={() => {
+                    setShowModelMenu((open) => !open);
+                    setShowAgentMenu(false);
+                    setShowRepoOptions(false);
+                  }}
+                  className="flex cursor-pointer items-center gap-1.5 rounded-full border border-[#333] bg-[#161616] px-2.5 py-1 text-[13px] text-gray-300 transition-colors hover:bg-[#222] hover:text-white"
+                >
+                  {cursorAgentModelLabel(cursorModel)}
+                  <ChevronDown
+                    className={cn(
+                      "size-3 text-gray-500 transition-transform",
+                      showModelMenu && "rotate-180",
+                    )}
+                  />
+                </MotionButton>
+
+                <AnimatePresence>
+                  {showModelMenu ? (
+                    <motion.div
+                      initial={{ opacity: 0, y: -8, scale: 0.96 }}
+                      animate={{ opacity: 1, y: 0, scale: 1 }}
+                      exit={{ opacity: 0, y: -8, scale: 0.96 }}
+                      transition={{ duration: 0.15 }}
+                      className="absolute bottom-full left-0 z-[100] mb-2 min-w-[180px] overflow-hidden rounded-xl border border-[#333] bg-[#1e1e1e] py-1 shadow-2xl"
+                    >
+                      {CURSOR_AGENT_MODELS.map((option) => (
+                        <MotionButton
+                          key={option.id}
+                          type="button"
+                          onClick={() => {
+                            setCursorModel(option.id);
+                            setShowModelMenu(false);
+                          }}
+                          className={cn(
+                            "flex w-full cursor-pointer px-3 py-2 text-left text-[13px] transition-colors hover:bg-[#252525]",
+                            cursorModel === option.id
+                              ? "text-white"
+                              : "text-gray-400",
+                          )}
+                        >
+                          {option.label}
+                        </MotionButton>
+                      ))}
+                    </motion.div>
+                  ) : null}
+                </AnimatePresence>
+              </div>
+            ) : null}
+
             <div className="relative" ref={repoMenuRef}>
               <MotionButton
                 type="button"
                 onClick={() => {
                   setShowRepoOptions((open) => !open);
                   setShowAgentMenu(false);
+                  setShowModelMenu(false);
                 }}
                 className={cn(
                   "flex cursor-pointer items-center gap-1.5 rounded-full border px-2.5 py-1 text-[13px] transition-colors hover:bg-[#222]",

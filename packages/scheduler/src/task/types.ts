@@ -66,6 +66,7 @@ export interface CreateTaskInput {
   testCommand?: string;
   issueTitle?: string;
   issueBody?: string;
+  agentModel?: string;
 }
 
 export interface ScheduleJob {
@@ -90,6 +91,7 @@ export interface ScheduleJob {
   testCommand?: string;
   issueTitle?: string;
   issueBody?: string;
+  agentModel?: string;
   draftPlan?: DraftPlan;
   greenfieldPushed?: boolean;
   enqueuedAt: string;

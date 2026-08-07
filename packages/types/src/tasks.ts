@@ -56,4 +56,6 @@ export interface CreateTaskRequest {
   testCommand?: string;
   issueTitle?: string;
   issueBody?: string;
+  /** Cursor CLI model id (cursor agent only). */
+  agentModel?: string;
 }

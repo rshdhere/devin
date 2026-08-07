@@ -23,6 +23,7 @@ type TaskRequestBody = {
   testCommand?: string;
   issueTitle?: string;
   issueBody?: string;
+  agentModel?: string;
 };
 
 export function createTaskRouter(tasks: TaskService): Router {
@@ -51,6 +52,7 @@ export function createTaskRouter(tasks: TaskService): Router {
         testCommand: body.testCommand,
         issueTitle: body.issueTitle,
         issueBody: body.issueBody,
+        agentModel: body.agentModel,
       });
       res.status(202).json(task);
     } catch (error) {
@@ -128,9 +130,9 @@ export function createTaskRouter(tasks: TaskService): Router {
   });
 
   router.post("/:id/continue", async (req, res) => {
-    const body = req.body as { prompt?: string };
+    const body = req.body as { prompt?: string; agentModel?: string };
     await runTaskAction(res, 202, "continue failed", () =>
-      tasks.continueTask(req.params.id, body.prompt ?? ""),
+      tasks.continueTask(req.params.id, body.prompt ?? "", body.agentModel),
     );
   });
 

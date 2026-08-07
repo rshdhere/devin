@@ -21,6 +21,7 @@ func SetSecret(ctx context.Context, args []string) error {
 		"anthropic_api_key": "ANTHROPIC_API_KEY",
 		"openai_api_key":    "OPENAI_API_KEY",
 		"github_bot_token":  "GITHUB_BOT_TOKEN",
+		"agent_model":       "AGENT_MODEL",
 	}
 	envKey, ok := keys[args[0]]
 	if !ok {

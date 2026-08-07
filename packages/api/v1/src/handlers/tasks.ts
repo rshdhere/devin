@@ -106,6 +106,7 @@ tasksRouter.post("/", async (req, res) => {
       testCommand: parsed.data.testCommand,
       issueTitle: parsed.data.issueTitle,
       issueBody: parsed.data.issueBody,
+      agentModel: parsed.data.agentModel,
       githubToken: githubToken ?? undefined,
       permissions: settings
         ? {
@@ -200,7 +201,11 @@ tasksRouter.post("/:id/continue", async (req, res) => {
     return;
   }
   try {
-    const response = await continueTask(req.params.id, prompt);
+    const agentModel =
+      typeof req.body?.agentModel === "string"
+        ? req.body.agentModel.trim()
+        : undefined;
+    const response = await continueTask(req.params.id, prompt, agentModel);
     res.status(response.status).json(await response.json());
   } catch (error) {
     respondSchedulerFailure(res, error);

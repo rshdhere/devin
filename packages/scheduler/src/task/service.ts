@@ -5,6 +5,7 @@ import { createQueue, type TaskQueue } from "@devin/queue";
 import { resolveDefaultAgent, usesRuntimeAgent } from "../agent/defaults.js";
 import {
   inferStackFromPrompt,
+  resolveCursorAgentModel,
   resolveRuntimeForTask,
   type StackRuntime,
 } from "@devin/types";
@@ -252,6 +253,7 @@ export class TaskService {
       testCommand: input.testCommand,
       issueTitle: input.issueTitle,
       issueBody: input.issueBody,
+      agentModel: input.agentModel,
       requireReviewBeforePush: input.requireReviewBeforePush ?? false,
       enqueuedAt: now,
     };
@@ -318,7 +320,11 @@ export class TaskService {
     return this.finalizeReviewedTask(taskId, { createPullRequest: true });
   }
 
-  async continueTask(taskId: string, prompt: string): Promise<Task> {
+  async continueTask(
+    taskId: string,
+    prompt: string,
+    agentModel?: string,
+  ): Promise<Task> {
     const trimmed = prompt.trim();
     if (!trimmed) {
       throw new Error("prompt is required");
@@ -348,6 +354,7 @@ export class TaskService {
       resumeSession: true,
       runtimeBaseUrl: session.runtimeBaseUrl,
       sandboxName: session.sandboxName,
+      agentModel: agentModel?.trim() || session.job.agentModel,
       enqueuedAt: new Date().toISOString(),
     };
 
@@ -1150,7 +1157,7 @@ export class TaskService {
               prompt: agentPrompt,
               agent: task.agent,
               workDir: repoReadyInSandbox ? repoCwd : undefined,
-              env: this.runtimeSecrets(githubToken),
+              env: this.runtimeSecrets(githubToken, task.agent, job.agentModel),
             },
             { maxWaitMs: resolveAgentMaxWaitMs() },
           );
@@ -3657,7 +3664,11 @@ export class TaskService {
     }
   }
 
-  private runtimeSecrets(githubToken?: string): Record<string, string> {
+  private runtimeSecrets(
+    githubToken?: string,
+    agent?: AgentProvider,
+    agentModel?: string,
+  ): Record<string, string> {
     const secrets: Record<string, string> = {};
     for (const key of ["CURSOR_API_KEY", "ANTHROPIC_API_KEY"] as const) {
       const value = process.env[key]?.trim();
@@ -3667,8 +3678,15 @@ export class TaskService {
     }
     const agentTimeout = String(resolveAgentTimeoutMinutes());
     secrets.AGENT_RUN_TIMEOUT_MIN = agentTimeout;
-    const model = process.env.AGENT_MODEL?.trim() || "composer-2-fast";
-    secrets.AGENT_MODEL = model;
+    const resolvedAgent = agent ?? "cursor";
+    if (resolvedAgent === "cursor") {
+      secrets.AGENT_MODEL = resolveCursorAgentModel(
+        agentModel,
+        process.env.AGENT_MODEL,
+      );
+    } else if (process.env.AGENT_MODEL?.trim()) {
+      secrets.AGENT_MODEL = process.env.AGENT_MODEL.trim();
+    }
     if (githubToken) {
       secrets.GITHUB_TOKEN = githubToken;
     }

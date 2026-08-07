@@ -27,6 +27,7 @@ interface SessionsContextValue {
     testCommand?: string;
     issueTitle?: string;
     issueBody?: string;
+    agentModel?: string;
   }) => Promise<Task>;
 }
 

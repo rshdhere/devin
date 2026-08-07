@@ -64,14 +64,21 @@ export async function raiseTaskPullRequest(id: string): Promise<Task> {
   return parseJsonResponse<Task>(response);
 }
 
-export async function continueTask(id: string, prompt: string): Promise<Task> {
+export async function continueTask(
+  id: string,
+  prompt: string,
+  agentModel?: string,
+): Promise<Task> {
   const response = await fetch(
     tasksApiUrl(`/${encodeURIComponent(id)}/continue`),
     {
       method: "POST",
       credentials: "include",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ prompt }),
+      body: JSON.stringify({
+        prompt,
+        agentModel: agentModel ?? undefined,
+      }),
     },
   );
   return parseJsonResponse<Task>(response);

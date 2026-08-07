@@ -64,12 +64,12 @@ func (r *CursorRunner) Run(
 		"--sandbox", "disabled",
 		"--output-format", "stream-json",
 	}
-	model := envValue(req, "AGENT_MODEL")
+	model := normalizeCursorModel(envValue(req, "AGENT_MODEL"))
 	if model == "" {
-		model = r.cfg.DefaultModel
+		model = normalizeCursorModel(r.cfg.DefaultModel)
 	}
 	if model == "" {
-		model = "composer-2-fast"
+		model = "composer-2.5"
 	}
 	args = append(args, "--model", model)
 	args = append(args, "--workspace", workDir)
@@ -452,6 +452,21 @@ exit 1
 		}
 	}
 	return bin, nil
+}
+
+func normalizeCursorModel(model string) string {
+	m := strings.TrimSpace(strings.ToLower(model))
+	switch m {
+	case "", "composer-2.5-fast", "composer-2-fast":
+		if m == "" {
+			return ""
+		}
+		return "composer-2.5"
+	case "composer-2.5", "cursor-grok-4.5-medium":
+		return m
+	default:
+		return "composer-2.5"
+	}
 }
 
 func shellQuote(value string) string {

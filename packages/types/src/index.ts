@@ -1,5 +1,12 @@
-export type { AgentProvider } from "./agents";
-export { isTemplateAgent, usesRuntimeAgent } from "./agents";
+export type { AgentProvider, CursorAgentModelId } from "./agents";
+export {
+  CURSOR_AGENT_MODELS,
+  DEFAULT_CURSOR_AGENT_MODEL,
+  cursorAgentModelLabel,
+  isTemplateAgent,
+  resolveCursorAgentModel,
+  usesRuntimeAgent,
+} from "./agents";
 export type {
   CreateTaskRequest,
   GitHubPermissions,
