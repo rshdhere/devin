@@ -112,10 +112,26 @@ func TestTruncateMessageBoundsLongPayloads(t *testing.T) {
 	}
 }
 
+func TestSummarizeThinkingAndDeltaTypesAreQuiet(t *testing.T) {
+	for _, line := range []string{
+		`{"type":"thinking","subtype":"delta"}`,
+		`{"type":"thinking","subtype":"completed"}`,
+		`{"type":"assistant_delta","subtype":"token"}`,
+	} {
+		evt, ok := parseCursorEvent(line)
+		if !ok {
+			t.Fatalf("expected stream event for %s", line)
+		}
+		if events := summarizeCursorEvent(evt); len(events) != 0 {
+			t.Errorf("expected %s to be quiet, got %+v", line, events)
+		}
+	}
+}
+
 // Regression: an unknown event type used to return no events at all, so a CLI
 // schema change would silently produce a run with zero visible output.
 func TestSummarizeUnknownTypeStillPublishes(t *testing.T) {
-	evt, ok := parseCursorEvent(`{"type":"assistant_delta","subtype":"token"}`)
+	evt, ok := parseCursorEvent(`{"type":"status","subtype":"update"}`)
 	if !ok {
 		t.Fatal("expected stream event")
 	}
@@ -126,7 +142,7 @@ func TestSummarizeUnknownTypeStillPublishes(t *testing.T) {
 	if events[0].Type != "agent.output" {
 		t.Errorf("expected agent.output, got %s", events[0].Type)
 	}
-	if events[0].Message != "assistant_delta: token" {
+	if events[0].Message != "status: update" {
 		t.Errorf("unexpected message %q", events[0].Message)
 	}
 }

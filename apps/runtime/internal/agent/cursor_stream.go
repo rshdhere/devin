@@ -146,6 +146,11 @@ func (e cursorStreamEvent) toolInput() json.RawMessage {
 // Returning an empty slice means the event carries no user-facing information.
 func summarizeCursorEvent(evt cursorStreamEvent) []publishedEvent {
 	switch evt.Type {
+	case "thinking", "assistant_delta":
+		// Token-level thinking/delta lines flood the UI; assistant text is
+		// published on completed assistant/message events instead.
+		return nil
+
 	case "assistant", "message":
 		var out []publishedEvent
 		for _, part := range evt.contentParts() {

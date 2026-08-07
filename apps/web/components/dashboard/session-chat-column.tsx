@@ -13,6 +13,10 @@ import type { Task, TaskEvent } from "@devin/types";
 import { DEVIN_BOT } from "@/lib/devin-bot";
 import { MotionButton } from "@/components/dashboard/motion-button";
 import { taskStatusLabel } from "@/lib/tasks-api";
+import {
+  latestProgressLine,
+  pickAssistantSummary,
+} from "@/lib/sessions/agent-activity";
 import { cn } from "@/lib/utils";
 
 export type ChatMessage = {
@@ -35,38 +39,44 @@ export function buildChatMessages(
     },
   ];
 
-  const draftSummary = events.find((e) => e.type === "draft.completed")?.data
-    ?.summary;
-  if (draftSummary) {
+  const terminal =
+    task.status === "completed" ||
+    task.status === "failed" ||
+    task.status === "cancelled" ||
+    task.status === "awaiting_review";
+
+  const summary = pickAssistantSummary(task, events);
+  if (summary && terminal) {
     messages.push({
-      id: "draft-summary",
+      id: "assistant-summary",
       role: "assistant",
-      content: String(draftSummary),
-      timestamp: events.find((e) => e.type === "draft.completed")?.timestamp,
+      content: summary,
+      timestamp:
+        events.find((e) => e.type === "task.completed")?.timestamp ??
+        events.at(-1)?.timestamp,
     });
   }
 
   for (const event of events) {
-    if (event.type === "agent.output") {
-      const text = event.message?.trim();
-      if (!text) continue;
-      messages.push({
-        id: event.id,
-        role: "assistant",
-        content: text,
-        timestamp: event.timestamp,
-      });
-      continue;
-    }
     if (
       event.type === "task.failed" ||
       event.type === "sandbox.failed" ||
       event.type === "task.completed"
     ) {
+      const text = event.message?.trim();
+      if (!text) continue;
+      if (
+        summary &&
+        terminal &&
+        event.type === "task.completed" &&
+        text === summary
+      ) {
+        continue;
+      }
       messages.push({
         id: event.id,
         role: "system",
-        content: event.message,
+        content: text,
         timestamp: event.timestamp,
       });
     }
@@ -106,13 +116,14 @@ export function SessionChatColumn({
 }: SessionChatColumnProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const messages = buildChatMessages(task, events);
+  const progressLine = isActive ? latestProgressLine(events) : null;
 
   useEffect(() => {
     scrollRef.current?.scrollTo({
       top: scrollRef.current.scrollHeight,
       behavior: "smooth",
     });
-  }, [messages.length, isActive]);
+  }, [messages.length, isActive, progressLine]);
 
   const statusColor =
     task.status === "failed"
@@ -122,7 +133,7 @@ export function SessionChatColumn({
         : "text-zinc-400 bg-zinc-500/10 border-zinc-500/20";
 
   return (
-    <div className="flex min-h-0 min-w-0 flex-1 flex-col border-b border-white/[0.06] bg-[#09090b] lg:max-w-[42%] lg:flex-none lg:border-r lg:border-b-0">
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col border-b border-white/[0.06] bg-[#09090b] lg:max-w-[38%] lg:flex-none lg:border-r lg:border-b-0">
       <header className="flex shrink-0 items-center gap-3 border-b border-white/[0.06] px-4 py-3">
         <MotionButton
           type="button"
@@ -189,13 +200,13 @@ export function SessionChatColumn({
         {messages.map((message) => (
           <ChatBubble key={message.id} message={message} />
         ))}
-        {isActive && messages.length <= 1 ? (
+        {isActive ? (
           <div className="flex items-start gap-3">
             <AssistantAvatar />
             <div className="rounded-2xl rounded-tl-md border border-white/[0.06] bg-white/[0.03] px-4 py-3">
               <div className="flex items-center gap-2 text-[13px] text-zinc-400">
-                <Loader2 className="size-4 animate-spin text-violet-400" />
-                Booting devbox and starting agent…
+                <Loader2 className="size-4 shrink-0 animate-spin text-violet-400" />
+                <span>{progressLine ?? "Working in the devbox…"}</span>
               </div>
             </div>
           </div>
@@ -219,7 +230,7 @@ export function SessionChatColumn({
             rows={2}
             placeholder={
               sessionActive
-                ? "Ask for changes, fixes, or next steps…"
+                ? "Ask Devin to build features, fix bugs, or work on your code"
                 : isActive
                   ? "Working… you can send a follow-up when the session is ready"
                   : "Start a new session from Sessions to continue building"
@@ -280,8 +291,42 @@ function ChatBubble({ message }: { message: ChatMessage }) {
     <div className="flex items-start gap-3">
       <AssistantAvatar />
       <div className="max-w-[92%] min-w-0 rounded-2xl rounded-tl-md border border-white/[0.06] bg-[#121214] px-4 py-2.5 text-[14px] leading-relaxed text-zinc-200">
-        <pre className="font-sans whitespace-pre-wrap">{message.content}</pre>
+        <AssistantMarkdown content={message.content} />
       </div>
+    </div>
+  );
+}
+
+function AssistantMarkdown({ content }: { content: string }) {
+  const lines = content.split("\n");
+  return (
+    <div className="space-y-1 font-sans text-[14px] leading-relaxed">
+      {lines.map((line, index) => {
+        const trimmed = line.trim();
+        if (!trimmed) {
+          return <div key={index} className="h-2" />;
+        }
+        if (/^#{1,3}\s/.test(trimmed)) {
+          return (
+            <p key={index} className="font-medium text-zinc-100">
+              {trimmed.replace(/^#{1,3}\s/, "")}
+            </p>
+          );
+        }
+        if (/^[-*]\s/.test(trimmed)) {
+          return (
+            <p key={index} className="text-zinc-300">
+              <span className="text-zinc-500">· </span>
+              {trimmed.replace(/^[-*]\s/, "")}
+            </p>
+          );
+        }
+        return (
+          <p key={index} className="whitespace-pre-wrap text-zinc-300">
+            {line}
+          </p>
+        );
+      })}
     </div>
   );
 }

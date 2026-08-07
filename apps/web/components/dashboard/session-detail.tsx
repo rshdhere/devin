@@ -1214,11 +1214,14 @@ export function SessionDetail({
         />
       </div>
 
-      <details className="mt-3 shrink-0 rounded-xl border border-white/[0.06] bg-[#111] px-4 py-2">
-        <summary className="cursor-pointer text-[12px] text-zinc-500 hover:text-zinc-300">
-          Technical activity & diagnostics
+      <details
+        className="mt-3 shrink-0 rounded-xl border border-white/[0.06] bg-[#0a0a0b] px-4 py-2.5"
+        open={false}
+      >
+        <summary className="cursor-pointer text-[11px] font-medium tracking-wide text-zinc-500 uppercase hover:text-zinc-300">
+          Activity log
         </summary>
-        <div className="mt-3 max-h-[280px] space-y-3 overflow-y-auto pb-2">
+        <div className="mt-3 max-h-[240px] space-y-2 overflow-y-auto pb-1">
           <LiveWorkPanel task={task} events={events} />
           {task.repository ? (
             <GitHubProgressBanner
@@ -1238,13 +1241,18 @@ export function SessionDetail({
               defaultExpanded={task.status === "failed"}
             />
           ) : null}
-          <div className="space-y-1">
+          <div className="space-y-0.5">
             {events
-              .filter(
-                (event) =>
-                  event.type !== "agent.output" &&
-                  !(event.type === "agent.tool" && Boolean(event.data?.tool)),
-              )
+              .filter((event) => {
+                if (
+                  event.type === "agent.output" ||
+                  event.type === "agent.log" ||
+                  (event.type === "agent.tool" && Boolean(event.data?.tool))
+                ) {
+                  return false;
+                }
+                return true;
+              })
               .map((event) => (
                 <EventRow key={event.id} event={event} />
               ))}
