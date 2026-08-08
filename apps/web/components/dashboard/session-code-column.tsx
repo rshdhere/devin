@@ -137,8 +137,11 @@ export function SessionCodeColumn({
         if (needRead) {
           const readResult = await readTaskFile(task.id, normalized);
           content = readResult.content;
-          setContents((prev) => ({ ...prev, [normalized]: content }));
-          onFileLineCount?.(normalized, content.split("\n").length);
+          setContents((prev) => ({
+            ...prev,
+            [normalized]: readResult.content,
+          }));
+          onFileLineCount?.(normalized, readResult.content.split("\n").length);
         }
 
         if (!diffLines[normalized]) {
