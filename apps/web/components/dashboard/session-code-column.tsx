@@ -29,7 +29,9 @@ import {
   extractChangedFiles,
   fileDisplayName,
   groupChangedFilesByFolder,
+  isAddedChangeType,
   isAgentStreamNoise,
+  normalizeSandboxFilePath,
   progressActivityLines,
 } from "@/lib/sessions/agent-activity";
 import {
@@ -79,9 +81,21 @@ export function SessionCodeColumn({
   const [loadingPaths, setLoadingPaths] = useState<Set<string>>(new Set());
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [collapsedPaths, setCollapsedPaths] = useState<Set<string>>(new Set());
+  const inFlightRef = useRef<Set<string>>(new Set());
 
-  const effectivePath =
-    selectedPath ?? changedFiles[changedFiles.length - 1]?.path ?? null;
+  const changedFileByPath = useMemo(() => {
+    const map = new Map<string, ChangedFile>();
+    for (const file of changedFiles) {
+      map.set(normalizeSandboxFilePath(file.path), file);
+    }
+    return map;
+  }, [changedFiles]);
+
+  const effectivePath = useMemo(() => {
+    const raw =
+      selectedPath ?? changedFiles[changedFiles.length - 1]?.path ?? null;
+    return raw ? normalizeSandboxFilePath(raw) : null;
+  }, [selectedPath, changedFiles]);
 
   useEffect(() => {
     const latest = changedFiles[changedFiles.length - 1];
@@ -92,69 +106,90 @@ export function SessionCodeColumn({
 
   const loadFile = useCallback(
     async (path: string) => {
-      if (contents[path] && diffLines[path]) {
+      const normalized = normalizeSandboxFilePath(path);
+      if (!normalized) {
         return;
       }
-      if (loadingPaths.has(path)) {
+      if (contents[normalized] !== undefined && diffLines[normalized]) {
+        return;
+      }
+      if (inFlightRef.current.has(normalized)) {
         return;
       }
       if (!canUseDevbox(task)) {
         setErrors((prev) => ({
           ...prev,
-          [path]: "Available after devbox is running",
+          [normalized]: "Available after devbox is running",
         }));
         return;
       }
-      setLoadingPaths((prev) => new Set(prev).add(path));
+
+      inFlightRef.current.add(normalized);
+      setLoadingPaths((prev) => new Set(prev).add(normalized));
       try {
-        let content: string | undefined = contents[path];
-        if (!content) {
-          const result = await readTaskFile(task.id, path);
-          content = result.content;
-          setContents((prev) => ({ ...prev, [path]: content! }));
-          onFileLineCount?.(path, content.split("\n").length);
+        const meta = changedFileByPath.get(normalized);
+        const skipGitDiff =
+          meta !== undefined && isAddedChangeType(meta.changeType);
+        const needRead = contents[normalized] === undefined;
+        const needDiff = !diffLines[normalized] && !skipGitDiff;
+
+        const [readResult, diffResult] = await Promise.all([
+          needRead ? readTaskFile(task.id, normalized) : Promise.resolve(null),
+          needDiff
+            ? runTaskTerminal(task.id, buildFileDiffCommand(normalized), "repo")
+            : Promise.resolve(null),
+        ]);
+
+        let content = contents[normalized];
+        if (readResult) {
+          content = readResult.content;
+          setContents((prev) => ({ ...prev, [normalized]: content }));
+          onFileLineCount?.(normalized, content.split("\n").length);
         }
 
-        let parsed: DiffLine[] = diffLines[path] ?? [];
-        if (!diffLines[path]) {
-          const diffResult = await runTaskTerminal(
-            task.id,
-            buildFileDiffCommand(path),
-          );
-          const raw = diffResult.stdout.trim();
-          parsed = raw ? parseUnifiedDiff(raw) : [];
-          const hasHunkLines = parsed.some(
-            (line) =>
-              line.kind === "add" ||
-              line.kind === "remove" ||
-              line.kind === "context",
-          );
-          if (!hasHunkLines && content) {
-            parsed = syntheticAddedDiff(content);
+        if (!diffLines[normalized]) {
+          if (skipGitDiff && content) {
+            setDiffLines((prev) => ({
+              ...prev,
+              [normalized]: syntheticAddedDiff(content),
+            }));
+          } else if (diffResult) {
+            const raw = diffResult.stdout.trim();
+            let parsed = raw ? parseUnifiedDiff(raw) : [];
+            const hasHunkLines = parsed.some(
+              (line) =>
+                line.kind === "add" ||
+                line.kind === "remove" ||
+                line.kind === "context",
+            );
+            if (!hasHunkLines && content) {
+              parsed = syntheticAddedDiff(content);
+            }
+            setDiffLines((prev) => ({ ...prev, [normalized]: parsed }));
           }
-          setDiffLines((prev) => ({ ...prev, [path]: parsed }));
         }
 
         setErrors((prev) => {
           const next = { ...prev };
-          delete next[path];
+          delete next[normalized];
           return next;
         });
       } catch (error) {
         setErrors((prev) => ({
           ...prev,
-          [path]:
+          [normalized]:
             error instanceof Error ? error.message : "Could not load file",
         }));
       } finally {
+        inFlightRef.current.delete(normalized);
         setLoadingPaths((prev) => {
           const next = new Set(prev);
-          next.delete(path);
+          next.delete(normalized);
           return next;
         });
       }
     },
-    [contents, diffLines, loadingPaths, onFileLineCount, task],
+    [changedFileByPath, contents, diffLines, onFileLineCount, task],
   );
 
   useEffect(() => {
@@ -493,6 +528,8 @@ function ChangesStackPanel({
           const stats = lines ? countDiffStats(lines) : null;
           const lineCount = content?.split("\n").length ?? 0;
           const loading = loadingPaths.has(file.path);
+          const awaitingDiff =
+            loading && content !== undefined && !lines && !errors[file.path];
           const error = errors[file.path];
           const changeKind = changeKindFromType(file.changeType);
           const isAdded = stats
@@ -587,7 +624,7 @@ function ChangesStackPanel({
               </header>
               {!collapsed ? (
                 <div className="bg-[#0a0a0a]">
-                  {loading ? (
+                  {loading && content === undefined ? (
                     <div className="flex items-center gap-2 px-4 py-8 text-[12px] text-zinc-500">
                       <Loader2 className="size-4 animate-spin" />
                       Loading…
@@ -604,6 +641,11 @@ function ChangesStackPanel({
                       content={content}
                       changeKind={changeKind}
                     />
+                  ) : awaitingDiff ? (
+                    <div className="flex items-center gap-2 px-4 py-3 text-[11px] text-zinc-600">
+                      <Loader2 className="size-3.5 animate-spin" />
+                      Loading diff…
+                    </div>
                   ) : (
                     <p className="px-4 py-8 text-[12px] text-zinc-600">
                       Waiting for file content…

@@ -105,13 +105,34 @@ export type ChangedFile = {
   changeType: "added" | "modified" | "create" | string;
 };
 
+/** Normalize agent/UI paths to workspace-relative form (e.g. repo/app.py). */
+export function normalizeSandboxFilePath(path: string): string {
+  let p = path.trim().replace(/\\/g, "/");
+  if (!p) {
+    return p;
+  }
+  while (p.startsWith("/workspace/")) {
+    p = p.slice("/workspace/".length);
+  }
+  p = p.replace(/^\/+/, "");
+  while (p.startsWith("workspace/")) {
+    p = p.slice("workspace/".length);
+  }
+  return p;
+}
+
+export function isAddedChangeType(changeType: string): boolean {
+  const lower = changeType.toLowerCase();
+  return lower === "added" || lower === "create" || lower === "new";
+}
+
 export function extractChangedFiles(events: TaskEvent[]): ChangedFile[] {
   const byPath = new Map<string, string>();
 
   for (const event of events) {
     if (event.type === "draft.diff" && event.data?.path) {
       byPath.set(
-        String(event.data.path),
+        normalizeSandboxFilePath(String(event.data.path)),
         String(event.data.changeType ?? "modified"),
       );
       continue;
@@ -126,11 +147,12 @@ export function extractChangedFiles(events: TaskEvent[]): ChangedFile[] {
       if (!pathLike || pathLike.includes(" ")) {
         continue;
       }
+      const normalized = normalizeSandboxFilePath(pathLike);
       const kind =
         tool === "Write" || tool === "ApplyPatch"
           ? "added"
-          : (byPath.get(pathLike) ?? "modified");
-      byPath.set(pathLike, kind);
+          : (byPath.get(normalized) ?? "modified");
+      byPath.set(normalized, kind);
     }
   }
 

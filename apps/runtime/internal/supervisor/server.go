@@ -3,7 +3,6 @@ package supervisor
 import (
 	"encoding/json"
 	"net/http"
-	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -71,13 +70,7 @@ func (s *Server) handleLogs(w http.ResponseWriter, _ *http.Request) {
 }
 
 func (s *Server) resolveCWD(path string) string {
-	if path == "" {
-		return s.workspace
-	}
-	if filepath.IsAbs(path) {
-		return path
-	}
-	return filepath.Join(s.workspace, filepath.Clean("/"+path))
+	return s.resolveWorkspacePath(path)
 }
 
 func (s *Server) appendLog(line string) {

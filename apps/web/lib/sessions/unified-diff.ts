@@ -100,7 +100,12 @@ export function shellQuote(path: string): string {
   return `'${path.replace(/'/g, `'\"'\"'`)}'`;
 }
 
-export function buildFileDiffCommand(path: string): string {
-  const quoted = shellQuote(path);
+export function buildFileDiffCommand(path: string, repoDir = "repo"): string {
+  let rel = path.replace(/\\/g, "/");
+  const prefix = `${repoDir}/`;
+  if (rel.startsWith(prefix)) {
+    rel = rel.slice(prefix.length);
+  }
+  const quoted = shellQuote(rel);
   return `p=${quoted}; base=$(git merge-base origin/main HEAD 2>/dev/null || git rev-parse HEAD~1 2>/dev/null || echo HEAD); out=$(git diff "$base" HEAD -- "$p" 2>/dev/null); if [ -z "$out" ]; then out=$(git diff HEAD -- "$p" 2>/dev/null); fi; if [ -z "$out" ] && [ -f "$p" ]; then out=$(git diff --no-index /dev/null "$p" 2>/dev/null || true); fi; printf '%s' "$out"`;
 }
