@@ -111,12 +111,16 @@ export function normalizeSandboxFilePath(path: string): string {
   if (!p) {
     return p;
   }
-  while (p.startsWith("/workspace/")) {
-    p = p.slice("/workspace/".length);
-  }
-  p = p.replace(/^\/+/, "");
-  while (p.startsWith("workspace/")) {
-    p = p.slice("workspace/".length);
+  let prev = "";
+  while (p !== prev) {
+    prev = p;
+    while (p.startsWith("/workspace/")) {
+      p = p.slice("/workspace/".length);
+    }
+    p = p.replace(/^\/+/, "");
+    while (p.startsWith("workspace/")) {
+      p = p.slice("workspace/".length);
+    }
   }
   return p;
 }

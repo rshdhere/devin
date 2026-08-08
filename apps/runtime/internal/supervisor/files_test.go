@@ -13,7 +13,7 @@ func TestResolveWorkspacePath(t *testing.T) {
 		{"/workspace/repo/app.py", "/workspace/repo/app.py"},
 		{"workspace/repo/app.py", "/workspace/repo/app.py"},
 		{"workspace/workspace/repo/app.py", "/workspace/repo/app.py"},
-		{"/workspace/workspace/repo/app.py", "/workspace/workspace/repo/app.py"},
+		{"/workspace/workspace/repo/app.py", "/workspace/repo/app.py"},
 	}
 
 	for _, tc := range cases {

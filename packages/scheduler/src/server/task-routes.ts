@@ -1,5 +1,6 @@
 import { Router, type Request, type Response } from "express";
 import type { TaskService } from "../task/service.js";
+import { normalizeSandboxFilePath } from "../sandbox/paths.js";
 import { handleTaskEvents } from "./task-events.js";
 
 type TaskRequestBody = {
@@ -156,20 +157,22 @@ export function createTaskRouter(tasks: TaskService): Router {
   });
 
   router.get("/:id/files", async (req, res) => {
+    const path = normalizeSandboxFilePath(queryString(req, "path", "."));
     await proxyRuntimeGet(
       tasks,
       req.params.id,
-      `/files/list?path=${encodeURIComponent(queryString(req, "path", "."))}`,
+      `/files/list?path=${encodeURIComponent(path)}`,
       res,
       "files list failed",
     );
   });
 
   router.get("/:id/files/read", async (req, res) => {
+    const path = normalizeSandboxFilePath(queryString(req, "path", ""));
     await proxyRuntimeGet(
       tasks,
       req.params.id,
-      `/files/read?path=${encodeURIComponent(queryString(req, "path", ""))}`,
+      `/files/read?path=${encodeURIComponent(path)}`,
       res,
       "file read failed",
     );

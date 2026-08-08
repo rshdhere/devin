@@ -111,19 +111,27 @@ func (s *Server) resolveWorkspacePath(rel string) string {
 	}
 
 	ws := filepath.Clean(s.workspace)
-	cleaned := filepath.Clean(rel)
-	if cleaned == ws || strings.HasPrefix(cleaned, ws+string(os.PathSeparator)) {
-		return cleaned
+	p := rel
+	for {
+		if strings.HasPrefix(p, ws+"/") {
+			p = strings.TrimPrefix(p, ws+"/")
+			continue
+		}
+		if strings.HasPrefix(p, "/workspace/") {
+			p = strings.TrimPrefix(p, "/workspace/")
+			continue
+		}
+		if strings.HasPrefix(p, "workspace/") {
+			p = strings.TrimPrefix(p, "workspace/")
+			continue
+		}
+		if strings.HasPrefix(p, "/") {
+			return filepath.Clean(p)
+		}
+		break
 	}
-	if filepath.IsAbs(cleaned) {
-		return cleaned
-	}
-
-	trimmed := strings.TrimPrefix(rel, "/")
-	for strings.HasPrefix(trimmed, "workspace/") {
-		trimmed = strings.TrimPrefix(trimmed, "workspace/")
-	}
-	return filepath.Join(ws, filepath.Clean("/"+trimmed))
+	p = strings.TrimPrefix(p, "/")
+	return filepath.Join(ws, filepath.Clean("/"+p))
 }
 
 func (s *Server) workspaceRelativePath(abs string) string {

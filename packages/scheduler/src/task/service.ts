@@ -1056,6 +1056,7 @@ export class TaskService {
         repoCwd,
         gitOwner,
         resolveStackRuntime(task, job),
+        createdNewRepo,
       );
       const repoReadyInSandbox = Boolean(repository && cloneUrl);
 
@@ -1090,6 +1091,22 @@ export class TaskService {
         createdNewRepo && runtimeAgentTask && runtime
           ? await this.readGitHead(runtime, task.id, repoCwd, githubToken)
           : "";
+
+      const stopGreenfieldPush =
+        createdNewRepo &&
+        runtimeAgentTask &&
+        repository &&
+        cloneUrl &&
+        job.permissions?.canPush
+          ? this.startGreenfieldPushWatcher(
+              runtime,
+              task.id,
+              job,
+              repoCwd,
+              githubToken,
+              preAgentHead,
+            )
+          : () => undefined;
 
       if (!runtime || !runtimeBaseUrl || !sandboxName) {
         throw new Error("devbox session is not available before agent start");
@@ -1210,6 +1227,7 @@ export class TaskService {
         }
       } finally {
         stopAutoCommit();
+        stopGreenfieldPush();
         stopEvents();
       }
 
@@ -2608,6 +2626,12 @@ export class TaskService {
       env: this.gitRuntimeEnv(githubToken),
       command: buildPushGreenfieldMainScript(),
     });
+    if (result.exitCode !== 0) {
+      this.emit("agent.log", taskId, "GitHub push to main failed", {
+        detail: (result.stderr || result.stdout || "").trim().slice(0, 500),
+        gitPush: true,
+      });
+    }
     return result.exitCode === 0;
   }
 
@@ -2932,6 +2956,64 @@ export class TaskService {
 
   private gitRuntimeEnv(githubToken?: string): Record<string, string> {
     return sandboxProcessEnv(githubToken);
+  }
+
+  private startGreenfieldPushWatcher(
+    runtime: RuntimeClient,
+    taskId: string,
+    job: ScheduleJob,
+    repoCwd: string,
+    githubToken?: string,
+    preAgentHead?: string,
+  ): () => void {
+    let stopped = false;
+    let lastSyncedHead = preAgentHead?.trim() ?? "";
+
+    const tick = async () => {
+      if (stopped) {
+        return;
+      }
+      try {
+        const head = await this.readGitHead(
+          runtime,
+          taskId,
+          repoCwd,
+          githubToken,
+        );
+        if (!head || head === lastSyncedHead) {
+          return;
+        }
+        const pushed = await this.pushGreenfieldMain(
+          runtime,
+          taskId,
+          repoCwd,
+          githubToken,
+          job.cloneUrl,
+        );
+        if (pushed) {
+          lastSyncedHead = head;
+          this.emit("git.push", taskId, "Synced agent commits to GitHub", {
+            branch: "main",
+            auto: true,
+          });
+        }
+      } catch {
+        // best-effort background sync
+      }
+    };
+
+    const interval = setInterval(() => {
+      void tick();
+    }, 90_000);
+    const initial = setTimeout(() => {
+      void tick();
+    }, 75_000);
+
+    return () => {
+      stopped = true;
+      clearInterval(interval);
+      clearTimeout(initial);
+    };
   }
 
   private startAutoCommitWatcher(
@@ -4690,6 +4772,7 @@ function buildAgentPrompt(
   repoCwd: string,
   owner?: GitHubUserIdentity,
   stackRuntime?: StackRuntime,
+  greenfieldRepo?: boolean,
 ): string {
   const bot = resolveBotAuthor();
   const ownerLine = owner
@@ -4714,7 +4797,9 @@ function buildAgentPrompt(
     "Git / commits:",
     "- Commit incrementally after meaningful steps (API, UI, features, polish)",
     "- Make at least 3 focused commits beyond the scaffold — multiple commits are required",
-    "- Push to the working branch as you go when possible",
+    greenfieldRepo
+      ? "- Do NOT run git push — commit locally only; the control plane syncs to GitHub automatically while you work and after you finish"
+      : "- Push to the working branch as you go when possible",
     `- Every commit MUST include this trailer on a new line in the commit message body: Co-authored-by: ${bot.name} <${bot.email}>`,
     `- ${bot.name} is the ONLY allowed co-author. Never attribute a commit or pull ` +
       "request to Cursor, Claude, an AI, an assistant, or an agent — no " +

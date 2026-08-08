@@ -133,15 +133,9 @@ export function SessionCodeColumn({
         const needRead = contents[normalized] === undefined;
         const needDiff = !diffLines[normalized] && !skipGitDiff;
 
-        const [readResult, diffResult] = await Promise.all([
-          needRead ? readTaskFile(task.id, normalized) : Promise.resolve(null),
-          needDiff
-            ? runTaskTerminal(task.id, buildFileDiffCommand(normalized), "repo")
-            : Promise.resolve(null),
-        ]);
-
         let content = contents[normalized];
-        if (readResult) {
+        if (needRead) {
+          const readResult = await readTaskFile(task.id, normalized);
           content = readResult.content;
           setContents((prev) => ({ ...prev, [normalized]: content }));
           onFileLineCount?.(normalized, content.split("\n").length);
@@ -153,19 +147,33 @@ export function SessionCodeColumn({
               ...prev,
               [normalized]: syntheticAddedDiff(content),
             }));
-          } else if (diffResult) {
-            const raw = diffResult.stdout.trim();
-            let parsed = raw ? parseUnifiedDiff(raw) : [];
-            const hasHunkLines = parsed.some(
-              (line) =>
-                line.kind === "add" ||
-                line.kind === "remove" ||
-                line.kind === "context",
-            );
-            if (!hasHunkLines && content) {
-              parsed = syntheticAddedDiff(content);
+          } else if (needDiff) {
+            try {
+              const diffResult = await runTaskTerminal(
+                task.id,
+                buildFileDiffCommand(normalized),
+                "repo",
+              );
+              const raw = diffResult.stdout.trim();
+              let parsed = raw ? parseUnifiedDiff(raw) : [];
+              const hasHunkLines = parsed.some(
+                (line) =>
+                  line.kind === "add" ||
+                  line.kind === "remove" ||
+                  line.kind === "context",
+              );
+              if (!hasHunkLines && content) {
+                parsed = syntheticAddedDiff(content);
+              }
+              setDiffLines((prev) => ({ ...prev, [normalized]: parsed }));
+            } catch {
+              if (content) {
+                setDiffLines((prev) => ({
+                  ...prev,
+                  [normalized]: syntheticAddedDiff(content),
+                }));
+              }
             }
-            setDiffLines((prev) => ({ ...prev, [normalized]: parsed }));
           }
         }
 

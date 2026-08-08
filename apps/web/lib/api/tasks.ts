@@ -124,7 +124,7 @@ export async function readTaskFile(
     tasksApiUrl(
       `/${encodeURIComponent(id)}/files/read?path=${encodeURIComponent(path)}`,
     ),
-    { credentials: "include" },
+    { credentials: "include", signal: AbortSignal.timeout(45_000) },
   );
   return parseJsonResponse(response);
 }
@@ -146,6 +146,7 @@ export async function runTaskTerminal(
       credentials: "include",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ command, cwd, stream: false }),
+      signal: AbortSignal.timeout(120_000),
     },
   );
   return parseJsonResponse(response);
