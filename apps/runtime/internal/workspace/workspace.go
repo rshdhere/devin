@@ -24,5 +24,10 @@ func Prepare(path string) error {
 		return err
 	}
 
+	PruneWorkspaceDiskIfLow(path)
+	if err := EnsureBuildDirs(path); err != nil {
+		return fmt.Errorf("prepare build dirs: %w", err)
+	}
+
 	return EnsureWritableHome(path)
 }

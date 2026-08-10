@@ -6,6 +6,8 @@ import { Router } from "express";
 import { authenticatedCloneUrl, getGitHubAccessToken } from "../lib/github.js";
 import {
   createTask,
+  fetchDesktopScreenshot,
+  fetchDevboxPreview,
   fetchTaskEventHistory,
   getInfraDiagnostics,
   getTask,
@@ -272,6 +274,51 @@ tasksRouter.get("/:id/files", async (req, res) => {
     const path = typeof req.query.path === "string" ? req.query.path : ".";
     const response = await listTaskFiles(req.params.id, path);
     res.status(response.status).send(await response.text());
+  } catch (error) {
+    respondSchedulerFailure(res, error);
+  }
+});
+
+tasksRouter.get("/:id/devbox-preview", async (req, res) => {
+  try {
+    const path =
+      typeof req.query.path === "string" && req.query.path.trim()
+        ? req.query.path
+        : "/";
+    const response = await fetchDevboxPreview(req.params.id, path);
+    res.status(response.status);
+    response.headers.forEach((value, key) => {
+      if (key.toLowerCase() !== "transfer-encoding") {
+        res.setHeader(key, value);
+      }
+    });
+    if (!response.body) {
+      res.end();
+      return;
+    }
+    const reader = response.body.getReader();
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      res.write(Buffer.from(value));
+    }
+    res.end();
+  } catch (error) {
+    respondSchedulerFailure(res, error);
+  }
+});
+
+tasksRouter.get("/:id/desktop-screenshot", async (req, res) => {
+  try {
+    const response = await fetchDesktopScreenshot(req.params.id);
+    res.status(response.status);
+    res.setHeader(
+      "Content-Type",
+      response.headers.get("content-type") ?? "image/png",
+    );
+    res.setHeader("Cache-Control", "no-store");
+    const body = await response.arrayBuffer();
+    res.send(Buffer.from(body));
   } catch (error) {
     respondSchedulerFailure(res, error);
   }

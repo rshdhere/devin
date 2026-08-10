@@ -23,9 +23,13 @@ func GitConfigPath(workspaceRoot string) string {
 // DevinProcessEnv returns env vars every guest shell should use for git and CLIs.
 func DevinProcessEnv(workspaceRoot string) []string {
 	home := WritableHome(workspaceRoot)
+	buildRoot := filepath.Join(workspaceRoot, buildRootDir)
 	return []string{
 		"HOME=" + home,
 		"GIT_CONFIG_GLOBAL=" + GitConfigPath(workspaceRoot),
+		"CARGO_HOME=" + filepath.Join(buildRoot, "cargo-home"),
+		"CARGO_TARGET_DIR=" + filepath.Join(buildRoot, "target"),
+		"RUSTUP_HOME=" + filepath.Join(buildRoot, "rustup"),
 		"PATH=/usr/local/bin:/root/.local/bin:" + filepath.Join(home, ".local/bin") +
 			":/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin",
 	}

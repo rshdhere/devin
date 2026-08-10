@@ -50,6 +50,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /files/read", s.handleFilesRead)
 	mux.HandleFunc("POST /terminal/stream", s.handleTerminalStream)
 	mux.HandleFunc("POST /browser/open", s.handleBrowserOpen)
+	mux.HandleFunc("GET /browser/screenshot", s.handleDesktopScreenshot)
 	mux.HandleFunc("GET /events", s.handleEvents)
 	return mux
 }

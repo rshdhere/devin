@@ -11,6 +11,12 @@ import {
 } from "@devin/types";
 import { resolvePreferredHost } from "../host/preferred-host.js";
 import {
+  buildDiscoverDevboxPortScript,
+  buildPruneWorkspaceDiskScript,
+} from "../devbox/preview.js";
+import http from "node:http";
+import type { IncomingMessage, ServerResponse } from "node:http";
+import {
   collectInfraDiagnostics,
   fetchSandboxByName,
   listSandboxes,
@@ -97,6 +103,7 @@ type ReviewSession = {
   githubToken?: string;
   createdNewRepo: boolean;
   guestHost?: string;
+  devboxPreviewPort?: number;
 };
 
 export class TaskService {
@@ -1108,6 +1115,19 @@ export class TaskService {
             )
           : () => undefined;
 
+      const stopDevboxPreview = this.startDevboxPreviewWatcher(
+        runtime,
+        task.id,
+        repoCwd,
+      );
+
+      if (resolveStackRuntime(task, job) === "rust") {
+        await runtime.terminalAllowFailure({
+          taskId: task.id,
+          command: buildPruneWorkspaceDiskScript(),
+        });
+      }
+
       if (!runtime || !runtimeBaseUrl || !sandboxName) {
         throw new Error("devbox session is not available before agent start");
       }
@@ -1228,6 +1248,7 @@ export class TaskService {
       } finally {
         stopAutoCommit();
         stopGreenfieldPush();
+        stopDevboxPreview();
         stopEvents();
       }
 
@@ -4607,6 +4628,123 @@ export class TaskService {
     }
   }
 
+  async proxyDevboxPreview(
+    taskId: string,
+    path: string,
+    req: IncomingMessage,
+    res: ServerResponse,
+  ): Promise<void> {
+    const session = await this.resolveLiveSession(taskId);
+    if (!session?.guestHost || !session.devboxPreviewPort) {
+      res.writeHead(404, { "Content-Type": "text/plain" });
+      res.end("No live devbox app on localhost yet");
+      return;
+    }
+
+    const proxyReq = http.request(
+      {
+        hostname: session.guestHost,
+        port: session.devboxPreviewPort,
+        path: path.startsWith("/") ? path : `/${path}`,
+        method: req.method,
+        headers: {
+          ...req.headers,
+          host: `${session.guestHost}:${session.devboxPreviewPort}`,
+        },
+      },
+      (proxyRes) => {
+        res.writeHead(proxyRes.statusCode ?? 502, proxyRes.headers);
+        proxyRes.pipe(res);
+      },
+    );
+
+    proxyReq.on("error", (error) => {
+      if (!res.headersSent) {
+        res.writeHead(502, { "Content-Type": "text/plain" });
+      }
+      res.end(
+        `Devbox preview unavailable: ${error instanceof Error ? error.message : "proxy error"}`,
+      );
+    });
+
+    req.pipe(proxyReq);
+  }
+
+  async fetchDesktopScreenshot(taskId: string): Promise<Response> {
+    const session = await this.resolveLiveSession(taskId);
+    if (!session) {
+      return new Response("No devbox session", { status: 404 });
+    }
+    const port = session.devboxPreviewPort ?? 3000;
+    const target = `http://127.0.0.1:${port}/`;
+    return fetch(
+      `${session.runtimeBaseUrl}/browser/screenshot?url=${encodeURIComponent(target)}`,
+    );
+  }
+
+  private async resolveLiveSession(
+    taskId: string,
+  ): Promise<ReviewSession | undefined> {
+    return (
+      this.activeSessions.get(taskId) ??
+      this.reviewSessions.get(taskId) ??
+      (await this.wakeSession(taskId))
+    );
+  }
+
+  private startDevboxPreviewWatcher(
+    runtime: RuntimeClient,
+    taskId: string,
+    repoCwd: string,
+  ): () => void {
+    let stopped = false;
+
+    const tick = async () => {
+      if (stopped) {
+        return;
+      }
+      const session =
+        this.activeSessions.get(taskId) ?? this.reviewSessions.get(taskId);
+      if (!session?.guestHost) {
+        return;
+      }
+      try {
+        const result = await runtime.terminalAllowFailure({
+          taskId,
+          cwd: repoCwd,
+          command: buildDiscoverDevboxPortScript(),
+        });
+        const port = Number.parseInt(result.stdout.trim(), 10);
+        if (!Number.isFinite(port) || port <= 0) {
+          return;
+        }
+        session.devboxPreviewPort = port;
+        const previewPath = `/api/v1/tasks/${encodeURIComponent(taskId)}/devbox-preview?path=/`;
+        this.patchTask(taskId, { previewUrl: previewPath });
+        this.emit("agent.log", taskId, "Devbox localhost preview available", {
+          port,
+          guestHost: session.guestHost,
+          desktop: true,
+        });
+      } catch {
+        // best-effort
+      }
+    };
+
+    const interval = setInterval(() => {
+      void tick();
+    }, 45_000);
+    const initial = setTimeout(() => {
+      void tick();
+    }, 20_000);
+
+    return () => {
+      stopped = true;
+      clearInterval(interval);
+      clearTimeout(initial);
+    };
+  }
+
   async proxyRuntimeRequest(
     taskId: string,
     path: string,
@@ -4766,6 +4904,20 @@ function nextjsPromptGuidance(stackRuntime?: StackRuntime): string[] {
   ];
 }
 
+function rustPromptGuidance(stackRuntime?: StackRuntime): string[] {
+  if (stackRuntime !== "rust") {
+    return [];
+  }
+  return [
+    "",
+    "Rust / workspace disk:",
+    "- Prefer `cargo build` (debug) for smoke tests — avoid `cargo build --release` unless necessary",
+    "- Builds use CARGO_TARGET_DIR=/workspace/.build/target — do not build under /root",
+    "- If you see 'No space left on device', stop cleaning loops; commit sources and finish",
+    "- After a successful binary smoke test, remove large `target/debug/deps` if you need space",
+  ];
+}
+
 function buildAgentPrompt(
   prompt: string,
   repository: string,
@@ -4793,6 +4945,7 @@ function buildAgentPrompt(
     "- Add dependencies only when needed; if you do, run npm install and verify start still works",
     "- Smoke-check GET / and /health before finishing",
     ...nextjsPromptGuidance(stackRuntime),
+    ...rustPromptGuidance(stackRuntime),
     "",
     "Git / commits:",
     "- Commit incrementally after meaningful steps (API, UI, features, polish)",

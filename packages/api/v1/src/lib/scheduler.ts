@@ -129,4 +129,19 @@ export async function fetchTaskEventHistory(id: string): Promise<Response> {
   );
 }
 
+export async function fetchDevboxPreview(
+  id: string,
+  path = "/",
+): Promise<Response> {
+  return proxyScheduler(
+    `/api/v1/tasks/${encodeURIComponent(id)}/devbox-preview?path=${encodeURIComponent(path)}`,
+  );
+}
+
+export async function fetchDesktopScreenshot(id: string): Promise<Response> {
+  return proxyScheduler(
+    `/api/v1/tasks/${encodeURIComponent(id)}/desktop-screenshot`,
+  );
+}
+
 export { schedulerBaseUrl };

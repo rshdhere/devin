@@ -12,10 +12,10 @@ import {
   Monitor,
   Plus,
   Search,
-  Sparkles,
 } from "lucide-react";
 import type { Task, TaskEvent } from "@devin/types";
-import { DevboxWorkspace } from "@/components/dashboard/devbox-workspace";
+import { SessionDesktopPanel } from "@/components/dashboard/session-desktop-panel";
+import { SessionWorkSteps } from "@/components/dashboard/session-work-steps";
 import {
   changeKindFromType,
   formatPathContext,
@@ -300,14 +300,7 @@ export function SessionCodeColumn({
               />
             ) : null}
             {workspaceTab === "desktop" ? (
-              <div className="flex h-full min-h-0 flex-col p-3">
-                <DevboxWorkspace
-                  task={task}
-                  onTaskChange={onTaskChange}
-                  layout="panel"
-                  defaultTab="browser"
-                />
-              </div>
+              <SessionDesktopPanel task={task} layout="panel" />
             ) : null}
           </div>
 
@@ -462,22 +455,8 @@ function ProgressPanel({
           <Loader2 className="size-3.5 animate-spin text-zinc-500" />
         ) : null}
       </div>
-      <div className="min-h-0 flex-1 space-y-2 overflow-y-auto">
-        {filtered.length === 0 ? (
-          <p className="flex items-center gap-2 text-[12px] text-zinc-600">
-            <Sparkles className="size-3.5" />
-            {isActive ? "Waiting for agent steps…" : "No progress recorded."}
-          </p>
-        ) : (
-          filtered.map((line, index) => (
-            <p
-              key={`${index}-${line.slice(0, 24)}`}
-              className="text-[12px] leading-relaxed text-zinc-400"
-            >
-              {line}
-            </p>
-          ))
-        )}
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        <SessionWorkSteps lines={filtered} isActive={isActive} />
       </div>
     </div>
   );

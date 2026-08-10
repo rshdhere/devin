@@ -17,7 +17,7 @@ func ensureTmpfs(path string) error {
 		return nil
 	}
 
-	if err := unix.Mount("tmpfs", path, "tmpfs", 0, "size=2G,mode=1777"); err != nil {
+	if err := unix.Mount("tmpfs", path, "tmpfs", 0, "size=4G,mode=1777"); err != nil {
 		if os.IsPermission(err) || err == unix.EPERM {
 			slog.Warn("tmpfs workspace mount skipped; continuing with existing directory", "path", path, "error", err)
 			return nil

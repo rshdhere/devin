@@ -178,6 +178,34 @@ export function createTaskRouter(tasks: TaskService): Router {
     );
   });
 
+  router.get("/:id/devbox-preview", async (req, res) => {
+    const path =
+      typeof req.query.path === "string" && req.query.path.trim()
+        ? req.query.path
+        : "/";
+    try {
+      await tasks.proxyDevboxPreview(req.params.id, path, req, res);
+    } catch (error) {
+      sendError(res, 502, error, "devbox preview failed");
+    }
+  });
+
+  router.get("/:id/desktop-screenshot", async (req, res) => {
+    try {
+      const response = await tasks.fetchDesktopScreenshot(req.params.id);
+      const body = await response.arrayBuffer();
+      res.status(response.status);
+      res.setHeader(
+        "Content-Type",
+        response.headers.get("content-type") ?? "image/png",
+      );
+      res.setHeader("Cache-Control", "no-store");
+      res.send(Buffer.from(body));
+    } catch (error) {
+      sendError(res, 502, error, "desktop screenshot failed");
+    }
+  });
+
   return router;
 }
 

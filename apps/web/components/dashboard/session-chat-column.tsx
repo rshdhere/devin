@@ -20,6 +20,7 @@ import {
   type CursorAgentModelId,
 } from "@devin/types";
 import { MotionButton } from "@/components/dashboard/motion-button";
+import { SessionDesktopPanel } from "@/components/dashboard/session-desktop-panel";
 import {
   pickAssistantSummary,
   pickStatusLine,
@@ -257,14 +258,9 @@ export function SessionChatColumn({
           </div>
         ) : null}
 
-        {task.previewUrl ? (
+        {task.previewUrl || task.sessionActive ? (
           <div className="mb-4 overflow-hidden rounded-xl border border-white/[0.08] bg-[#111]">
-            {/* eslint-disable-next-line @next/next/no-img-element -- preview is external */}
-            <img
-              src={task.previewUrl}
-              alt="App preview"
-              className="max-h-[200px] w-full object-cover object-top"
-            />
+            <SessionDesktopPanel task={task} layout="embed" />
           </div>
         ) : null}
 

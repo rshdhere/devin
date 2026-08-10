@@ -12,6 +12,7 @@ import {
 } from "@/lib/api/tasks";
 import type { Task } from "@devin/types";
 import { canUseDevbox } from "@/lib/sessions/devbox";
+import { SessionDesktopPanel } from "@/components/dashboard/session-desktop-panel";
 import { cn } from "@/lib/utils";
 
 type WorkspaceTab = "shell" | "files" | "browser";
@@ -138,7 +139,9 @@ export function DevboxWorkspace({
       {tab === "files" ? (
         <FileExplorer taskId={task.id} disabled={task.sessionSleeping} />
       ) : null}
-      {tab === "browser" ? <BrowserPanel task={task} /> : null}
+      {tab === "browser" ? (
+        <SessionDesktopPanel task={task} layout="embed" />
+      ) : null}
     </div>
   );
 }
@@ -387,41 +390,6 @@ function FileExplorer({
           <p className="text-[12px] text-gray-600">Select a file to preview.</p>
         )}
       </div>
-    </div>
-  );
-}
-
-function BrowserPanel({ task }: { task: Task }) {
-  const previewUrl = task.previewUrl;
-
-  if (!previewUrl) {
-    return (
-      <div className="px-4 py-8 text-center text-[12px] text-gray-500">
-        Preview deploy is not supported. Devin pushes completed work to GitHub
-        only — open the repository from the session header to review changes.
-      </div>
-    );
-  }
-
-  return (
-    <div className="flex flex-col">
-      <div className="flex items-center justify-between border-b border-[#252525] px-4 py-2">
-        <span className="truncate text-[12px] text-gray-400">{previewUrl}</span>
-        <a
-          href={previewUrl}
-          target="_blank"
-          rel="noreferrer"
-          className="text-[11px] text-indigo-300 hover:text-indigo-200"
-        >
-          Open tab
-        </a>
-      </div>
-      <iframe
-        title="Devbox preview"
-        src={previewUrl}
-        className="h-[360px] w-full bg-white"
-        sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
-      />
     </div>
   );
 }
