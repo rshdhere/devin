@@ -36,6 +36,8 @@ RUN mkdir -p /root/.cursor \
 RUN npm install -g @anthropic-ai/claude-code@latest \
     && ln -sf "$(npm root -g)/@anthropic-ai/claude-code/cli.js" /usr/local/bin/claude || true
 
+RUN npm install -g playwright-core@1.60.0
+
 ENV PATH="/root/.local/bin:/usr/local/bin:${PATH}"
 ENV AGENT_PROVIDER=mock
 ENV AGENT_RUN_TIMEOUT_MIN=120

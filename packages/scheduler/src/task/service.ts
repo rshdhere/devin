@@ -4806,24 +4806,45 @@ export class TaskService {
     taskId: string,
   ): Promise<Buffer | undefined> {
     await this.refreshDevboxPreviewPort(session, taskId);
-    const port = session.devboxPreviewPort ?? 3000;
-    const target = `http://127.0.0.1:${port}/`;
+    const fallbackPorts = [8000, 3000, 5173, 8080, 5000, 4173];
+    const ports = session.devboxPreviewPort
+      ? [
+          session.devboxPreviewPort,
+          ...fallbackPorts.filter((p) => p !== session.devboxPreviewPort),
+        ]
+      : fallbackPorts;
 
-    let buffer = await this.fetchRuntimeLiveScreenshot(taskId, target);
-    if (!buffer) {
-      try {
-        await session.runtime.terminalAllowFailure({
-          taskId,
-          cwd: session.repoCwd,
-          command: buildDesktopScreenshotScript(
-            target,
-            "/workspace/.home/desktop-preview.png",
-          ),
-        });
-      } catch {
-        // chromium may be missing in older snapshots
+    let buffer: Buffer | undefined;
+    for (const port of ports) {
+      const target = `http://127.0.0.1:${port}/`;
+      buffer = await this.fetchRuntimeLiveScreenshot(taskId, target);
+      if (buffer) {
+        session.devboxPreviewPort = port;
+        break;
       }
-      buffer = await this.fetchRuntimePersistedScreenshot(taskId);
+    }
+
+    if (!buffer) {
+      for (const port of ports) {
+        const target = `http://127.0.0.1:${port}/`;
+        try {
+          await session.runtime.terminalAllowFailure({
+            taskId,
+            cwd: session.repoCwd,
+            command: buildDesktopScreenshotScript(
+              target,
+              "/workspace/.home/desktop-preview.png",
+            ),
+          });
+        } catch {
+          // playwright/chromium may be missing in older snapshots
+        }
+        buffer = await this.fetchRuntimePersistedScreenshot(taskId);
+        if (buffer) {
+          session.devboxPreviewPort = port;
+          break;
+        }
+      }
     }
 
     if (buffer) {

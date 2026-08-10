@@ -146,26 +146,13 @@ func (s *Server) handleBrowserProxy(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleDesktopScreenshot(w http.ResponseWriter, r *http.Request) {
 	targetURL := strings.TrimSpace(r.URL.Query().Get("url"))
 	if targetURL == "" {
-		targetURL = "http://127.0.0.1:3000/"
+		targetURL = "http://127.0.0.1:8000/"
 	}
 	outPath := filepath.Join(workspace.WritableHome(s.workspace), "desktop-preview.png")
-	script := fmt.Sprintf(
-		"set -e; if command -v chromium >/dev/null 2>&1; then B=chromium; elif command -v chromium-browser >/dev/null 2>&1; then B=chromium-browser; else exit 127; fi; "+
-			"$B --headless --disable-gpu --no-sandbox --window-size=1280,720 --hide-scrollbars --run-all-compositor-stages-before-draw --virtual-time-budget=8000 --screenshot=%s %s",
-		shellQuote(outPath),
-		shellQuote(targetURL),
-	)
-	result, err := executil.RunGuest(
-		r.Context(),
-		s.workspace,
-		script,
-		workspace.DevinProcessEnv(s.workspace),
-		nil,
-	)
-	if err != nil || result.ExitCode != 0 {
-		msg := executil.CombinedOutput(result)
+	if err := s.captureDesktopScreenshotToFile(r.Context(), targetURL, outPath); err != nil {
+		msg := err.Error()
 		if msg == "" {
-			msg = "chromium not available in sandbox image"
+			msg = "playwright/chromium screenshot failed in sandbox"
 		}
 		writeError(w, http.StatusServiceUnavailable, msg)
 		return

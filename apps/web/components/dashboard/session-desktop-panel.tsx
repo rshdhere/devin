@@ -140,8 +140,7 @@ export function SessionDesktopPanel({
     >
       <div className="flex shrink-0 items-center justify-between gap-2 border-b border-white/[0.06] px-3 py-2">
         <span className="text-[11px] text-zinc-500">
-          Sandbox snapshot
-          {task.sessionSleeping ? " (saved from devbox)" : ""}
+          Sandbox snapshot (Playwright capture from localhost in the devbox)
         </span>
         <button
           type="button"
