@@ -12,6 +12,7 @@ import {
 import { resolvePreferredHost } from "../host/preferred-host.js";
 import {
   buildDiscoverDevboxPortScript,
+  buildDesktopScreenshotScript,
   buildPruneWorkspaceDiskScript,
 } from "../devbox/preview.js";
 import { sanitizeProxyResponseHeaders } from "../devbox/proxy-headers.js";
@@ -1369,6 +1370,17 @@ export class TaskService {
             ? "Work completed — pushed to GitHub"
             : "Work completed — local commits not pushed to GitHub"
           : runResult.message || "Task completed";
+
+      const sessionBeforeComplete =
+        this.activeSessions.get(task.id) ?? this.reviewSessions.get(task.id);
+      if (sessionBeforeComplete) {
+        try {
+          await this.captureDesktopScreenshot(sessionBeforeComplete, task.id);
+        } catch {
+          // best-effort final sandbox snapshot
+        }
+      }
+
       this.updateTask(task.id, "completed", completionMessage);
       this.emit("task.completed", task.id, completionMessage, {
         output: runResult.output,
@@ -4497,6 +4509,7 @@ export class TaskService {
       this.pendingJobs.set(persisted.taskId, persisted.job);
       task.sessionActive = true;
       task.sandboxName = persisted.sandboxName;
+      this.startDevboxPreviewWatcher(persisted.taskId);
     }
   }
 
@@ -4632,6 +4645,47 @@ export class TaskService {
     req: IncomingMessage,
     res: ServerResponse,
   ): Promise<void> {
+    if (this.mode === "brain") {
+      const previewPath =
+        typeof path === "string" && path.startsWith("/") ? path : `/${path}`;
+      const workerPath = `/api/v1/tasks/${encodeURIComponent(taskId)}/devbox-preview?path=${encodeURIComponent(previewPath)}`;
+      try {
+        const upstream = await this.delegateRequestToWorker(workerPath, {
+          method: req.method === "HEAD" ? "HEAD" : "GET",
+          headers: {
+            Accept: "*/*",
+            "Accept-Encoding": "identity",
+          },
+        });
+        res.status(upstream.status);
+        upstream.headers.forEach((value, key) => {
+          const lower = key.toLowerCase();
+          if (
+            lower === "transfer-encoding" ||
+            lower === "content-encoding" ||
+            lower === "content-length"
+          ) {
+            return;
+          }
+          res.setHeader(key, value);
+        });
+        if (req.method === "HEAD") {
+          res.end();
+          return;
+        }
+        const body = await upstream.arrayBuffer();
+        res.end(Buffer.from(body));
+      } catch (error) {
+        if (!res.headersSent) {
+          res.writeHead(502, { "Content-Type": "text/plain" });
+        }
+        res.end(
+          error instanceof Error ? error.message : "devbox preview failed",
+        );
+      }
+      return;
+    }
+
     const session = await this.resolveLiveSession(taskId);
     if (!session) {
       res.writeHead(404, { "Content-Type": "text/plain" });
@@ -4642,16 +4696,19 @@ export class TaskService {
     await this.refreshDevboxPreviewPort(session, taskId);
     const previewPort = session.devboxPreviewPort ?? 3000;
     const proxyPath = path.startsWith("/") ? path : `/${path}`;
-    const upstreamUrl = `${session.runtimeBaseUrl}/browser/proxy?port=${previewPort}&path=${encodeURIComponent(proxyPath)}`;
 
     try {
-      const upstream = await fetch(upstreamUrl, {
-        method: req.method === "HEAD" ? "HEAD" : "GET",
-        headers: {
-          Accept: "*/*",
-          "Accept-Encoding": "identity",
+      const upstream = await this.proxyRuntimeRequest(
+        taskId,
+        `/browser/proxy?port=${previewPort}&path=${encodeURIComponent(proxyPath)}`,
+        {
+          method: req.method === "HEAD" ? "HEAD" : "GET",
+          headers: {
+            Accept: "*/*",
+            "Accept-Encoding": "identity",
+          },
         },
-      });
+      );
       if (!upstream.ok) {
         const detail = await upstream.text();
         if (!res.headersSent) {
@@ -4703,10 +4760,32 @@ export class TaskService {
   }
 
   async fetchDesktopScreenshot(taskId: string): Promise<Response> {
-    const session = await this.resolveLiveSession(taskId);
+    if (this.mode === "brain") {
+      return this.delegateRequestToWorker(
+        `/api/v1/tasks/${encodeURIComponent(taskId)}/desktop-screenshot`,
+      );
+    }
+
+    const session =
+      (await this.resolveLiveSession(taskId)) ??
+      (this.tasks.get(taskId)?.sessionSleeping
+        ? await this.wakeSession(taskId)
+        : undefined);
+
     if (!session) {
+      const persisted = await this.fetchRuntimePersistedScreenshot(taskId);
+      if (persisted) {
+        return new Response(persisted, {
+          status: 200,
+          headers: {
+            "Content-Type": "image/png",
+            "Cache-Control": "no-store",
+          },
+        });
+      }
       return new Response("No devbox session", { status: 404 });
     }
+
     const buffer = await this.captureDesktopScreenshot(session, taskId);
     if (!buffer) {
       return new Response("Desktop snapshot not available yet", {
@@ -4729,22 +4808,78 @@ export class TaskService {
     await this.refreshDevboxPreviewPort(session, taskId);
     const port = session.devboxPreviewPort ?? 3000;
     const target = `http://127.0.0.1:${port}/`;
+
+    let buffer = await this.fetchRuntimeLiveScreenshot(taskId, target);
+    if (!buffer) {
+      try {
+        await session.runtime.terminalAllowFailure({
+          taskId,
+          cwd: session.repoCwd,
+          command: buildDesktopScreenshotScript(
+            target,
+            "/workspace/.home/desktop-preview.png",
+          ),
+        });
+      } catch {
+        // chromium may be missing in older snapshots
+      }
+      buffer = await this.fetchRuntimePersistedScreenshot(taskId);
+    }
+
+    if (buffer) {
+      session.lastDesktopScreenshot = buffer;
+      return buffer;
+    }
+
+    return (
+      session.lastDesktopScreenshot ??
+      (await this.fetchRuntimePersistedScreenshot(taskId))
+    );
+  }
+
+  private async fetchRuntimeLiveScreenshot(
+    taskId: string,
+    targetUrl: string,
+  ): Promise<Buffer | undefined> {
     try {
-      const response = await fetch(
-        `${session.runtimeBaseUrl}/browser/screenshot?url=${encodeURIComponent(target)}`,
+      const upstream = await this.proxyRuntimeRequest(
+        taskId,
+        `/browser/screenshot?url=${encodeURIComponent(targetUrl)}`,
         { signal: AbortSignal.timeout(90_000) },
       );
-      if (response.ok) {
-        const buffer = Buffer.from(await response.arrayBuffer());
-        if (buffer.length > 128) {
-          session.lastDesktopScreenshot = buffer;
-          return buffer;
-        }
+      if (!upstream.ok) {
+        return undefined;
+      }
+      const buffer = Buffer.from(await upstream.arrayBuffer());
+      if (buffer.length > 128) {
+        return buffer;
       }
     } catch {
-      // fall back to last good capture
+      return undefined;
     }
-    return session.lastDesktopScreenshot;
+    return undefined;
+  }
+
+  private async fetchRuntimePersistedScreenshot(
+    taskId: string,
+  ): Promise<Buffer | undefined> {
+    try {
+      const upstream = await this.proxyRuntimeRequest(
+        taskId,
+        "/browser/last-screenshot",
+        { signal: AbortSignal.timeout(30_000) },
+      );
+      if (!upstream.ok) {
+        return undefined;
+      }
+      const buffer = Buffer.from(await upstream.arrayBuffer());
+      if (buffer.length > 128) {
+        return buffer;
+      }
+    } catch {
+      return undefined;
+    }
+    return undefined;
   }
 
   private async refreshDevboxPreviewPort(

@@ -51,6 +51,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /terminal/stream", s.handleTerminalStream)
 	mux.HandleFunc("POST /browser/open", s.handleBrowserOpen)
 	mux.HandleFunc("GET /browser/screenshot", s.handleDesktopScreenshot)
+	mux.HandleFunc("GET /browser/last-screenshot", s.handleLastDesktopScreenshot)
 	mux.HandleFunc("GET /browser/proxy", s.handleBrowserProxy)
 	mux.HandleFunc("GET /events", s.handleEvents)
 	return mux

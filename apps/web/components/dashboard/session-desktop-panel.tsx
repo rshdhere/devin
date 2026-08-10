@@ -7,6 +7,21 @@ import { tasksApiUrl } from "@/lib/api/http";
 import { canUseDevbox } from "@/lib/sessions/devbox";
 import { cn } from "@/lib/utils";
 
+async function blobLooksLikePng(blob: Blob): Promise<boolean> {
+  if (blob.type.includes("image")) {
+    return true;
+  }
+  const header = await blob.slice(0, 8).arrayBuffer();
+  const bytes = new Uint8Array(header);
+  return (
+    bytes.length >= 8 &&
+    bytes[0] === 0x89 &&
+    bytes[1] === 0x50 &&
+    bytes[2] === 0x4e &&
+    bytes[3] === 0x47
+  );
+}
+
 export function SessionDesktopPanel({
   task,
   layout = "panel",
@@ -32,7 +47,7 @@ export function SessionDesktopPanel({
   }, []);
 
   useEffect(() => {
-    if (!canUse || task.sessionSleeping) {
+    if (!canUse) {
       return;
     }
     let cancelled = false;
@@ -47,7 +62,7 @@ export function SessionDesktopPanel({
         if (cancelled) {
           return;
         }
-        if (!blob.type.includes("image")) {
+        if (!(await blobLooksLikePng(blob))) {
           throw new Error("snapshot is not an image");
         }
         setShotUrl((prev) => {
@@ -72,7 +87,7 @@ export function SessionDesktopPanel({
     return () => {
       cancelled = true;
     };
-  }, [canUse, screenshotSrc, shotKey, task.sessionSleeping]);
+  }, [canUse, screenshotSrc, shotKey]);
 
   const isAgentActive =
     task.status === "running" ||
@@ -83,7 +98,7 @@ export function SessionDesktopPanel({
     task.status === "awaiting_review";
 
   useEffect(() => {
-    if (!canUse || task.sessionSleeping) {
+    if (!canUse) {
       return;
     }
     const interval = setInterval(
@@ -93,7 +108,7 @@ export function SessionDesktopPanel({
       isAgentActive ? 8_000 : 20_000,
     );
     return () => clearInterval(interval);
-  }, [canUse, isAgentActive, refreshScreenshot, task.sessionSleeping]);
+  }, [canUse, isAgentActive, refreshScreenshot]);
 
   useEffect(() => {
     return () => {
@@ -125,7 +140,8 @@ export function SessionDesktopPanel({
     >
       <div className="flex shrink-0 items-center justify-between gap-2 border-b border-white/[0.06] px-3 py-2">
         <span className="text-[11px] text-zinc-500">
-          Sandbox snapshot (headless capture from localhost in the devbox)
+          Sandbox snapshot
+          {task.sessionSleeping ? " (saved from devbox)" : ""}
         </span>
         <button
           type="button"
@@ -148,10 +164,9 @@ export function SessionDesktopPanel({
         ) : null}
         {shotError && !shotUrl ? (
           <p className="max-w-sm text-center text-[12px] text-zinc-500">
-            Waiting for the agent to run a dev server in the sandbox (for
-            example <code className="text-zinc-300">npm run dev</code> or{" "}
-            <code className="text-zinc-300">go run .</code>). Snapshots refresh
-            automatically while the session is live.
+            {task.sessionSleeping
+              ? "Waking the devbox to load the last saved snapshot…"
+              : "Waiting for the agent to run a dev server in the sandbox (for example npm run dev or go run .)."}
           </p>
         ) : null}
         {shotUrl ? (
@@ -161,7 +176,7 @@ export function SessionDesktopPanel({
             alt="Sandbox app snapshot"
             className={cn(
               "rounded-lg border border-white/[0.08] object-contain object-top shadow-lg",
-              isEmbed ? "max-h-[220px] w-full" : "max-h-full w-full max-w-5xl",
+              isEmbed ? "max-h-[280px] w-full" : "max-h-full w-full max-w-5xl",
             )}
           />
         ) : null}

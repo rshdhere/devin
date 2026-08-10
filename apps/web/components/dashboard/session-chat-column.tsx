@@ -27,6 +27,7 @@ import {
   progressActivityLines,
   formatAgentFailureMessage,
 } from "@/lib/sessions/agent-activity";
+import { canUseDevbox } from "@/lib/sessions/devbox";
 import { cn } from "@/lib/utils";
 
 export type ChatMessage = {
@@ -258,7 +259,7 @@ export function SessionChatColumn({
           </div>
         ) : null}
 
-        {task.previewUrl || task.sessionActive ? (
+        {canUseDevbox(task) ? (
           <div className="mb-4 overflow-hidden rounded-xl border border-white/[0.08] bg-[#111]">
             <SessionDesktopPanel task={task} layout="embed" />
           </div>

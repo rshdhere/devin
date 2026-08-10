@@ -31,6 +31,44 @@ func (s *Server) handleBrowserOpen(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+const desktopSnapshotRel = ".home/last-desktop-snapshot.png"
+
+func desktopSnapshotPaths(workspaceRoot string) []string {
+	home := workspace.WritableHome(workspaceRoot)
+	return []string{
+		filepath.Join(home, "last-desktop-snapshot.png"),
+		filepath.Join(home, "desktop-preview.png"),
+	}
+}
+
+func (s *Server) handleLastDesktopScreenshot(w http.ResponseWriter, r *http.Request) {
+	for _, path := range desktopSnapshotPaths(s.workspace) {
+		data, err := os.ReadFile(path)
+		if err != nil || len(data) < 128 {
+			continue
+		}
+		w.Header().Set("Content-Type", "image/png")
+		w.Header().Set("Cache-Control", "no-store")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(data)
+		return
+	}
+	writeError(w, http.StatusNotFound, "no desktop snapshot saved yet")
+}
+
+func (s *Server) persistDesktopSnapshot(workspaceRoot, sourcePath string) {
+	for _, dest := range desktopSnapshotPaths(workspaceRoot) {
+		if dest == sourcePath {
+			continue
+		}
+		data, err := os.ReadFile(sourcePath)
+		if err != nil {
+			continue
+		}
+		_ = os.WriteFile(dest, data, 0o644)
+	}
+}
+
 func (s *Server) handleBrowserProxy(w http.ResponseWriter, r *http.Request) {
 	port := strings.TrimSpace(r.URL.Query().Get("port"))
 	if port == "" {
@@ -113,7 +151,7 @@ func (s *Server) handleDesktopScreenshot(w http.ResponseWriter, r *http.Request)
 	outPath := filepath.Join(workspace.WritableHome(s.workspace), "desktop-preview.png")
 	script := fmt.Sprintf(
 		"set -e; if command -v chromium >/dev/null 2>&1; then B=chromium; elif command -v chromium-browser >/dev/null 2>&1; then B=chromium-browser; else exit 127; fi; "+
-			"$B --headless --disable-gpu --no-sandbox --window-size=1280,720 --screenshot=%s %s",
+			"$B --headless --disable-gpu --no-sandbox --window-size=1280,720 --hide-scrollbars --run-all-compositor-stages-before-draw --virtual-time-budget=8000 --screenshot=%s %s",
 		shellQuote(outPath),
 		shellQuote(targetURL),
 	)
@@ -141,4 +179,5 @@ func (s *Server) handleDesktopScreenshot(w http.ResponseWriter, r *http.Request)
 	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(data)
+	s.persistDesktopSnapshot(s.workspace, outPath)
 }
