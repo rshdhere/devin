@@ -140,6 +140,9 @@ export class TaskService {
   private workerStarted = false;
   private readonly processingTasks = new Set<string>();
   private restored = false;
+  private readonly snapshotSpinCooldownMs = 45_000;
+  private readonly lastSnapshotSpinAt = new Map<string, number>();
+  private readonly lastSnapshotTriggerAt = new Map<string, number>();
 
   constructor(options: TaskServiceOptions) {
     this.orchestratorUrl = options.orchestratorUrl.replace(/\/$/, "");
@@ -2676,6 +2679,51 @@ export class TaskService {
     return result.exitCode === 0;
   }
 
+  private maybeTriggerDesktopSnapshotFromRuntime(
+    taskId: string,
+    message: string,
+    data?: Record<string, unknown>,
+  ): void {
+    const detail = typeof data?.detail === "string" ? data.detail : "";
+    const text = `${message}\n${detail}`.trim();
+    if (!text) {
+      return;
+    }
+    const lower = text.toLowerCase();
+    const looksLikeDevServer =
+      /compiled successfully|✓ compiled|ready in \d|ready on|local:\s*https?:\/\/|started server|listening on|http:\/\/127\.0\.0\.1:\d+/i.test(
+        text,
+      );
+    const looksLikeBuildOk =
+      /npm run build|next build/i.test(text) &&
+      /exit code 0|exited with 0|successfully compiled|compiled successfully|✓|creating an optimized production build/i.test(
+        lower,
+      );
+    if (!looksLikeDevServer && !looksLikeBuildOk) {
+      return;
+    }
+    void this.triggerDesktopSnapshot(taskId);
+  }
+
+  private async triggerDesktopSnapshot(taskId: string): Promise<void> {
+    const now = Date.now();
+    if (now - (this.lastSnapshotTriggerAt.get(taskId) ?? 0) < 30_000) {
+      return;
+    }
+    this.lastSnapshotTriggerAt.set(taskId, now);
+
+    const session =
+      this.activeSessions.get(taskId) ?? this.reviewSessions.get(taskId);
+    if (!session) {
+      return;
+    }
+    try {
+      await this.captureDesktopScreenshotWithDevServer(session, taskId);
+    } catch {
+      // best-effort
+    }
+  }
+
   private forwardRuntimeEvents(
     runtimeBaseUrl: string,
     taskId: string,
@@ -2740,6 +2788,11 @@ export class TaskService {
         taskId,
         payload.type as TaskEventType,
         payload.message,
+        payload.data,
+      );
+      this.maybeTriggerDesktopSnapshotFromRuntime(
+        taskId,
+        payload.message ?? "",
         payload.data,
       );
     } catch {
@@ -4851,6 +4904,19 @@ export class TaskService {
     if (buffer) {
       return buffer;
     }
+
+    const cached = await loadTaskDesktopSnapshot(taskId);
+    if (cached) {
+      session.lastDesktopScreenshot = cached;
+      return cached;
+    }
+
+    const now = Date.now();
+    const lastSpin = this.lastSnapshotSpinAt.get(taskId) ?? 0;
+    if (now - lastSpin < this.snapshotSpinCooldownMs) {
+      return session.lastDesktopScreenshot;
+    }
+    this.lastSnapshotSpinAt.set(taskId, now);
 
     try {
       await session.runtime.terminalAllowFailure({

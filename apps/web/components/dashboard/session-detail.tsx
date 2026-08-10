@@ -1109,6 +1109,40 @@ export function SessionDetail({
     };
   }, [task.id, task.status, refreshTasks, loadDiagnostics]);
 
+  useEffect(() => {
+    if (!streamError) {
+      return;
+    }
+    let cancelled = false;
+    const poll = () => {
+      void fetchTaskEventHistory(task.id)
+        .then((history) => {
+          if (!cancelled && history.length > 0) {
+            setEvents(
+              [...history].sort((a, b) =>
+                a.timestamp.localeCompare(b.timestamp),
+              ),
+            );
+            setStreamError(null);
+          }
+        })
+        .catch(() => undefined);
+      void fetchTask(task.id)
+        .then((updated) => {
+          if (!cancelled) {
+            setTask(updated);
+          }
+        })
+        .catch(() => undefined);
+    };
+    poll();
+    const interval = setInterval(poll, 5000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [streamError, task.id]);
+
   // Poll task status while non-terminal so a dropped SSE stream cannot leave
   // the header stuck on "Booting devbox".
   useEffect(() => {

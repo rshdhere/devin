@@ -25,9 +25,11 @@ async function blobLooksLikePng(blob: Blob): Promise<boolean> {
 export function SessionDesktopPanel({
   task,
   layout = "panel",
+  externalRefreshKey = 0,
 }: {
   task: Task;
   layout?: "panel" | "embed";
+  externalRefreshKey?: number;
 }) {
   const canUse = canUseDevbox(task);
   const screenshotSrc = tasksApiUrl(
@@ -45,6 +47,12 @@ export function SessionDesktopPanel({
     setShotError(false);
     setShotKey((k) => k + 1);
   }, []);
+
+  useEffect(() => {
+    if (externalRefreshKey > 0) {
+      refreshScreenshot();
+    }
+  }, [externalRefreshKey, refreshScreenshot]);
 
   useEffect(() => {
     if (!canUse) {
@@ -163,9 +171,11 @@ export function SessionDesktopPanel({
         ) : null}
         {shotError && !shotUrl ? (
           <p className="max-w-sm text-center text-[12px] text-zinc-500">
-            {task.sessionSleeping
-              ? "Waking the devbox to load the last saved snapshot…"
-              : "Waiting for the agent to run a dev server in the sandbox (for example npm run dev or go run .)."}
+            {isAgentActive
+              ? "Capturing sandbox preview… we start npm start/dev briefly after build when needed."
+              : task.sessionSleeping
+                ? "Waking devbox to load saved snapshot — try Refresh."
+                : "Click Refresh to capture the app with Playwright."}
           </p>
         ) : null}
         {shotUrl ? (

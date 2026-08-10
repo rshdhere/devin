@@ -141,6 +141,11 @@ export function SessionChatColumn({
   const showModelPicker =
     task.agent === "cursor" && cursorAgentModel && onCursorAgentModelChange;
 
+  const snapshotRefreshKey = events.reduce(
+    (count, event) => count + (event.data?.desktopSnapshot === true ? 1 : 0),
+    0,
+  );
+
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
       if (
@@ -261,7 +266,11 @@ export function SessionChatColumn({
 
         {canUseDevbox(task) ? (
           <div className="mb-4 overflow-hidden rounded-xl border border-white/[0.08] bg-[#111]">
-            <SessionDesktopPanel task={task} layout="embed" />
+            <SessionDesktopPanel
+              task={task}
+              layout="embed"
+              externalRefreshKey={snapshotRefreshKey}
+            />
           </div>
         ) : null}
 
