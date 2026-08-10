@@ -206,6 +206,28 @@ export function createTaskRouter(tasks: TaskService): Router {
     }
   });
 
+  router.get("/:id/runtime-proxy", async (req, res) => {
+    const runtimePath = queryString(req, "path", "/");
+    try {
+      const upstream = await tasks.proxyRuntimeRequest(
+        req.params.id,
+        runtimePath,
+      );
+      res.status(upstream.status);
+      upstream.headers.forEach((value, key) => {
+        const lower = key.toLowerCase();
+        if (lower === "transfer-encoding" || lower === "content-encoding") {
+          return;
+        }
+        res.setHeader(key, value);
+      });
+      const body = await upstream.arrayBuffer();
+      res.send(Buffer.from(body));
+    } catch (error) {
+      sendError(res, 502, error, "runtime proxy failed");
+    }
+  });
+
   return router;
 }
 

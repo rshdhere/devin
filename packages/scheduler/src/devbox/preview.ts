@@ -27,6 +27,43 @@ export function buildDiscoverDevboxPortScript(): string {
   ].join("\n");
 }
 
+/** Start npm dev/start in background for a one-off Playwright snapshot. */
+export function buildStartDevServerForSnapshotScript(): string {
+  return [
+    "set +e",
+    "PIDFILE=/workspace/.home/devin-snapshot-server.pid",
+    'if [ -f "$PIDFILE" ]; then kill $(cat "$PIDFILE") 2>/dev/null || true; rm -f "$PIDFILE"; fi',
+    "if [ ! -f package.json ]; then exit 0; fi",
+    'CMD=""',
+    'if grep -q "\\"dev\\"" package.json 2>/dev/null; then CMD="npm run dev"; elif grep -q "\\"start\\"" package.json 2>/dev/null; then CMD="npm start"; fi',
+    'if [ -z "$CMD" ]; then exit 0; fi',
+    'nohup bash -lc "$CMD" >>/workspace/.home/devin-snapshot-server.log 2>&1 &',
+    'echo $! > "$PIDFILE"',
+  ].join("\n");
+}
+
+export function buildStopDevServerForSnapshotScript(): string {
+  return [
+    "set +e",
+    "PIDFILE=/workspace/.home/devin-snapshot-server.pid",
+    'if [ -f "$PIDFILE" ]; then kill $(cat "$PIDFILE") 2>/dev/null || true; rm -f "$PIDFILE"; fi',
+  ].join("\n");
+}
+
+export function buildWaitForDevServerScript(): string {
+  return [
+    "set +e",
+    "for i in $(seq 1 45); do",
+    "  for p in 3000 8000 5173 8080; do",
+    "    code=$(curl -s -o /dev/null -w '%{http_code}' -H 'Accept-Encoding: identity' --max-time 2 \"http://127.0.0.1:$p/\" 2>/dev/null || true)",
+    '    if echo "$code" | grep -qE "^(200|30[0-9])"; then echo "$p"; exit 0; fi',
+    "  done",
+    "  sleep 1",
+    "done",
+    "exit 1",
+  ].join("\n");
+}
+
 /** Playwright + Chromium fallback screenshot script for scheduler terminal path. */
 export function buildDesktopScreenshotScript(
   url: string,

@@ -14,7 +14,14 @@ import {
   buildDiscoverDevboxPortScript,
   buildDesktopScreenshotScript,
   buildPruneWorkspaceDiskScript,
+  buildStartDevServerForSnapshotScript,
+  buildStopDevServerForSnapshotScript,
+  buildWaitForDevServerScript,
 } from "../devbox/preview.js";
+import {
+  loadTaskDesktopSnapshot,
+  saveTaskDesktopSnapshot,
+} from "../devbox/snapshot-store.js";
 import { sanitizeProxyResponseHeaders } from "../devbox/proxy-headers.js";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import {
@@ -1375,7 +1382,10 @@ export class TaskService {
         this.activeSessions.get(task.id) ?? this.reviewSessions.get(task.id);
       if (sessionBeforeComplete) {
         try {
-          await this.captureDesktopScreenshot(sessionBeforeComplete, task.id);
+          await this.captureDesktopScreenshotWithDevServer(
+            sessionBeforeComplete,
+            task.id,
+          );
         } catch {
           // best-effort final sandbox snapshot
         }
@@ -3690,6 +3700,10 @@ export class TaskService {
         this.emit("agent.log", task.id, "Smoke check passed (HTTP 200)", {
           endpoint: "http://127.0.0.1:3000",
         });
+        const shotSession = this.activeSessions.get(task.id);
+        if (shotSession) {
+          void this.captureDesktopScreenshotWithDevServer(shotSession, task.id);
+        }
       } else {
         this.emit(
           "agent.log",
@@ -4766,6 +4780,17 @@ export class TaskService {
       );
     }
 
+    const cached = await loadTaskDesktopSnapshot(taskId);
+    if (cached) {
+      return new Response(cached, {
+        status: 200,
+        headers: {
+          "Content-Type": "image/png",
+          "Cache-Control": "no-store",
+        },
+      });
+    }
+
     const session =
       (await this.resolveLiveSession(taskId)) ??
       (this.tasks.get(taskId)?.sessionSleeping
@@ -4773,9 +4798,17 @@ export class TaskService {
         : undefined);
 
     if (!session) {
-      const persisted = await this.fetchRuntimePersistedScreenshot(taskId);
-      if (persisted) {
-        return new Response(persisted, {
+      return new Response("No devbox session", { status: 404 });
+    }
+
+    const buffer = await this.captureDesktopScreenshotWithDevServer(
+      session,
+      taskId,
+    );
+    if (!buffer) {
+      const disk = await loadTaskDesktopSnapshot(taskId);
+      if (disk) {
+        return new Response(disk, {
           status: 200,
           headers: {
             "Content-Type": "image/png",
@@ -4783,11 +4816,6 @@ export class TaskService {
           },
         });
       }
-      return new Response("No devbox session", { status: 404 });
-    }
-
-    const buffer = await this.captureDesktopScreenshot(session, taskId);
-    if (!buffer) {
       return new Response("Desktop snapshot not available yet", {
         status: 503,
       });
@@ -4799,6 +4827,58 @@ export class TaskService {
         "Cache-Control": "no-store",
       },
     });
+  }
+
+  private async persistDesktopSnapshot(
+    taskId: string,
+    session: ReviewSession,
+    buffer: Buffer,
+  ): Promise<void> {
+    session.lastDesktopScreenshot = buffer;
+    await saveTaskDesktopSnapshot(taskId, buffer);
+    this.emit("agent.log", taskId, "Sandbox desktop snapshot saved", {
+      desktop: true,
+      desktopSnapshot: true,
+    });
+  }
+
+  /** Spin up dev server briefly if needed, then Playwright capture (Devin-style). */
+  private async captureDesktopScreenshotWithDevServer(
+    session: ReviewSession,
+    taskId: string,
+  ): Promise<Buffer | undefined> {
+    let buffer = await this.captureDesktopScreenshot(session, taskId);
+    if (buffer) {
+      return buffer;
+    }
+
+    try {
+      await session.runtime.terminalAllowFailure({
+        taskId,
+        cwd: session.repoCwd,
+        command: buildStartDevServerForSnapshotScript(),
+      });
+      const wait = await session.runtime.terminalAllowFailure({
+        taskId,
+        cwd: session.repoCwd,
+        command: buildWaitForDevServerScript(),
+      });
+      const port = Number.parseInt(wait.stdout.trim(), 10);
+      if (Number.isFinite(port) && port > 0) {
+        session.devboxPreviewPort = port;
+      }
+      buffer = await this.captureDesktopScreenshot(session, taskId);
+    } catch {
+      // best-effort
+    } finally {
+      await session.runtime.terminalAllowFailure({
+        taskId,
+        cwd: session.repoCwd,
+        command: buildStopDevServerForSnapshotScript(),
+      });
+    }
+
+    return buffer;
   }
 
   private async captureDesktopScreenshot(
@@ -4848,7 +4928,7 @@ export class TaskService {
     }
 
     if (buffer) {
-      session.lastDesktopScreenshot = buffer;
+      await this.persistDesktopSnapshot(taskId, session, buffer);
       return buffer;
     }
 
@@ -4957,7 +5037,7 @@ export class TaskService {
         return;
       }
       await this.refreshDevboxPreviewPort(session, taskId);
-      void this.captureDesktopScreenshot(session, taskId);
+      void this.captureDesktopScreenshotWithDevServer(session, taskId);
     };
 
     const interval = setInterval(() => {
@@ -5001,6 +5081,21 @@ export class TaskService {
       if (path.startsWith("/files/list") || path.startsWith("/files/read")) {
         return this.delegateRequestToWorker(workerPath, { method: "GET" });
       }
+      if (path.startsWith("/terminal")) {
+        return this.delegateRequestToWorker(workerPath, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            ...(init?.headers ?? {}),
+          },
+          body: init?.body,
+        });
+      }
+      return this.delegateRequestToWorker(workerPath, {
+        method: init?.method ?? "GET",
+        headers: init?.headers,
+        signal: init?.signal,
+      });
     }
 
     const session =
