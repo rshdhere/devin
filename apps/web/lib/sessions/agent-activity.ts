@@ -58,6 +58,8 @@ export function isAgentStreamNoise(message: string | undefined): boolean {
   if (lower.startsWith("assistant_delta:")) return true;
   if (/^cursor agent working — no output for \d+s$/i.test(text)) return true;
   if (lower === "connection: reconnected") return true;
+  if (/^hook[a-z]/i.test(text)) return true;
+  if (text.includes("hookAdditionalContexts")) return true;
   return false;
 }
 
@@ -73,9 +75,12 @@ export function latestProgressLine(events: TaskEvent[]): string | null {
     const event = events[index];
     if (!event) continue;
     if (event.type === "agent.tool" && event.data?.tool) {
+      const tool = String(event.data.tool);
+      if (/^hook/i.test(tool)) {
+        continue;
+      }
       const detail =
         typeof event.data.detail === "string" ? event.data.detail : "";
-      const tool = String(event.data.tool);
       const shortDetail = detail.split("\n")[0]?.trim() ?? "";
       if (shortDetail) {
         return `${tool} · ${shortDetail}`;
@@ -208,6 +213,10 @@ export function progressActivityLines(events: TaskEvent[]): string[] {
 
   for (const event of events) {
     if (event.type === "agent.tool" && event.data?.tool) {
+      const tool = String(event.data.tool);
+      if (/^hook/i.test(tool)) {
+        continue;
+      }
       const line = latestProgressLine([event]);
       if (line && !seen.has(line)) {
         seen.add(line);

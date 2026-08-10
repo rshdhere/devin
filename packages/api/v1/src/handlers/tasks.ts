@@ -288,9 +288,15 @@ tasksRouter.get("/:id/devbox-preview", async (req, res) => {
     const response = await fetchDevboxPreview(req.params.id, path);
     res.status(response.status);
     response.headers.forEach((value, key) => {
-      if (key.toLowerCase() !== "transfer-encoding") {
-        res.setHeader(key, value);
+      const lower = key.toLowerCase();
+      if (
+        lower === "transfer-encoding" ||
+        lower === "content-encoding" ||
+        lower === "content-length"
+      ) {
+        return;
       }
+      res.setHeader(key, value);
     });
     if (!response.body) {
       res.end();

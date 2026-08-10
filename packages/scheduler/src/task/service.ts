@@ -14,6 +14,10 @@ import {
   buildDiscoverDevboxPortScript,
   buildPruneWorkspaceDiskScript,
 } from "../devbox/preview.js";
+import {
+  devboxUpstreamRequestHeaders,
+  sanitizeProxyResponseHeaders,
+} from "../devbox/proxy-headers.js";
 import http from "node:http";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import {
@@ -1115,11 +1119,7 @@ export class TaskService {
             )
           : () => undefined;
 
-      const stopDevboxPreview = this.startDevboxPreviewWatcher(
-        runtime,
-        task.id,
-        repoCwd,
-      );
+      const stopDevboxPreview = this.startDevboxPreviewWatcher(task.id);
 
       if (resolveStackRuntime(task, job) === "rust") {
         await runtime.terminalAllowFailure({
@@ -4635,25 +4635,31 @@ export class TaskService {
     res: ServerResponse,
   ): Promise<void> {
     const session = await this.resolveLiveSession(taskId);
-    if (!session?.guestHost || !session.devboxPreviewPort) {
+    if (!session?.guestHost) {
       res.writeHead(404, { "Content-Type": "text/plain" });
       res.end("No live devbox app on localhost yet");
       return;
     }
 
+    await this.refreshDevboxPreviewPort(session, taskId);
+    const previewPort = session.devboxPreviewPort ?? 3000;
+
     const proxyReq = http.request(
       {
         hostname: session.guestHost,
-        port: session.devboxPreviewPort,
+        port: previewPort,
         path: path.startsWith("/") ? path : `/${path}`,
-        method: req.method,
-        headers: {
-          ...req.headers,
-          host: `${session.guestHost}:${session.devboxPreviewPort}`,
-        },
+        method: req.method ?? "GET",
+        headers: devboxUpstreamRequestHeaders(
+          req.headers,
+          `${session.guestHost}:${previewPort}`,
+        ),
       },
       (proxyRes) => {
-        res.writeHead(proxyRes.statusCode ?? 502, proxyRes.headers);
+        res.writeHead(
+          proxyRes.statusCode ?? 502,
+          sanitizeProxyResponseHeaders(proxyRes.headers),
+        );
         proxyRes.pipe(res);
       },
     );
@@ -4675,11 +4681,46 @@ export class TaskService {
     if (!session) {
       return new Response("No devbox session", { status: 404 });
     }
+    await this.refreshDevboxPreviewPort(session, taskId);
     const port = session.devboxPreviewPort ?? 3000;
     const target = `http://127.0.0.1:${port}/`;
     return fetch(
       `${session.runtimeBaseUrl}/browser/screenshot?url=${encodeURIComponent(target)}`,
     );
+  }
+
+  /** Detect guest dev server port (Next, Vite, Rust, Django, etc.) for preview + screenshots. */
+  private async refreshDevboxPreviewPort(
+    session: ReviewSession,
+    taskId: string,
+  ): Promise<void> {
+    if (!session.guestHost) {
+      return;
+    }
+    try {
+      const result = await session.runtime.terminalAllowFailure({
+        taskId,
+        cwd: session.repoCwd,
+        command: buildDiscoverDevboxPortScript(),
+      });
+      const port = Number.parseInt(result.stdout.trim(), 10);
+      if (!Number.isFinite(port) || port <= 0) {
+        return;
+      }
+      if (session.devboxPreviewPort === port) {
+        return;
+      }
+      session.devboxPreviewPort = port;
+      const previewPath = `/api/v1/tasks/${encodeURIComponent(taskId)}/devbox-preview?path=/`;
+      this.patchTask(taskId, { previewUrl: previewPath });
+      this.emit("agent.log", taskId, "Devbox localhost preview available", {
+        port,
+        guestHost: session.guestHost,
+        desktop: true,
+      });
+    } catch {
+      // best-effort
+    }
   }
 
   private async resolveLiveSession(
@@ -4692,11 +4733,7 @@ export class TaskService {
     );
   }
 
-  private startDevboxPreviewWatcher(
-    runtime: RuntimeClient,
-    taskId: string,
-    repoCwd: string,
-  ): () => void {
+  private startDevboxPreviewWatcher(taskId: string): () => void {
     let stopped = false;
 
     const tick = async () => {
@@ -4708,35 +4745,15 @@ export class TaskService {
       if (!session?.guestHost) {
         return;
       }
-      try {
-        const result = await runtime.terminalAllowFailure({
-          taskId,
-          cwd: repoCwd,
-          command: buildDiscoverDevboxPortScript(),
-        });
-        const port = Number.parseInt(result.stdout.trim(), 10);
-        if (!Number.isFinite(port) || port <= 0) {
-          return;
-        }
-        session.devboxPreviewPort = port;
-        const previewPath = `/api/v1/tasks/${encodeURIComponent(taskId)}/devbox-preview?path=/`;
-        this.patchTask(taskId, { previewUrl: previewPath });
-        this.emit("agent.log", taskId, "Devbox localhost preview available", {
-          port,
-          guestHost: session.guestHost,
-          desktop: true,
-        });
-      } catch {
-        // best-effort
-      }
+      await this.refreshDevboxPreviewPort(session, taskId);
     };
 
     const interval = setInterval(() => {
       void tick();
-    }, 45_000);
+    }, 12_000);
     const initial = setTimeout(() => {
       void tick();
-    }, 20_000);
+    }, 6_000);
 
     return () => {
       stopped = true;

@@ -7,13 +7,18 @@ async function proxyScheduler(
 ): Promise<Response> {
   const url = `${schedulerBaseUrl()}${path}`;
 
+  const headers: Record<string, string> = {
+    ...(init?.headers as Record<string, string> | undefined),
+  };
+  const hasBody = init?.body !== undefined && init?.body !== null;
+  if (hasBody && !headers["Content-Type"] && !headers["content-type"]) {
+    headers["Content-Type"] = "application/json";
+  }
+
   try {
     return await fetch(url, {
       ...init,
-      headers: {
-        "Content-Type": "application/json",
-        ...(init?.headers ?? {}),
-      },
+      headers,
     });
   } catch (error) {
     const detail =
@@ -135,6 +140,12 @@ export async function fetchDevboxPreview(
 ): Promise<Response> {
   return proxyScheduler(
     `/api/v1/tasks/${encodeURIComponent(id)}/devbox-preview?path=${encodeURIComponent(path)}`,
+    {
+      headers: {
+        Accept: "*/*",
+        "Accept-Encoding": "identity",
+      },
+    },
   );
 }
 

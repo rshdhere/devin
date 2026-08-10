@@ -1,10 +1,24 @@
-/** Shell script: print first localhost port that responds with HTTP 2xx/3xx. */
+/** Shell script: print first localhost port with a responding dev server (HTTP 2xx/3xx). */
 export function buildDiscoverDevboxPortScript(): string {
   return [
     "set +e",
-    "for p in 3000 5173 8080 8000 4173; do",
-    "  code=$(curl -sf -o /dev/null -w '%{http_code}' --max-time 2 http://127.0.0.1:$p/ 2>/dev/null || true)",
-    '  if echo "$code" | grep -qE "^(200|30[0-9])"; then echo "$p"; exit 0; fi',
+    "COMMON='3000 5173 8080 8000 5000 4173 3001 4200 9000 1313 4321 24678'",
+    "LISTEN=''",
+    "if command -v ss >/dev/null 2>&1; then",
+    "  for p in $COMMON; do",
+    '    if ss -ltn 2>/dev/null | grep -qE ":$p[[:space:]]"; then LISTEN="$LISTEN $p"; fi',
+    "  done",
+    "fi",
+    "try_port() {",
+    "  p=$1",
+    "  code=$(curl -s -o /dev/null -w '%{http_code}' -H 'Accept-Encoding: identity' --max-time 3 \"http://127.0.0.1:$p/\" 2>/dev/null || true)",
+    '  echo "$code" | grep -qE "^(200|30[0-9])"',
+    "}",
+    "for p in $LISTEN $COMMON; do",
+    '  if try_port "$p"; then echo "$p"; exit 0; fi',
+    "done",
+    "for p in $LISTEN $COMMON; do",
+    '  if command -v ss >/dev/null 2>&1 && ss -ltn 2>/dev/null | grep -qE ":$p[[:space:]]"; then echo "$p"; exit 0; fi',
     "done",
     "exit 1",
   ].join("\n");
