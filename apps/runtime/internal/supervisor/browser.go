@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/rshdhere/devin/apps/runtime/internal/executil"
@@ -28,6 +29,80 @@ func (s *Server) handleBrowserOpen(w http.ResponseWriter, r *http.Request) {
 		"url":     req.URL,
 		"message": "open this URL in the embedded browser panel or a new tab",
 	})
+}
+
+func (s *Server) handleBrowserProxy(w http.ResponseWriter, r *http.Request) {
+	port := strings.TrimSpace(r.URL.Query().Get("port"))
+	if port == "" {
+		port = "3000"
+	}
+	path := r.URL.Query().Get("path")
+	if path == "" {
+		path = "/"
+	}
+	if !strings.HasPrefix(path, "/") {
+		path = "/" + path
+	}
+	target := fmt.Sprintf("http://127.0.0.1:%s%s", port, path)
+	tmpDir := workspace.WritableHome(s.workspace)
+	bodyPath := filepath.Join(tmpDir, "preview-body.tmp")
+	hdrPath := filepath.Join(tmpDir, "preview-hdr.tmp")
+	script := fmt.Sprintf(
+		"curl -sS -H 'Accept-Encoding: identity' -D %s -o %s --max-time 20 %s",
+		shellQuote(hdrPath),
+		shellQuote(bodyPath),
+		shellQuote(target),
+	)
+	result, err := executil.RunGuest(
+		r.Context(),
+		s.workspace,
+		script,
+		workspace.DevinProcessEnv(s.workspace),
+		nil,
+	)
+	if err != nil || result.ExitCode != 0 {
+		msg := executil.CombinedOutput(result)
+		if msg == "" {
+			msg = "localhost dev server not reachable from sandbox"
+		}
+		writeError(w, http.StatusBadGateway, msg)
+		return
+	}
+	hdrBytes, err := os.ReadFile(hdrPath)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	bodyBytes, err := os.ReadFile(bodyPath)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	status := http.StatusOK
+	contentType := "text/html; charset=utf-8"
+	for _, line := range strings.Split(string(hdrBytes), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		if strings.HasPrefix(line, "HTTP/") {
+			parts := strings.Fields(line)
+			if len(parts) >= 2 {
+				if code, parseErr := strconv.Atoi(parts[1]); parseErr == nil && code >= 100 {
+					status = code
+				}
+			}
+			continue
+		}
+		lower := strings.ToLower(line)
+		if strings.HasPrefix(lower, "content-type:") {
+			contentType = strings.TrimSpace(line[len("content-type:"):])
+		}
+	}
+	w.Header().Set("Content-Type", contentType)
+	w.Header().Set("Cache-Control", "no-store")
+	w.WriteHeader(status)
+	_, _ = w.Write(bodyBytes)
 }
 
 func (s *Server) handleDesktopScreenshot(w http.ResponseWriter, r *http.Request) {

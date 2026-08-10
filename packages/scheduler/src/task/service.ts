@@ -14,11 +14,7 @@ import {
   buildDiscoverDevboxPortScript,
   buildPruneWorkspaceDiskScript,
 } from "../devbox/preview.js";
-import {
-  devboxUpstreamRequestHeaders,
-  sanitizeProxyResponseHeaders,
-} from "../devbox/proxy-headers.js";
-import http from "node:http";
+import { sanitizeProxyResponseHeaders } from "../devbox/proxy-headers.js";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import {
   collectInfraDiagnostics,
@@ -108,6 +104,8 @@ type ReviewSession = {
   createdNewRepo: boolean;
   guestHost?: string;
   devboxPreviewPort?: number;
+  /** Last successful headless capture while the devbox session is alive. */
+  lastDesktopScreenshot?: Buffer;
 };
 
 export class TaskService {
@@ -4635,45 +4633,73 @@ export class TaskService {
     res: ServerResponse,
   ): Promise<void> {
     const session = await this.resolveLiveSession(taskId);
-    if (!session?.guestHost) {
+    if (!session) {
       res.writeHead(404, { "Content-Type": "text/plain" });
-      res.end("No live devbox app on localhost yet");
+      res.end("No live devbox session");
       return;
     }
 
     await this.refreshDevboxPreviewPort(session, taskId);
     const previewPort = session.devboxPreviewPort ?? 3000;
+    const proxyPath = path.startsWith("/") ? path : `/${path}`;
+    const upstreamUrl = `${session.runtimeBaseUrl}/browser/proxy?port=${previewPort}&path=${encodeURIComponent(proxyPath)}`;
 
-    const proxyReq = http.request(
-      {
-        hostname: session.guestHost,
-        port: previewPort,
-        path: path.startsWith("/") ? path : `/${path}`,
-        method: req.method ?? "GET",
-        headers: devboxUpstreamRequestHeaders(
-          req.headers,
-          `${session.guestHost}:${previewPort}`,
-        ),
-      },
-      (proxyRes) => {
-        res.writeHead(
-          proxyRes.statusCode ?? 502,
-          sanitizeProxyResponseHeaders(proxyRes.headers),
+    try {
+      const upstream = await fetch(upstreamUrl, {
+        method: req.method === "HEAD" ? "HEAD" : "GET",
+        headers: {
+          Accept: "*/*",
+          "Accept-Encoding": "identity",
+        },
+      });
+      if (!upstream.ok) {
+        const detail = await upstream.text();
+        if (!res.headersSent) {
+          res.writeHead(upstream.status, { "Content-Type": "text/plain" });
+        }
+        res.end(
+          detail.trim() ||
+            `Devbox preview unavailable: HTTP ${upstream.status}`,
         );
-        proxyRes.pipe(res);
-      },
-    );
-
-    proxyReq.on("error", (error) => {
+        return;
+      }
+      const headerRecord: Record<string, string> = {};
+      upstream.headers.forEach((value, key) => {
+        headerRecord[key] = value;
+      });
+      if (!res.headersSent) {
+        res.writeHead(
+          upstream.status,
+          sanitizeProxyResponseHeaders(headerRecord),
+        );
+      }
+      if (req.method === "HEAD") {
+        res.end();
+        return;
+      }
+      if (!upstream.body) {
+        res.end();
+        return;
+      }
+      const reader = upstream.body.getReader();
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) {
+          break;
+        }
+        if (value) {
+          res.write(value);
+        }
+      }
+      res.end();
+    } catch (error) {
       if (!res.headersSent) {
         res.writeHead(502, { "Content-Type": "text/plain" });
       }
       res.end(
         `Devbox preview unavailable: ${error instanceof Error ? error.message : "proxy error"}`,
       );
-    });
-
-    req.pipe(proxyReq);
+    }
   }
 
   async fetchDesktopScreenshot(taskId: string): Promise<Response> {
@@ -4681,22 +4707,50 @@ export class TaskService {
     if (!session) {
       return new Response("No devbox session", { status: 404 });
     }
+    const buffer = await this.captureDesktopScreenshot(session, taskId);
+    if (!buffer) {
+      return new Response("Desktop snapshot not available yet", {
+        status: 503,
+      });
+    }
+    return new Response(buffer, {
+      status: 200,
+      headers: {
+        "Content-Type": "image/png",
+        "Cache-Control": "no-store",
+      },
+    });
+  }
+
+  private async captureDesktopScreenshot(
+    session: ReviewSession,
+    taskId: string,
+  ): Promise<Buffer | undefined> {
     await this.refreshDevboxPreviewPort(session, taskId);
     const port = session.devboxPreviewPort ?? 3000;
     const target = `http://127.0.0.1:${port}/`;
-    return fetch(
-      `${session.runtimeBaseUrl}/browser/screenshot?url=${encodeURIComponent(target)}`,
-    );
+    try {
+      const response = await fetch(
+        `${session.runtimeBaseUrl}/browser/screenshot?url=${encodeURIComponent(target)}`,
+        { signal: AbortSignal.timeout(90_000) },
+      );
+      if (response.ok) {
+        const buffer = Buffer.from(await response.arrayBuffer());
+        if (buffer.length > 128) {
+          session.lastDesktopScreenshot = buffer;
+          return buffer;
+        }
+      }
+    } catch {
+      // fall back to last good capture
+    }
+    return session.lastDesktopScreenshot;
   }
 
-  /** Detect guest dev server port (Next, Vite, Rust, Django, etc.) for preview + screenshots. */
   private async refreshDevboxPreviewPort(
     session: ReviewSession,
     taskId: string,
   ): Promise<void> {
-    if (!session.guestHost) {
-      return;
-    }
     try {
       const result = await session.runtime.terminalAllowFailure({
         taskId,
@@ -4707,17 +4761,18 @@ export class TaskService {
       if (!Number.isFinite(port) || port <= 0) {
         return;
       }
-      if (session.devboxPreviewPort === port) {
-        return;
-      }
+      const portChanged = session.devboxPreviewPort !== port;
       session.devboxPreviewPort = port;
-      const previewPath = `/api/v1/tasks/${encodeURIComponent(taskId)}/devbox-preview?path=/`;
-      this.patchTask(taskId, { previewUrl: previewPath });
-      this.emit("agent.log", taskId, "Devbox localhost preview available", {
-        port,
-        guestHost: session.guestHost,
-        desktop: true,
-      });
+      if (portChanged) {
+        const previewPath = `/api/v1/tasks/${encodeURIComponent(taskId)}/devbox-preview?path=/`;
+        this.patchTask(taskId, { previewUrl: previewPath });
+        this.emit("agent.log", taskId, "Devbox localhost preview available", {
+          port,
+          guestHost: session.guestHost,
+          desktop: true,
+        });
+        void this.captureDesktopScreenshot(session, taskId);
+      }
     } catch {
       // best-effort
     }
@@ -4742,10 +4797,11 @@ export class TaskService {
       }
       const session =
         this.activeSessions.get(taskId) ?? this.reviewSessions.get(taskId);
-      if (!session?.guestHost) {
+      if (!session) {
         return;
       }
       await this.refreshDevboxPreviewPort(session, taskId);
+      void this.captureDesktopScreenshot(session, taskId);
     };
 
     const interval = setInterval(() => {

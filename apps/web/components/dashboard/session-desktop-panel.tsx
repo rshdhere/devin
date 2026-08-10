@@ -1,7 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
-import { ExternalLink, Loader2, Monitor, RefreshCw } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Loader2, Monitor, RefreshCw } from "lucide-react";
 import type { Task } from "@devin/types";
 import { tasksApiUrl } from "@/lib/api/http";
 import { canUseDevbox } from "@/lib/sessions/devbox";
@@ -15,9 +15,6 @@ export function SessionDesktopPanel({
   layout?: "panel" | "embed";
 }) {
   const canUse = canUseDevbox(task);
-  const previewSrc = tasksApiUrl(
-    `/${encodeURIComponent(task.id)}/devbox-preview?path=/`,
-  );
   const screenshotSrc = tasksApiUrl(
     `/${encodeURIComponent(task.id)}/desktop-screenshot`,
   );
@@ -26,8 +23,8 @@ export function SessionDesktopPanel({
   const [shotError, setShotError] = useState(false);
   const [shotLoading, setShotLoading] = useState(false);
   const [shotUrl, setShotUrl] = useState<string | null>(null);
-  const [previewLive, setPreviewLive] = useState(false);
-  const [previewKey, setPreviewKey] = useState(0);
+  const shotUrlRef = useRef<string | null>(null);
+  shotUrlRef.current = shotUrl;
 
   const refreshScreenshot = useCallback(() => {
     setShotError(false);
@@ -62,7 +59,7 @@ export function SessionDesktopPanel({
         setShotError(false);
       })
       .catch(() => {
-        if (!cancelled) {
+        if (!cancelled && !shotUrlRef.current) {
           setShotError(true);
         }
       })
@@ -82,9 +79,8 @@ export function SessionDesktopPanel({
     task.status === "runtime_ready" ||
     task.status === "sandbox_starting" ||
     task.status === "drafting" ||
-    task.status === "scheduling";
-
-  const previewFrameSrc = `${previewSrc}&r=${previewKey}`;
+    task.status === "scheduling" ||
+    task.status === "awaiting_review";
 
   useEffect(() => {
     if (!canUse || task.sessionSleeping) {
@@ -93,12 +89,8 @@ export function SessionDesktopPanel({
     const interval = setInterval(
       () => {
         refreshScreenshot();
-        if (isAgentActive) {
-          setPreviewLive(false);
-          setPreviewKey((k) => k + 1);
-        }
       },
-      isAgentActive ? 10_000 : 30_000,
+      isAgentActive ? 8_000 : 20_000,
     );
     return () => clearInterval(interval);
   }, [canUse, isAgentActive, refreshScreenshot, task.sessionSleeping]);
@@ -122,81 +114,57 @@ export function SessionDesktopPanel({
     );
   }
 
+  const isEmbed = layout === "embed";
+
   return (
     <div
       className={cn(
         "flex min-h-0 flex-col",
-        layout === "panel" ? "h-full" : "min-h-[320px]",
+        isEmbed ? "min-h-[200px]" : "h-full",
       )}
     >
       <div className="flex shrink-0 items-center justify-between gap-2 border-b border-white/[0.06] px-3 py-2">
         <span className="text-[11px] text-zinc-500">
-          Localhost in the sandbox (proxied from the devbox)
+          Sandbox snapshot (headless capture from localhost in the devbox)
         </span>
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={refreshScreenshot}
-            className="inline-flex cursor-pointer items-center gap-1 rounded-md px-2 py-1 text-[11px] text-zinc-400 hover:bg-white/[0.06] hover:text-zinc-200"
-          >
-            <RefreshCw className="size-3.5" />
-            Refresh
-          </button>
-          <a
-            href={previewSrc}
-            target="_blank"
-            rel="noreferrer"
-            className="inline-flex items-center gap-1 text-[11px] text-indigo-300 hover:text-indigo-200"
-          >
-            Open
-            <ExternalLink className="size-3" />
-          </a>
-        </div>
+        <button
+          type="button"
+          onClick={refreshScreenshot}
+          className="inline-flex cursor-pointer items-center gap-1 rounded-md px-2 py-1 text-[11px] text-zinc-400 hover:bg-white/[0.06] hover:text-zinc-200"
+        >
+          <RefreshCw className="size-3.5" />
+          Refresh
+        </button>
       </div>
 
-      <div className="grid min-h-0 flex-1 grid-cols-1 gap-0 lg:grid-cols-2">
-        <div className="relative min-h-[200px] border-b border-white/[0.06] bg-[#0a0a0a] lg:border-r lg:border-b-0">
-          {!previewLive && !task.sessionSleeping ? (
-            <div className="absolute inset-0 z-10 flex items-center justify-center bg-[#0a0a0a]/80">
-              <Loader2 className="size-6 animate-spin text-zinc-600" />
-            </div>
-          ) : null}
-          <iframe
-            title="Devbox localhost preview"
-            src={previewFrameSrc}
-            className="h-full min-h-[240px] w-full bg-white"
-            sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
-            onLoad={() => {
-              setPreviewLive(true);
-            }}
-          />
-        </div>
-
-        <div className="flex min-h-[200px] flex-col bg-[#111]">
-          <p className="shrink-0 px-3 py-2 text-[10px] font-medium tracking-wide text-zinc-600 uppercase">
-            Desktop snapshot
+      <div
+        className={cn(
+          "relative flex min-h-0 flex-1 items-center justify-center bg-[#0a0a0a]",
+          isEmbed ? "min-h-[180px] p-2" : "p-4",
+        )}
+      >
+        {shotLoading && !shotUrl ? (
+          <Loader2 className="size-6 animate-spin text-zinc-600" />
+        ) : null}
+        {shotError && !shotUrl ? (
+          <p className="max-w-sm text-center text-[12px] text-zinc-500">
+            Waiting for the agent to run a dev server in the sandbox (for
+            example <code className="text-zinc-300">npm run dev</code> or{" "}
+            <code className="text-zinc-300">go run .</code>). Snapshots refresh
+            automatically while the session is live.
           </p>
-          <div className="relative flex min-h-0 flex-1 items-center justify-center p-3">
-            {shotLoading && !shotUrl ? (
-              <Loader2 className="size-6 animate-spin text-zinc-600" />
-            ) : null}
-            {shotError && !shotUrl ? (
-              <p className="text-center text-[12px] text-zinc-500">
-                Desktop snapshot will appear when the agent starts a local dev
-                server (Next, Vite, Rust, Django, etc.). We probe common ports
-                and capture the page automatically.
-              </p>
-            ) : null}
-            {shotUrl ? (
-              /* eslint-disable-next-line @next/next/no-img-element */
-              <img
-                src={shotUrl}
-                alt="Devbox desktop snapshot"
-                className="max-h-full w-full rounded-lg border border-white/[0.08] object-contain object-top shadow-lg"
-              />
-            ) : null}
-          </div>
-        </div>
+        ) : null}
+        {shotUrl ? (
+          /* eslint-disable-next-line @next/next/no-img-element */
+          <img
+            src={shotUrl}
+            alt="Sandbox app snapshot"
+            className={cn(
+              "rounded-lg border border-white/[0.08] object-contain object-top shadow-lg",
+              isEmbed ? "max-h-[220px] w-full" : "max-h-full w-full max-w-5xl",
+            )}
+          />
+        ) : null}
       </div>
     </div>
   );
