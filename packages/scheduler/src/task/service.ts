@@ -1435,15 +1435,6 @@ export class TaskService {
 
       const sessionBeforeComplete =
         this.activeSessions.get(task.id) ?? this.reviewSessions.get(task.id);
-      if (sessionBeforeComplete) {
-        // Never block task completion on Playwright — a hung capture kept
-        // sessions "Working…" for 30+ minutes after GitHub already had commits.
-        void this.captureDesktopScreenshotWithDevServer(
-          sessionBeforeComplete,
-          task.id,
-          { allowSpin: true },
-        );
-      }
 
       this.updateTask(task.id, "completed", completionMessage);
       this.emit("task.completed", task.id, completionMessage, {
@@ -1470,6 +1461,9 @@ export class TaskService {
           githubToken,
           createdNewRepo,
           guestHost,
+          // Preserve preview state so post-complete Desktop captures work.
+          devboxPreviewPort: sessionBeforeComplete?.devboxPreviewPort,
+          lastDesktopScreenshot: sessionBeforeComplete?.lastDesktopScreenshot,
         });
         void this.persistSession(
           task.id,
@@ -1479,6 +1473,35 @@ export class TaskService {
         void this.taskStore.touchSession(task.id);
         task.sessionActive = true;
         retainSandboxForPreview = true;
+
+        // Devin-style: after Done, keep a localhost desktop snapshot. Bound the
+        // wait so a hung Playwright never blocks the control plane forever.
+        const shotSession = this.activeSessions.get(task.id)!;
+        await Promise.race([
+          this.captureDesktopScreenshotWithDevServer(shotSession, task.id, {
+            allowSpin: true,
+            keepServer: true,
+            bypassSpinCooldown: true,
+          }),
+          new Promise<undefined>((resolve) =>
+            setTimeout(() => resolve(undefined), 45_000),
+          ),
+        ]);
+      } else if (sessionBeforeComplete) {
+        await Promise.race([
+          this.captureDesktopScreenshotWithDevServer(
+            sessionBeforeComplete,
+            task.id,
+            {
+              allowSpin: true,
+              keepServer: true,
+              bypassSpinCooldown: true,
+            },
+          ),
+          new Promise<undefined>((resolve) =>
+            setTimeout(() => resolve(undefined), 45_000),
+          ),
+        ]);
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : "Task failed";
@@ -5008,7 +5031,11 @@ export class TaskService {
     const buffer = await this.captureDesktopScreenshotWithDevServer(
       session,
       taskId,
-      { allowSpin: Boolean(opts?.fresh) },
+      {
+        allowSpin: Boolean(opts?.fresh),
+        keepServer: true,
+        bypassSpinCooldown: Boolean(opts?.fresh),
+      },
     );
     if (!buffer) {
       const disk = await this.loadCachedDesktopSnapshot(taskId);
@@ -5069,7 +5096,11 @@ export class TaskService {
   private async captureDesktopScreenshotWithDevServer(
     session: ReviewSession,
     taskId: string,
-    opts?: { allowSpin?: boolean },
+    opts?: {
+      allowSpin?: boolean;
+      keepServer?: boolean;
+      bypassSpinCooldown?: boolean;
+    },
   ): Promise<Buffer | undefined> {
     const existing = this.desktopCaptureInFlight.get(taskId);
     if (existing) {
@@ -5080,6 +5111,8 @@ export class TaskService {
       session,
       taskId,
       opts?.allowSpin !== false,
+      opts?.keepServer === true,
+      opts?.bypassSpinCooldown === true,
     ).finally(() => {
       if (this.desktopCaptureInFlight.get(taskId) === promise) {
         this.desktopCaptureInFlight.delete(taskId);
@@ -5093,6 +5126,8 @@ export class TaskService {
     session: ReviewSession,
     taskId: string,
     allowSpin: boolean,
+    keepServer: boolean,
+    bypassSpinCooldown: boolean,
   ): Promise<Buffer | undefined> {
     let buffer = await this.captureDesktopScreenshot(session, taskId);
     if (buffer) {
@@ -5111,17 +5146,22 @@ export class TaskService {
 
     const now = Date.now();
     const lastSpin = this.lastSnapshotSpinAt.get(taskId) ?? 0;
-    if (now - lastSpin < this.snapshotSpinCooldownMs) {
+    if (!bypassSpinCooldown && now - lastSpin < this.snapshotSpinCooldownMs) {
       return session.lastDesktopScreenshot;
     }
     this.lastSnapshotSpinAt.set(taskId, now);
 
+    let spunUp = false;
     try {
+      this.emit("agent.log", taskId, "Starting app for desktop snapshot", {
+        desktop: true,
+      });
       await session.runtime.terminalAllowFailure({
         taskId,
         cwd: session.repoCwd,
         command: buildStartDevServerForSnapshotScript(),
       });
+      spunUp = true;
       const wait = await session.runtime.terminalAllowFailure({
         taskId,
         cwd: session.repoCwd,
@@ -5131,16 +5171,33 @@ export class TaskService {
       if (Number.isFinite(port) && port > 0) {
         session.devboxPreviewPort = port;
         void this.taskStore.setPreviewPort(taskId, port);
+        const previewPath = `/api/v1/tasks/${encodeURIComponent(taskId)}/devbox-preview?path=/`;
+        this.patchTask(taskId, { previewUrl: previewPath });
+      } else {
+        this.emit(
+          "agent.log",
+          taskId,
+          "Desktop snapshot: app did not become ready on a known port",
+          { desktop: true },
+        );
       }
       buffer = await this.captureDesktopScreenshot(session, taskId);
-    } catch {
-      // best-effort
-    } finally {
-      await session.runtime.terminalAllowFailure({
-        taskId,
-        cwd: session.repoCwd,
-        command: buildStopDevServerForSnapshotScript(),
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "snapshot spin failed";
+      this.emit("agent.log", taskId, `Desktop snapshot failed: ${message}`, {
+        desktop: true,
       });
+    } finally {
+      // Keep the server up after completion so Desktop / Refresh keep working
+      // (Devin-style computer-use preview). Only tear down mid-run spins.
+      if (spunUp && !keepServer) {
+        await session.runtime.terminalAllowFailure({
+          taskId,
+          cwd: session.repoCwd,
+          command: buildStopDevServerForSnapshotScript(),
+        });
+      }
     }
 
     return buffer;
@@ -5152,9 +5209,17 @@ export class TaskService {
   ): Promise<Buffer | undefined> {
     await this.refreshDevboxPreviewPort(session, taskId);
 
-    // Only hit ports we know respond — spraying every common port with
-    // Playwright (90s each) is what froze sessions after the agent finished.
-    const ports = session.devboxPreviewPort ? [session.devboxPreviewPort] : [];
+    // Only hit a known-live preview port. An empty list used to skip capture
+    // entirely; spraying every common port with Playwright hung completions.
+    // When discovery finds nothing, return quickly so allowSpin can start the app.
+    if (!session.devboxPreviewPort) {
+      return (
+        session.lastDesktopScreenshot ??
+        (await this.fetchRuntimePersistedScreenshot(taskId))
+      );
+    }
+
+    const ports = [session.devboxPreviewPort];
 
     let buffer: Buffer | undefined;
     for (const port of ports) {

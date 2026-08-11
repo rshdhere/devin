@@ -29,6 +29,13 @@ describe("buildStartDevServerForSnapshotScript", () => {
     expect(script).toContain("npm start");
   });
 
+  it("falls back to tsx/node entrypoints for socket.io-style apps", () => {
+    const script = buildStartDevServerForSnapshotScript();
+    expect(script).toContain("tsx src/index.ts");
+    expect(script).toContain("node dist/index.js");
+    expect(script).toContain("PORT=3000");
+  });
+
   it("starts FastAPI via uvicorn when main.py exists", () => {
     const script = buildStartDevServerForSnapshotScript();
     expect(script).toContain("uvicorn main:app");

@@ -43,9 +43,9 @@ const browser = await chromium.launch({
   executablePath,
   args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
 });
-const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
+const page = await browser.newPage({ viewport: { width: 1024, height: 768 } });
 await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 15000 });
-await page.waitForTimeout(800);
+await page.waitForTimeout(1200);
 await page.screenshot({ path: out, fullPage: false, type: 'png' });
 await browser.close();
 `,
@@ -76,7 +76,7 @@ func (s *Server) runChromiumCLIScreenshot(
 ) (*executil.Result, error) {
 	chrome := chromiumExecutable()
 	script := fmt.Sprintf(
-		"set -e; %s --headless --disable-gpu --no-sandbox --window-size=1280,720 --hide-scrollbars --run-all-compositor-stages-before-draw --virtual-time-budget=8000 --screenshot=%s %s",
+		"set -e; %s --headless --disable-gpu --no-sandbox --window-size=1024,768 --hide-scrollbars --run-all-compositor-stages-before-draw --virtual-time-budget=10000 --screenshot=%s %s",
 		shellQuote(chrome),
 		shellQuote(outPath),
 		shellQuote(targetURL),

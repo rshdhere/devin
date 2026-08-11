@@ -65,7 +65,9 @@ export function SessionDesktopPanel({
     const freshQuery = forceFresh ? "&fresh=1" : "";
     const url = `${screenshotSrc}?t=${shotKey}${freshQuery}`;
     const controller = new AbortController();
-    const timeout = window.setTimeout(() => controller.abort(), 25_000);
+    // Fresh captures may spin npm/tsx + Chromium; allow enough time.
+    const timeoutMs = forceFresh ? 70_000 : 25_000;
+    const timeout = window.setTimeout(() => controller.abort(), timeoutMs);
     fetch(url, { credentials: "include", signal: controller.signal })
       .then(async (response) => {
         if (!response.ok) {
@@ -180,10 +182,10 @@ export function SessionDesktopPanel({
         {shotError && !shotUrl ? (
           <p className="max-w-sm text-center text-[12px] text-zinc-500">
             {isAgentActive
-              ? "Capturing sandbox preview… we start npm/uvicorn briefly after build when needed."
+              ? "Capturing desktop preview… starting the app in the sandbox when needed."
               : task.sessionSleeping
                 ? "Waking devbox to load saved snapshot — try Refresh."
-                : "No snapshot yet — click Refresh to capture localhost via Playwright."}
+                : "No desktop snapshot yet — click Refresh to start the app and capture localhost (1024×768)."}
           </p>
         ) : null}
         {shotUrl ? (
