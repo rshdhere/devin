@@ -50,7 +50,7 @@ import {
   greenfieldCommitPlateauReason,
   GREENFIELD_PLATEAU_MIN_COMMITS,
   GREENFIELD_PLATEAU_MS,
-  isAgentTimeoutMessage,
+  isRecoverableAgentInterruption,
 } from "../greenfield/git-sync.js";
 import { greenfieldShellScaffoldFiles } from "../greenfield/shell-scaffold.js";
 import { ensureExecutionHostRegistered } from "../host/register-execution-host.js";
@@ -1233,9 +1233,16 @@ export class TaskService {
       } catch (error) {
         const message =
           error instanceof Error ? error.message : "Agent run failed";
-        if (isAgentTimeoutMessage(message)) {
+        if (isRecoverableAgentInterruption(message)) {
           this.emit("agent.failed", task.id, message, {
-            timeout: true,
+            timeout:
+              /timed out|did not finish within|idle-stalled|commit-plateau/i.test(
+                message,
+              ),
+            resourceExhausted:
+              /resource_exhausted|RetriableError|rate.?limit|quota/i.test(
+                message,
+              ),
             maxWaitMs: resolveAgentMaxWaitMs(),
           });
           if (
@@ -1259,7 +1266,7 @@ export class TaskService {
                 status: "completed",
                 taskId: task.id,
                 message:
-                  "Agent timed out; control plane finalized greenfield commits",
+                  "Agent interrupted; control plane finalized greenfield commits",
                 agent: task.agent,
               };
             } else {
@@ -1281,7 +1288,7 @@ export class TaskService {
       if (runResult.status === "failed") {
         const failMessage = runResult.message || "Agent run failed";
         if (
-          isAgentTimeoutMessage(failMessage) &&
+          isRecoverableAgentInterruption(failMessage) &&
           createdNewRepo &&
           runtimeAgentTask &&
           runtime &&
@@ -1289,8 +1296,15 @@ export class TaskService {
           cloneUrl
         ) {
           this.emit("agent.failed", task.id, failMessage, {
-            timeout: true,
+            timeout:
+              /timed out|did not finish within|idle-stalled|commit-plateau/i.test(
+                failMessage,
+              ),
             idleStalled: /idle-stalled/i.test(failMessage),
+            resourceExhausted:
+              /resource_exhausted|RetriableError|rate.?limit|quota/i.test(
+                failMessage,
+              ),
             maxWaitMs: resolveAgentMaxWaitMs(),
           });
           const recovered = await this.recoverGreenfieldAfterAgentInterruption(
@@ -1306,7 +1320,7 @@ export class TaskService {
               status: "completed",
               taskId: task.id,
               message:
-                "Agent stalled; control plane finalized greenfield commits",
+                "Agent interrupted; control plane finalized greenfield commits",
               agent: task.agent,
             };
           } else {
@@ -2635,9 +2649,9 @@ export class TaskService {
   }
 
   /**
-   * When a runtime agent times out or idle-stalls (hung HEREDOC/git), commit
-   * dirty work and push to main with fetch + force-with-lease so divergent
-   * hydrate/checkpoint history still lands.
+   * When a runtime agent is interrupted (timeout, idle-stall, Cursor
+   * resource_exhausted / RetriableError), commit dirty work and push to main
+   * with fetch + force-with-lease so divergent hydrate/checkpoint history still lands.
    */
   private async recoverGreenfieldAfterAgentInterruption(
     runtime: RuntimeClient,

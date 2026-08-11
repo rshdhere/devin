@@ -4,6 +4,7 @@ import {
   buildPushGreenfieldMainScript,
   greenfieldCommitPlateauReason,
   isAgentTimeoutMessage,
+  isRecoverableAgentInterruption,
 } from "./git-sync.js";
 
 describe("greenfield-git-sync", () => {
@@ -27,6 +28,31 @@ describe("greenfield-git-sync", () => {
     ).toBe(true);
     expect(isAgentTimeoutMessage(greenfieldCommitPlateauReason(3))).toBe(true);
     expect(isAgentTimeoutMessage("context canceled")).toBe(true);
+  });
+
+  test("isRecoverableAgentInterruption covers Cursor resource_exhausted", () => {
+    expect(
+      isRecoverableAgentInterruption(
+        "RetriableError: [resource_exhausted] Error",
+      ),
+    ).toBe(true);
+    expect(
+      isRecoverableAgentInterruption(
+        'RetriableError: [resource_exhausted] Error\n{"type":"error"}',
+      ),
+    ).toBe(true);
+    expect(isRecoverableAgentInterruption("rate limit exceeded")).toBe(true);
+    expect(isRecoverableAgentInterruption("quota exceeded for model")).toBe(
+      true,
+    );
+    expect(
+      isRecoverableAgentInterruption("cursor agent exited with code 1"),
+    ).toBe(false);
+    expect(
+      isRecoverableAgentInterruption(
+        "Agent run for task abc did not finish within 1800s",
+      ),
+    ).toBe(true);
   });
 
   test("buildAlignHydratedRepoScript hard-resets by default", () => {

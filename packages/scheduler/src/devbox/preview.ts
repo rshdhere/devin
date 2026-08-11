@@ -74,6 +74,11 @@ export function buildStartDevServerForSnapshotScript(): string {
     'if [ -z "$CMD" ] && [ -f Cargo.toml ]; then',
     '  if command -v cargo >/dev/null 2>&1; then CMD="cargo run --release"; fi',
     "fi",
+    // Prefer Go when go.mod/main.go exist — greenfield agents often leave a Node
+    // package.json scaffold whose npm start would otherwise win and blank Desktop.
+    "if [ -f go.mod ] || [ -f main.go ]; then",
+    '  if command -v go >/dev/null 2>&1; then CMD="go run ."; fi',
+    "fi",
     'if [ -z "$CMD" ]; then echo "no snapshot start command" >>"$LOG"; exit 0; fi',
     "export HOST=127.0.0.1 PORT=3000 HOSTNAME=127.0.0.1",
     'nohup bash -lc "$CMD" >>"$LOG" 2>&1 &',

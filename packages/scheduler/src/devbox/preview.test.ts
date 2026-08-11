@@ -41,6 +41,13 @@ describe("buildStartDevServerForSnapshotScript", () => {
     expect(script).toContain("uvicorn main:app");
     expect(script).toContain("uvicorn app:app");
   });
+
+  it("starts Go apps via go run when go.mod or main.go exists", () => {
+    const script = buildStartDevServerForSnapshotScript();
+    expect(script).toContain("go.mod");
+    expect(script).toContain("main.go");
+    expect(script).toContain("go run .");
+  });
 });
 
 describe("buildWaitForDevServerScript", () => {

@@ -357,6 +357,13 @@ function DiagnosticsPanel({
               remove stale sandboxes, and retry. This is not a web or API bug.
             </p>
           ) : null}
+          {/resource_exhausted/i.test(task.message) ? (
+            <p className="text-[12px] leading-relaxed text-amber-200/90">
+              The Cursor cloud agent ran out of temporary capacity mid-run. The
+              control plane finalizes commits already on disk when possible;
+              retry the session if the product is incomplete.
+            </p>
+          ) : null}
           {/agent credentials are not configured/i.test(task.message) ? (
             <p className="text-[12px] leading-relaxed text-amber-200/90">
               Agent credentials are managed on the execution host, not in the

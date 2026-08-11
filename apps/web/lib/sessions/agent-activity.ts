@@ -28,11 +28,18 @@ export function formatAgentFailureMessage(
     if (/database or disk is full/i.test(core)) {
       return "Cursor agent failed: sandbox disk or agent database is full on the execution host. Free disk space (or remove old sandboxes), then retry the task.";
     }
+    if (/resource_exhausted/i.test(core) || /resource_exhausted/i.test(text)) {
+      return "Cursor agent hit a temporary resource limit (resource_exhausted). Work already on disk is finalized when possible — retry if the session failed.";
+    }
     return `Cursor agent error: ${core.slice(0, 240)}`;
   }
 
   if (/database or disk is full/i.test(text)) {
     return "Sandbox disk or agent database is full on the execution host. Free disk space and retry.";
+  }
+
+  if (/resource_exhausted/i.test(text)) {
+    return "Cursor agent hit a temporary resource limit (resource_exhausted). Work already on disk is finalized when possible — retry if the session failed.";
   }
 
   const assistantTexts = [
@@ -58,6 +65,8 @@ export function isAgentStreamNoise(message: string | undefined): boolean {
   if (lower.startsWith("assistant_delta:")) return true;
   if (/^cursor agent working — no output for \d+s$/i.test(text)) return true;
   if (lower === "connection: reconnected") return true;
+  if (lower === "connection: reconnecting") return true;
+  if (lower === "retrying cursor agent session") return true;
   if (/^hook[a-z]/i.test(text)) return true;
   if (text.includes("hookAdditionalContexts")) return true;
   return false;

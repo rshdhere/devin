@@ -13,6 +13,25 @@ export function isAgentTimeoutMessage(message: string): boolean {
   );
 }
 
+/**
+ * Agent interruptions where the control plane should finalize git work already
+ * on disk instead of hard-failing and tearing down the sandbox.
+ *
+ * Covers scheduler timeouts / idle stalls plus Cursor cloud quota errors
+ * (`RetriableError: [resource_exhausted]`) that abort mid-run after reconnects.
+ */
+export function isRecoverableAgentInterruption(message: string): boolean {
+  if (isAgentTimeoutMessage(message)) {
+    return true;
+  }
+  return (
+    /resource_exhausted/i.test(message) ||
+    /RetriableError/i.test(message) ||
+    /rate.?limit(?:ed|ing)?/i.test(message) ||
+    /quota.?exceeded/i.test(message)
+  );
+}
+
 /** Soft-complete greenfield once enough commits land and HEAD stops moving. */
 export const GREENFIELD_PLATEAU_MIN_COMMITS = 3;
 export const GREENFIELD_PLATEAU_MS = 3 * 60 * 1000;
