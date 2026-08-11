@@ -199,9 +199,32 @@ export class RuntimeClient {
     return response.json() as Promise<RunResponse>;
   }
 
+  async cancelRun(taskId: string, reason?: string): Promise<RunResponse> {
+    const response = await this.fetchRuntime("/run/cancel", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        taskId,
+        reason: reason?.trim() || "agent run cancelled by control plane",
+      }),
+    });
+    if (!response.ok) {
+      const errorBody = await response.text();
+      throw new Error(
+        errorBody || `Runtime cancel failed with status ${response.status}`,
+      );
+    }
+    return response.json() as Promise<RunResponse>;
+  }
+
   async runAndWait(
     body: RunRequest,
-    opts?: { pollIntervalMs?: number; maxWaitMs?: number },
+    opts?: {
+      pollIntervalMs?: number;
+      maxWaitMs?: number;
+      /** When this returns a string, stop waiting and surface it as a failed run. */
+      getAbortReason?: () => string | undefined;
+    },
   ): Promise<RunResponse> {
     const pollIntervalMs = opts?.pollIntervalMs ?? 3_000;
     const maxWaitMs = opts?.maxWaitMs ?? 30 * 60 * 1000;
@@ -212,6 +235,15 @@ export class RuntimeClient {
     }
 
     while (Date.now() < deadline) {
+      const abortReason = opts?.getAbortReason?.()?.trim();
+      if (abortReason) {
+        return {
+          taskId: body.taskId,
+          status: "failed",
+          message: abortReason,
+          agent: body.agent,
+        };
+      }
       await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
       const status = await this.runStatus(body.taskId);
       if (status.status === "completed" || status.status === "failed") {

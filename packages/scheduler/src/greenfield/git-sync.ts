@@ -6,8 +6,21 @@ export function isAgentTimeoutMessage(message: string): boolean {
     /did not finish within/i.test(message) ||
     /timed out after/i.test(message) ||
     /context deadline exceeded/i.test(message) ||
+    /context canceled/i.test(message) ||
     /exited with code -1/i.test(message) ||
-    /idle-stalled/i.test(message)
+    /idle-stalled/i.test(message) ||
+    /commit-plateau/i.test(message)
+  );
+}
+
+/** Soft-complete greenfield once enough commits land and HEAD stops moving. */
+export const GREENFIELD_PLATEAU_MIN_COMMITS = 3;
+export const GREENFIELD_PLATEAU_MS = 3 * 60 * 1000;
+
+export function greenfieldCommitPlateauReason(commits: number): string {
+  return (
+    `greenfield commit-plateau: agent produced ${commits} commits with no further git progress — ` +
+    "control plane will finalize"
   );
 }
 

@@ -9,11 +9,13 @@ import (
 )
 
 type runRecord struct {
-	mu      sync.RWMutex
-	Status  string
-	Message string
-	Output  string
-	Agent   string
+	mu           sync.RWMutex
+	Status       string
+	Message      string
+	Output       string
+	Agent        string
+	cancel       context.CancelFunc
+	cancelReason string
 }
 
 func (r *runRecord) snapshot() map[string]any {
@@ -36,11 +38,42 @@ func (r *runRecord) set(status, message, output, agentName string) {
 	r.Agent = agentName
 }
 
+func (r *runRecord) setCancel(cancel context.CancelFunc) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.cancel = cancel
+}
+
+func (r *runRecord) requestCancel(reason string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.Status != "running" && r.Status != "accepted" {
+		return false
+	}
+	if reason == "" {
+		reason = "agent run cancelled"
+	}
+	r.cancelReason = reason
+	if r.cancel != nil {
+		r.cancel()
+	}
+	return true
+}
+
+func (r *runRecord) takeCancelReason() string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	reason := r.cancelReason
+	r.cancelReason = ""
+	r.cancel = nil
+	return reason
+}
+
 type runManager struct {
-	mu    sync.Mutex
-	runs  map[string]*runRecord
+	mu     sync.Mutex
+	runs   map[string]*runRecord
 	agents *agent.Service
-	bus   *events.Bus
+	bus    *events.Bus
 }
 
 func newRunManager(agents *agent.Service, bus *events.Bus) *runManager {
@@ -73,15 +106,34 @@ func (m *runManager) execute(req agent.RunRequest, record *runRecord) {
 	record.set("running", "agent executing", "", firstNonEmpty(req.Agent, "default"))
 
 	ctx, cancel := context.WithTimeout(context.Background(), m.agents.RunTimeout(req))
+	record.setCancel(cancel)
 	defer cancel()
 
 	result, err := m.agents.Run(ctx, req, m.bus)
+	reason := record.takeCancelReason()
 	if err != nil {
-		record.set("failed", err.Error(), "", firstNonEmpty(req.Agent, "default"))
+		message := reason
+		if message == "" {
+			message = err.Error()
+		}
+		record.set("failed", message, "", firstNonEmpty(req.Agent, "default"))
 		return
 	}
 
 	record.set(result.Status, result.Message, result.Output, result.Agent)
+}
+
+func (m *runManager) cancel(taskID, reason string) (map[string]any, bool) {
+	m.mu.Lock()
+	record, ok := m.runs[taskID]
+	m.mu.Unlock()
+	if !ok {
+		return nil, false
+	}
+	if !record.requestCancel(reason) {
+		return record.snapshot(), true
+	}
+	return record.snapshot(), true
 }
 
 func (m *runManager) status(taskID string) (map[string]any, bool) {

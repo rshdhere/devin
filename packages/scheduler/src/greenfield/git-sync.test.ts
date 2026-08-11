@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   buildAlignHydratedRepoScript,
   buildPushGreenfieldMainScript,
+  greenfieldCommitPlateauReason,
   isAgentTimeoutMessage,
 } from "./git-sync.js";
 
@@ -21,9 +22,11 @@ describe("greenfield-git-sync", () => {
     );
     expect(
       isAgentTimeoutMessage(
-        "cursor agent idle-stalled after 8m0s with no output — likely hung on a shell HEREDOC",
+        "cursor agent idle-stalled after 3m0s with no output — likely hung on a shell HEREDOC",
       ),
     ).toBe(true);
+    expect(isAgentTimeoutMessage(greenfieldCommitPlateauReason(3))).toBe(true);
+    expect(isAgentTimeoutMessage("context canceled")).toBe(true);
   });
 
   test("buildAlignHydratedRepoScript hard-resets by default", () => {

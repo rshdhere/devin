@@ -41,6 +41,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /logs", s.handleLogs)
 	mux.HandleFunc("POST /run", s.handleRun)
 	mux.HandleFunc("GET /run/status", s.handleRunStatus)
+	mux.HandleFunc("POST /run/cancel", s.handleRunCancel)
 	mux.HandleFunc("POST /terminal", s.handleTerminal)
 	mux.HandleFunc("POST /git/clone", s.handleGitClone)
 	mux.HandleFunc("POST /git/commit", s.handleGitCommit)

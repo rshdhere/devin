@@ -24,7 +24,7 @@ const (
 	cursorHeartbeatInterval = 30 * time.Second
 	cursorWatchdogTick      = 10 * time.Second
 	cursorStartupStallLimit = 5 * time.Minute
-	cursorIdleStallLimit    = 8 * time.Minute
+	cursorIdleStallLimit    = 3 * time.Minute
 )
 
 type CursorRunner struct {

@@ -77,6 +77,45 @@ func (s *Server) handleRunStatus(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+type runCancelRequest struct {
+	TaskID string `json:"taskId"`
+	Reason string `json:"reason,omitempty"`
+}
+
+func (s *Server) handleRunCancel(w http.ResponseWriter, r *http.Request) {
+	var req runCancelRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	taskID := strings.TrimSpace(req.TaskID)
+	if taskID == "" {
+		taskID = strings.TrimSpace(r.URL.Query().Get("taskId"))
+	}
+	if taskID == "" {
+		writeError(w, http.StatusBadRequest, "taskId is required")
+		return
+	}
+	reason := strings.TrimSpace(req.Reason)
+	if reason == "" {
+		reason = "agent run cancelled by control plane"
+	}
+
+	snapshot, ok := s.runs.cancel(taskID, reason)
+	if !ok {
+		writeError(w, http.StatusNotFound, "run not found")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"taskId":  taskID,
+		"status":  runSnapshotString(snapshot, "status"),
+		"message": runSnapshotString(snapshot, "message"),
+		"output":  runSnapshotString(snapshot, "output"),
+		"agent":   runSnapshotString(snapshot, "agent"),
+	})
+}
+
 func runSnapshotString(snapshot map[string]any, key string) string {
 	if value, ok := snapshot[key].(string); ok {
 		return value

@@ -46,7 +46,8 @@ func runShell(ctx context.Context, cwd, command string, env []string) (*Result, 
 		return nil, err
 	}
 
-	cmd := exec.CommandContext(ctx, "/bin/sh", "-c", command)
+	cmd := exec.Command("/bin/sh", "-c", command)
+	configureCmdProcessGroup(cmd)
 	cmd.Dir = filepath.Clean(cwd)
 	cmd.Env = env
 
@@ -54,7 +55,24 @@ func runShell(ctx context.Context, cwd, command string, env []string) (*Result, 
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 
-	err := cmd.Run()
+	if err := cmd.Start(); err != nil {
+		return nil, fmt.Errorf("start command: %w", err)
+	}
+
+	waitDone := make(chan error, 1)
+	go func() { waitDone <- cmd.Wait() }()
+
+	var err error
+	select {
+	case <-ctx.Done():
+		killCmdTree(cmd)
+		err = <-waitDone
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+	case err = <-waitDone:
+	}
+
 	exitCode := 0
 	if err != nil {
 		if ctx.Err() != nil {
@@ -175,7 +193,8 @@ func runStreamingShell(
 		return nil, err
 	}
 
-	cmd := exec.CommandContext(ctx, "/bin/sh", "-c", command)
+	cmd := exec.Command("/bin/sh", "-c", command)
+	configureCmdProcessGroup(cmd)
 	cmd.Dir = filepath.Clean(cwd)
 	cmd.Env = env
 
@@ -213,12 +232,12 @@ func runStreamingShell(
 				if err != nil {
 					stopErr = err
 					stopRequested = true
-					_ = cmd.Process.Kill()
+					killCmdTree(cmd)
 					return
 				}
 				if stop {
 					stopRequested = true
-					_ = cmd.Process.Kill()
+					killCmdTree(cmd)
 					return
 				}
 			}
@@ -233,9 +252,22 @@ func runStreamingShell(
 		return nil, fmt.Errorf("start command: %w", err)
 	}
 
-	wg.Wait()
+	waitDone := make(chan error, 1)
+	go func() {
+		wg.Wait()
+		waitDone <- cmd.Wait()
+	}()
 
-	err = cmd.Wait()
+	select {
+	case <-ctx.Done():
+		killCmdTree(cmd)
+		err = <-waitDone
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+	case err = <-waitDone:
+	}
+
 	exitCode := 0
 	if err != nil {
 		if ctx.Err() != nil {

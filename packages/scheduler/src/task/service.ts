@@ -47,6 +47,9 @@ import { bootstrapGreenfieldProject } from "../greenfield/bootstrap.js";
 import {
   buildAlignHydratedRepoScript,
   buildPushGreenfieldMainScript,
+  greenfieldCommitPlateauReason,
+  GREENFIELD_PLATEAU_MIN_COMMITS,
+  GREENFIELD_PLATEAU_MS,
   isAgentTimeoutMessage,
 } from "../greenfield/git-sync.js";
 import { greenfieldShellScaffoldFiles } from "../greenfield/shell-scaffold.js";
@@ -1119,6 +1122,7 @@ export class TaskService {
           ? await this.readGitHead(runtime, task.id, repoCwd, githubToken)
           : "";
 
+      const greenfieldSoftAbort = { reason: undefined as string | undefined };
       const stopGreenfieldPush =
         createdNewRepo &&
         runtimeAgentTask &&
@@ -1132,6 +1136,9 @@ export class TaskService {
               repoCwd,
               githubToken,
               preAgentHead,
+              (reason) => {
+                greenfieldSoftAbort.reason = reason;
+              },
             )
           : () => undefined;
 
@@ -1217,7 +1224,10 @@ export class TaskService {
               workDir: repoReadyInSandbox ? repoCwd : undefined,
               env: this.runtimeSecrets(githubToken, task.agent, job.agentModel),
             },
-            { maxWaitMs: resolveAgentMaxWaitMs() },
+            {
+              maxWaitMs: resolveAgentMaxWaitMs(),
+              getAbortReason: () => greenfieldSoftAbort.reason,
+            },
           );
         }
       } catch (error) {
@@ -3144,37 +3154,82 @@ export class TaskService {
     repoCwd: string,
     githubToken?: string,
     preAgentHead?: string,
+    onPlateau?: (reason: string) => void,
   ): () => void {
     let stopped = false;
     let lastSyncedHead = preAgentHead?.trim() ?? "";
+    let lastSeenHead = lastSyncedHead;
+    let lastHeadChangeAt = Date.now();
+    let plateauCancelRequested = false;
+    const baseHead = preAgentHead?.trim() ?? "";
 
     const tick = async () => {
       if (stopped) {
         return;
       }
       try {
-        const head = await this.readGitHead(
-          runtime,
+        const probe = await runtime.terminalAllowFailure({
           taskId,
-          repoCwd,
-          githubToken,
-        );
-        if (!head || head === lastSyncedHead) {
-          return;
+          cwd: repoCwd,
+          env: this.gitRuntimeEnv(githubToken),
+          command: [
+            "set +e",
+            "head=$(git rev-parse HEAD 2>/dev/null || true)",
+            "commits=0",
+            `base='${baseHead.replace(/'/g, "")}'`,
+            'if [ -n "$base" ] && git cat-file -e "$base^{commit}" 2>/dev/null; then',
+            '  commits=$(git rev-list --count "$base"..HEAD 2>/dev/null || echo 0)',
+            'elif [ -n "$head" ]; then',
+            "  commits=$(git rev-list --count HEAD 2>/dev/null || echo 0)",
+            "fi",
+            'echo "head=$head commits=$commits"',
+          ].join("\n"),
+        });
+        const output = `${probe.stdout}\n${probe.stderr}`;
+        const head = output.match(/^head=(\S+)/m)?.[1]?.trim() ?? "";
+        const commits = Number(output.match(/commits=(\d+)/)?.[1] ?? 0);
+
+        if (head && head !== lastSeenHead) {
+          lastSeenHead = head;
+          lastHeadChangeAt = Date.now();
         }
-        const pushed = await this.pushGreenfieldMain(
-          runtime,
-          taskId,
-          repoCwd,
-          githubToken,
-          job.cloneUrl,
-        );
-        if (pushed) {
-          lastSyncedHead = head;
-          this.emit("git.push", taskId, "Synced agent commits to GitHub", {
-            branch: "main",
-            auto: true,
+
+        if (head && head !== lastSyncedHead) {
+          const pushed = await this.pushGreenfieldMain(
+            runtime,
+            taskId,
+            repoCwd,
+            githubToken,
+            job.cloneUrl,
+          );
+          if (pushed) {
+            lastSyncedHead = head;
+            this.emit("git.push", taskId, "Synced agent commits to GitHub", {
+              branch: "main",
+              auto: true,
+              commits,
+            });
+          }
+        }
+
+        if (
+          !plateauCancelRequested &&
+          commits >= GREENFIELD_PLATEAU_MIN_COMMITS &&
+          Date.now() - lastHeadChangeAt >= GREENFIELD_PLATEAU_MS
+        ) {
+          plateauCancelRequested = true;
+          const reason = greenfieldCommitPlateauReason(commits);
+          this.emit("agent.log", taskId, reason, {
+            commits,
+            plateauMs: GREENFIELD_PLATEAU_MS,
+            softComplete: true,
           });
+          onPlateau?.(reason);
+          try {
+            await runtime.cancelRun(taskId, reason);
+          } catch {
+            // Old guest runtimes may lack /run/cancel; control-plane abort is enough.
+          }
         }
       } catch {
         // best-effort background sync
@@ -5489,12 +5544,14 @@ function buildAgentPrompt(
       "`Co-authored-by: Cursor Agent`, no `Generated with ...` lines",
     "- If git push is rejected, stop retrying — the control plane finalizes and pushes on completion or timeout",
     "- If a shell command hangs, stop retrying it and finish remaining file edits; control plane finalizes git",
+    "- After smoke tests pass and you have ≥3 product commits, STOP IMMEDIATELY — do not clean caches, du, rm -rf target/node_modules, or start extra polish loops",
     "",
     "Sandbox resilience:",
     "- If shell/npm commands fail (ENOMEM, spawn errors), keep writing files with edit tools",
     "- Do not launch subagents or long retry loops for shell — finish the product on disk",
     "- Prefer zero-dependency Node.js (built-in http + SSE) when npm install cannot run",
     "- The control plane runs tests, commits, and push after you finish or on timeout",
+    "- Never spend time on disk cleanup or build-artifact housekeeping; exit so the session can mark Done",
     "",
     "Sandbox tooling:",
     "- GITHUB_TOKEN is available for gh and git",
