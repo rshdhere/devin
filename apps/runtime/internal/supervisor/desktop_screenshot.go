@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/rshdhere/devin/apps/runtime/internal/executil"
 	"github.com/rshdhere/devin/apps/runtime/internal/workspace"
@@ -97,7 +98,9 @@ func (s *Server) captureDesktopScreenshotToFile(
 ) error {
 	// Prefer Chromium CLI first — Playwright networkidle used to hang forever on
 	// Next.js HMR websockets. CLI is bounded and good enough for sandbox previews.
-	result, err := s.runChromiumCLIScreenshot(ctx, targetURL, outPath)
+	cliCtx, cliCancel := context.WithTimeout(ctx, 22*time.Second)
+	defer cliCancel()
+	result, err := s.runChromiumCLIScreenshot(cliCtx, targetURL, outPath)
 	if err == nil && result.ExitCode == 0 {
 		if data, readErr := os.ReadFile(outPath); readErr == nil && len(data) > 128 {
 			return nil
@@ -106,7 +109,9 @@ func (s *Server) captureDesktopScreenshotToFile(
 	if ctx.Err() != nil {
 		return ctx.Err()
 	}
-	result, err = s.runPlaywrightScreenshot(ctx, targetURL, outPath)
+	pwCtx, pwCancel := context.WithTimeout(ctx, 35*time.Second)
+	defer pwCancel()
+	result, err = s.runPlaywrightScreenshot(pwCtx, targetURL, outPath)
 	if err != nil {
 		return err
 	}

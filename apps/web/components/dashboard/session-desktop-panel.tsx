@@ -37,6 +37,7 @@ export function SessionDesktopPanel({
   );
 
   const [shotError, setShotError] = useState(false);
+  const [shotErrorDetail, setShotErrorDetail] = useState<string | null>(null);
   const [shotLoading, setShotLoading] = useState(false);
   const [shotUrl, setShotUrl] = useState<string | null>(null);
   const shotUrlRef = useRef<string | null>(null);
@@ -62,6 +63,7 @@ export function SessionDesktopPanel({
         freshInFlightRef.current = true;
       }
       setShotError(false);
+      setShotErrorDetail(null);
       setShotLoading(true);
 
       const controller = new AbortController();
@@ -90,9 +92,26 @@ export function SessionDesktopPanel({
           return URL.createObjectURL(blob);
         });
         setShotError(false);
-      } catch {
+        setShotErrorDetail(null);
+      } catch (error) {
         if (!shotUrlRef.current) {
           setShotError(true);
+          if (error instanceof DOMException && error.name === "AbortError") {
+            setShotErrorDetail(
+              fresh
+                ? "Capture timed out — Go/Rust builds can take a minute. Try Refresh again."
+                : "Snapshot request timed out — try Refresh.",
+            );
+          } else if (
+            error instanceof Error &&
+            error.message.startsWith("snapshot HTTP 503")
+          ) {
+            setShotErrorDetail(
+              "App not ready yet — the sandbox is starting localhost. Click Refresh or wait a moment.",
+            );
+          } else if (error instanceof Error && error.message.length > 0) {
+            setShotErrorDetail(error.message);
+          }
         }
       } finally {
         window.clearTimeout(timeout);
@@ -217,11 +236,12 @@ export function SessionDesktopPanel({
         ) : null}
         {shotError && !shotUrl ? (
           <p className="max-w-sm text-center text-[12px] text-zinc-500">
-            {isAgentActive
-              ? "Capturing desktop preview… starting the app in the sandbox when needed."
-              : task.sessionSleeping
-                ? "Waking devbox to load saved snapshot — try Refresh."
-                : "No desktop snapshot yet — click Refresh to start the app and capture localhost (1024×768)."}
+            {shotErrorDetail ??
+              (isAgentActive
+                ? "Capturing desktop preview… starting the app in the sandbox when needed."
+                : task.sessionSleeping
+                  ? "Waking devbox to load saved snapshot — try Refresh."
+                  : "No desktop snapshot yet — click Refresh to start the app and capture localhost (1024×768).")}
           </p>
         ) : null}
         {shotUrl ? (

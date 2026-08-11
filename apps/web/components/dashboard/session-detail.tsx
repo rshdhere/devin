@@ -357,6 +357,15 @@ function DiagnosticsPanel({
               remove stale sandboxes, and retry. This is not a web or API bug.
             </p>
           ) : null}
+          {/enospc|no space left on device/i.test(task.message) ? (
+            <p className="text-[12px] leading-relaxed text-amber-200/90">
+              The sandbox workspace tmpfs filled up (pip/npm caches, build
+              artifacts). Retry the session — redeploy the runtime worker so
+              tmpfs grows to 8G and automatic cache pruning is active. If it
+              persists, free host disk under{" "}
+              <span className="font-mono text-amber-100">/var/lib/devin</span>.
+            </p>
+          ) : null}
           {/resource_exhausted/i.test(task.message) ? (
             <p className="text-[12px] leading-relaxed text-amber-200/90">
               The Cursor cloud agent ran out of temporary capacity mid-run. The

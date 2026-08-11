@@ -8,9 +8,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/aws/aws-sdk-go-v2/aws"
-	"github.com/aws/aws-sdk-go-v2/service/ec2"
-	ec2types "github.com/aws/aws-sdk-go-v2/service/ec2/types"
 	"github.com/rshdhere/devin/infra/internal/awsutil"
 	"github.com/rshdhere/devin/infra/internal/envx"
 	"github.com/rshdhere/devin/infra/internal/hostpayload"
@@ -30,24 +27,11 @@ func DeployImages(ctx context.Context, args []string) error {
 	}
 	r := envx.Region("")
 	if discover {
-		cfg, err := awsutil.Config(ctx, r)
+		found, err := awsutil.DiscoverExecutionHosts(ctx, r)
 		if err != nil {
 			return err
 		}
-		out, err := ec2.NewFromConfig(cfg).DescribeInstances(ctx, &ec2.DescribeInstancesInput{
-			Filters: []ec2types.Filter{
-				{Name: aws.String("tag:Role"), Values: []string{"firecracker-execution-host"}},
-				{Name: aws.String("instance-state-name"), Values: []string{"running"}},
-			},
-		})
-		if err != nil {
-			return err
-		}
-		for _, res := range out.Reservations {
-			for _, in := range res.Instances {
-				ids = append(ids, aws.ToString(in.InstanceId))
-			}
-		}
+		ids = append(ids, found...)
 	}
 	if len(ids) == 0 {
 		return errors.New("provide instance IDs or --discover")

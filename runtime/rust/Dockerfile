@@ -1,7 +1,7 @@
 FROM rust:1.83-bookworm
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates git pkg-config libssl-dev chromium \
+    ca-certificates curl git pkg-config libssl-dev chromium \
     && rm -rf /var/lib/apt/lists/*
 
 ENV RUST_BACKTRACE=1

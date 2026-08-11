@@ -204,16 +204,23 @@ export function buildDesktopScreenshotScript(
   ].join("\n");
 }
 
-/** Prune cargo/target dirs when workspace tmpfs is tight. */
+/** Prune build/package caches when workspace tmpfs is tight. */
 export function buildPruneWorkspaceDiskScript(): string {
   return [
     "set +e",
+    // Grow golden-snapshot tmpfs (4G) without rebuilding Firecracker images.
+    "mount -o remount,size=8G /workspace 2>/dev/null || true",
+    "mkdir -p /workspace/.build/npm-cache /workspace/.build/xdg-cache /workspace/.build/cargo-home /workspace/.build/target 2>/dev/null || true",
     "df_line=$(df -P /workspace 2>/dev/null | tail -1)",
     'pct=$(echo "$df_line" | awk "{print $5}" | tr -d "%")',
-    'if [ -n "$pct" ] && [ "$pct" -ge 88 ]; then',
+    'if [ -n "$pct" ] && [ "$pct" -ge 80 ]; then',
     "  rm -rf /workspace/.build/target /workspace/.build/cargo-home/registry/cache",
-    "  rm -rf /workspace/repo/target",
+    "  rm -rf /workspace/.build/npm-cache /workspace/.build/xdg-cache /workspace/.build/pip-cache",
+    "  rm -rf /workspace/repo/target /workspace/repo/node_modules/.cache /workspace/repo/.next/cache",
     "  rm -rf /workspace/.home/.cargo/registry/cache 2>/dev/null",
+    "  rm -rf /workspace/.home/.cache/pip /workspace/.home/.npm/_cacache 2>/dev/null",
+    "  rm -rf /workspace/.home/.cursor/logs 2>/dev/null",
+    "  find /workspace/repo -type d -name __pycache__ -prune -exec rm -rf {} + 2>/dev/null || true",
     "fi",
   ].join("\n");
 }

@@ -6,6 +6,7 @@ import {
   buildStartDevServerForSnapshotScript,
   buildWaitForDevServerScript,
   buildDesktopScreenshotScript,
+  buildPruneWorkspaceDiskScript,
 } from "./preview.js";
 
 describe("buildDiscoverDevboxPortScript", () => {
@@ -90,5 +91,16 @@ describe("buildDesktopScreenshotScript", () => {
       "/workspace/.home/desktop-preview.png",
     );
     expect(script).toContain("--disable-dev-shm-usage");
+  });
+});
+
+describe("buildPruneWorkspaceDiskScript", () => {
+  it("prunes pip and npm caches when tmpfs is at least 80% full", () => {
+    const script = buildPruneWorkspaceDiskScript();
+    expect(script).toContain("remount,size=8G");
+    expect(script).toContain('"$pct" -ge 80');
+    expect(script).toContain(".cache/pip");
+    expect(script).toContain("npm-cache");
+    expect(script).toContain("__pycache__");
   });
 });

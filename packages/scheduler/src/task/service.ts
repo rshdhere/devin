@@ -1144,13 +1144,15 @@ export class TaskService {
           : () => undefined;
 
       const stopDevboxPreview = this.startDevboxPreviewWatcher(task.id);
+      const stopDiskPrune = this.startWorkspaceDiskPruneWatcher(
+        runtime,
+        task.id,
+      );
 
-      if (resolveStackRuntime(task, job) === "rust") {
-        await runtime.terminalAllowFailure({
-          taskId: task.id,
-          command: buildPruneWorkspaceDiskScript(),
-        });
-      }
+      await runtime.terminalAllowFailure({
+        taskId: task.id,
+        command: buildPruneWorkspaceDiskScript(),
+      });
 
       if (!runtime || !runtimeBaseUrl || !sandboxName) {
         throw new Error("devbox session is not available before agent start");
@@ -1283,6 +1285,7 @@ export class TaskService {
         stopAutoCommit();
         stopGreenfieldPush();
         stopDevboxPreview();
+        stopDiskPrune();
         stopEvents();
       }
 
@@ -3892,6 +3895,19 @@ export class TaskService {
           `cargo check failed: ${check.stderr || check.stdout}`.trim(),
         );
       }
+      await this.smokeAndCaptureDevboxPreview(runtime, task, repoCwd, {
+        startCommand: [
+          "set +e",
+          "mkdir -p /workspace/.home",
+          'export PATH="/usr/local/cargo/bin:/usr/local/bin:$PATH"',
+          "export HOST=127.0.0.1 PORT=3000 HOSTNAME=127.0.0.1",
+          'nohup bash -lc "set -m; cargo run --release" >/workspace/.home/devin-snapshot-server.log 2>&1 &',
+          "echo $! > /workspace/.home/devin-snapshot-server.pid",
+          "exit 0",
+        ].join("\n"),
+        port: 3000,
+        waitSeconds: 90,
+      });
     } else if (
       stackRuntime === "python" ||
       hasPythonProject.stdout.trim() === "yes"
@@ -5454,6 +5470,35 @@ export class TaskService {
     );
   }
 
+  private startWorkspaceDiskPruneWatcher(
+    runtime: RuntimeClient,
+    taskId: string,
+  ): () => void {
+    let stopped = false;
+
+    const tick = async () => {
+      if (stopped) {
+        return;
+      }
+      if (!this.activeSessions.has(taskId)) {
+        return;
+      }
+      await runtime.terminalAllowFailure({
+        taskId,
+        command: buildPruneWorkspaceDiskScript(),
+      });
+    };
+
+    const interval = setInterval(() => {
+      void tick();
+    }, 45_000);
+
+    return () => {
+      stopped = true;
+      clearInterval(interval);
+    };
+  }
+
   private startDevboxPreviewWatcher(taskId: string): () => void {
     let stopped = false;
 
@@ -5675,6 +5720,19 @@ function rustPromptGuidance(stackRuntime?: StackRuntime): string[] {
   ];
 }
 
+function pythonPromptGuidance(stackRuntime?: StackRuntime): string[] {
+  if (stackRuntime !== "python") {
+    return [];
+  }
+  return [
+    "",
+    "Python / workspace disk:",
+    "- PIP_NO_CACHE_DIR is set — do not run `pip cache` housekeeping or delete venvs in loops",
+    "- Prefer a single venv in the repo; avoid duplicate `pip install` across multiple envs",
+    "- If you see ENOSPC / no space left on device, commit sources and finish — do not rm -rf the repo",
+  ];
+}
+
 function buildAgentPrompt(
   prompt: string,
   repository: string,
@@ -5703,6 +5761,7 @@ function buildAgentPrompt(
     "- Smoke-check GET / and /health before finishing",
     ...nextjsPromptGuidance(stackRuntime),
     ...rustPromptGuidance(stackRuntime),
+    ...pythonPromptGuidance(stackRuntime),
     "",
     "Git / commits:",
     "- Commit incrementally after meaningful steps (API, UI, features, polish)",

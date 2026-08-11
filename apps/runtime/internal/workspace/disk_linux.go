@@ -12,7 +12,9 @@ import (
 
 const buildRootDir = ".build"
 
-// EnsureBuildDirs creates isolated cargo/rust build dirs on workspace tmpfs.
+const pruneUsageThresholdPercent = 80
+
+// EnsureBuildDirs creates isolated build/cache dirs on workspace tmpfs.
 func EnsureBuildDirs(workspaceRoot string) error {
 	if workspaceRoot == "" {
 		workspaceRoot = defaultPath
@@ -20,6 +22,9 @@ func EnsureBuildDirs(workspaceRoot string) error {
 	for _, rel := range []string{
 		filepath.Join(buildRootDir, "cargo-home"),
 		filepath.Join(buildRootDir, "target"),
+		filepath.Join(buildRootDir, "npm-cache"),
+		filepath.Join(buildRootDir, "xdg-cache"),
+		filepath.Join(buildRootDir, "pip-cache"),
 	} {
 		if err := os.MkdirAll(filepath.Join(workspaceRoot, rel), 0o755); err != nil {
 			return err
@@ -28,7 +33,7 @@ func EnsureBuildDirs(workspaceRoot string) error {
 	return nil
 }
 
-// PruneWorkspaceDiskIfLow removes heavy build artifacts when tmpfs is nearly full.
+// PruneWorkspaceDiskIfLow removes heavy caches when tmpfs is nearly full.
 func PruneWorkspaceDiskIfLow(workspaceRoot string) {
 	if workspaceRoot == "" {
 		workspaceRoot = defaultPath
@@ -37,17 +42,30 @@ func PruneWorkspaceDiskIfLow(workspaceRoot string) {
 	if err != nil {
 		return
 	}
-	if usage < 88 {
+	if usage < pruneUsageThresholdPercent {
 		return
 	}
 	slog.Warn("workspace tmpfs nearly full; pruning build caches", "usagePercent", usage)
-	for _, target := range []string{
+	for _, target := range pruneTargets(workspaceRoot) {
+		_ = os.RemoveAll(target)
+	}
+}
+
+func pruneTargets(workspaceRoot string) []string {
+	home := WritableHome(workspaceRoot)
+	return []string{
 		filepath.Join(workspaceRoot, buildRootDir, "target"),
 		filepath.Join(workspaceRoot, buildRootDir, "cargo-home", "registry", "cache"),
+		filepath.Join(workspaceRoot, buildRootDir, "npm-cache"),
+		filepath.Join(workspaceRoot, buildRootDir, "xdg-cache"),
+		filepath.Join(workspaceRoot, buildRootDir, "pip-cache"),
 		filepath.Join(workspaceRoot, "repo", "target"),
-		filepath.Join(workspaceRoot, ".home", ".cargo", "registry", "cache"),
-	} {
-		_ = os.RemoveAll(target)
+		filepath.Join(workspaceRoot, "repo", "node_modules", ".cache"),
+		filepath.Join(workspaceRoot, "repo", ".next", "cache"),
+		filepath.Join(home, ".cargo", "registry", "cache"),
+		filepath.Join(home, ".cache", "pip"),
+		filepath.Join(home, ".npm", "_cacache"),
+		filepath.Join(home, ".cursor", "logs"),
 	}
 }
 

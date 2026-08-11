@@ -34,6 +34,10 @@ func Run(ctx context.Context, args []string) error {
 		return operator.InstallPlugin(ctx)
 	case "rebootstrap":
 		return operator.Rebootstrap(ctx, args[1:])
+	case "diagnose-host":
+		return operator.DiagnoseHost(ctx, args[1:])
+	case "free-host-disk":
+		return operator.FreeHostDisk(ctx, args[1:])
 	case "sync-platform-config":
 		return host.SyncPlatformConfig(ctx)
 	case "fix-sandbox-dns":
@@ -57,7 +61,7 @@ func usage() error {
 	fmt.Fprintln(os.Stderr, `Usage: devin-infra <command>
 Operator commands: deploy-images, bootstrap-snapshots, rebuild-agent-snapshot,
 sync-host-config, enable-nested-virt, patch-scheduler-url, set-platform-secret,
-configure-profile, install-ssm-plugin, rebootstrap
+configure-profile, install-ssm-plugin, rebootstrap, diagnose-host, free-host-disk
 Host commands: sync-platform-config, fix-sandbox-dns, fix-cni,
 bootstrap-snapshots-local, host-deploy, install-self`)
 	return nil

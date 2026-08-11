@@ -28,6 +28,9 @@ export function formatAgentFailureMessage(
     if (/database or disk is full/i.test(core)) {
       return "Cursor agent failed: sandbox disk or agent database is full on the execution host. Free disk space (or remove old sandboxes), then retry the task.";
     }
+    if (/enospc|no space left on device/i.test(core)) {
+      return "Sandbox workspace ran out of disk (ENOSPC). Retry the task — the platform now prunes caches and uses a larger workspace tmpfs.";
+    }
     if (/resource_exhausted/i.test(core) || /resource_exhausted/i.test(text)) {
       return "Cursor agent hit a temporary resource limit (resource_exhausted). Work already on disk is finalized when possible — retry if the session failed.";
     }
@@ -36,6 +39,10 @@ export function formatAgentFailureMessage(
 
   if (/database or disk is full/i.test(text)) {
     return "Sandbox disk or agent database is full on the execution host. Free disk space and retry.";
+  }
+
+  if (/enospc|no space left on device/i.test(text)) {
+    return "Sandbox workspace ran out of disk (ENOSPC). Retry the task after redeploying the runtime — caches are pruned automatically and tmpfs is larger.";
   }
 
   if (/resource_exhausted/i.test(text)) {

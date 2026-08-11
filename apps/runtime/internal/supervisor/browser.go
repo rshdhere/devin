@@ -150,7 +150,7 @@ func (s *Server) handleDesktopScreenshot(w http.ResponseWriter, r *http.Request)
 	if targetURL == "" {
 		targetURL = "http://127.0.0.1:8000/"
 	}
-	ctx, cancel := context.WithTimeout(r.Context(), 22*time.Second)
+	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
 	defer cancel()
 	outPath := filepath.Join(workspace.WritableHome(s.workspace), "desktop-preview.png")
 	if err := s.captureDesktopScreenshotToFile(ctx, targetURL, outPath); err != nil {
