@@ -18,11 +18,13 @@ import (
 const cursorVersionTimeoutSec = 45
 
 // Heartbeats keep the activity feed alive while the agent is thinking, and the
-// stall limit aborts runs where the CLI never produces a single line.
+// stall limits abort runs where the CLI never produces a single line (startup)
+// or goes silent mid-run (hung shell HEREDOC / stuck tool).
 const (
 	cursorHeartbeatInterval = 30 * time.Second
 	cursorWatchdogTick      = 10 * time.Second
 	cursorStartupStallLimit = 5 * time.Minute
+	cursorIdleStallLimit    = 8 * time.Minute
 )
 
 type CursorRunner struct {
@@ -99,9 +101,11 @@ func (r *CursorRunner) Run(
 	var lastOutputNano atomic.Int64
 	var sawOutput atomic.Bool
 	var stalled atomic.Bool
+	var idleStalled atomic.Bool
 	lastOutputNano.Store(time.Now().UnixNano())
 
 	stallLimit := cursorStallLimit(req)
+	idleLimit := cursorIdleStallLimitFromEnv(req)
 	go func() {
 		ticker := time.NewTicker(cursorWatchdogTick)
 		defer ticker.Stop()
@@ -114,6 +118,11 @@ func (r *CursorRunner) Run(
 				idle := now.Sub(time.Unix(0, lastOutputNano.Load()))
 				if !sawOutput.Load() && stallLimit > 0 && idle >= stallLimit {
 					stalled.Store(true)
+					cancelRun()
+					return
+				}
+				if sawOutput.Load() && idleLimit > 0 && idle >= idleLimit {
+					idleStalled.Store(true)
 					cancelRun()
 					return
 				}
@@ -188,6 +197,17 @@ func (r *CursorRunner) Run(
 				"cursor agent produced no output for %s after starting — the CLI never came up in the sandbox. "+
 					"Rebuild the agent Firecracker snapshot (runtime/agent/Dockerfile) and verify /proc is mounted in the guest.",
 				stallLimit,
+			),
+			Agent: r.Name(),
+		}, nil
+	}
+	if idleStalled.Load() {
+		return &RunResult{
+			Status: "failed",
+			Message: fmt.Sprintf(
+				"cursor agent idle-stalled after %s with no output — likely hung on a shell HEREDOC or interactive git commit. "+
+					"Control plane will finalize any commits already on disk.",
+				idleLimit,
 			),
 			Agent: r.Name(),
 		}, nil
@@ -406,6 +426,21 @@ func cursorStallLimit(req RunRequest) time.Duration {
 	minutes, err := strconv.Atoi(raw)
 	if err != nil || minutes < 0 {
 		return cursorStartupStallLimit
+	}
+	return time.Duration(minutes) * time.Minute
+}
+
+func cursorIdleStallLimitFromEnv(req RunRequest) time.Duration {
+	raw := strings.TrimSpace(envValue(req, "AGENT_IDLE_STALL_MIN"))
+	if raw == "" {
+		return cursorIdleStallLimit
+	}
+	minutes, err := strconv.Atoi(raw)
+	if err != nil || minutes < 0 {
+		return cursorIdleStallLimit
+	}
+	if minutes == 0 {
+		return 0
 	}
 	return time.Duration(minutes) * time.Minute
 }

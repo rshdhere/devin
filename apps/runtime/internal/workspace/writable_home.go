@@ -27,6 +27,11 @@ func DevinProcessEnv(workspaceRoot string) []string {
 	return []string{
 		"HOME=" + home,
 		"GIT_CONFIG_GLOBAL=" + GitConfigPath(workspaceRoot),
+		"GIT_EDITOR=true",
+		"GIT_TERMINAL_PROMPT=0",
+		"EDITOR=true",
+		"VISUAL=true",
+		"PAGER=cat",
 		"CARGO_HOME=" + filepath.Join(buildRoot, "cargo-home"),
 		"CARGO_TARGET_DIR=" + filepath.Join(buildRoot, "target"),
 		"RUSTUP_HOME=" + filepath.Join(buildRoot, "rustup"),

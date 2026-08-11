@@ -1269,7 +1269,42 @@ export class TaskService {
       }
 
       if (runResult.status === "failed") {
-        throw new Error(runResult.message);
+        const failMessage = runResult.message || "Agent run failed";
+        if (
+          isAgentTimeoutMessage(failMessage) &&
+          createdNewRepo &&
+          runtimeAgentTask &&
+          runtime &&
+          repository &&
+          cloneUrl
+        ) {
+          this.emit("agent.failed", task.id, failMessage, {
+            timeout: true,
+            idleStalled: /idle-stalled/i.test(failMessage),
+            maxWaitMs: resolveAgentMaxWaitMs(),
+          });
+          const recovered = await this.recoverGreenfieldAfterAgentInterruption(
+            runtime,
+            task,
+            job,
+            repoCwd,
+            githubToken,
+            preAgentHead,
+          );
+          if (recovered) {
+            runResult = {
+              status: "completed",
+              taskId: task.id,
+              message:
+                "Agent stalled; control plane finalized greenfield commits",
+              agent: task.agent,
+            };
+          } else {
+            throw new Error(failMessage);
+          }
+        } else {
+          throw new Error(failMessage);
+        }
       }
 
       if (createdNewRepo && runtimeAgentTask && runtime) {
@@ -2567,8 +2602,9 @@ export class TaskService {
   }
 
   /**
-   * When a runtime agent times out, commit dirty work and push to main with
-   * fetch + force-with-lease so divergent hydrate/checkpoint history still lands.
+   * When a runtime agent times out or idle-stalls (hung HEREDOC/git), commit
+   * dirty work and push to main with fetch + force-with-lease so divergent
+   * hydrate/checkpoint history still lands.
    */
   private async recoverGreenfieldAfterAgentInterruption(
     runtime: RuntimeClient,
@@ -2580,6 +2616,20 @@ export class TaskService {
   ): Promise<boolean> {
     try {
       const gitEnv = this.gitRuntimeEnv(githubToken);
+      // Hung `git commit` HEREDOCs often leave index.lock + orphan git after
+      // the agent process is killed; clear that before status/commit.
+      await runtime.terminalAllowFailure({
+        taskId: task.id,
+        cwd: repoCwd,
+        env: gitEnv,
+        command: [
+          "set +e",
+          "pkill -u \"$(id -u)\" -f '[g]it commit' 2>/dev/null || true",
+          "sleep 0.5",
+          "rm -f .git/index.lock .git/HEAD.lock .git/refs/heads/*.lock 2>/dev/null || true",
+          "true",
+        ].join("\n"),
+      });
       const status = await runtime.terminalAllowFailure({
         taskId: task.id,
         cwd: repoCwd,
@@ -2600,7 +2650,7 @@ export class TaskService {
         this.emit(
           "agent.log",
           task.id,
-          "Agent timeout with no recoverable git work",
+          "Agent interruption with no recoverable git work",
         );
         return false;
       }
@@ -2609,7 +2659,7 @@ export class TaskService {
         await runtime.gitCommit({
           taskId: task.id,
           message: buildCommitMessage(
-            `devin: agent timeout recovery — ${task.title ?? "partial work"}`,
+            `devin: agent interruption recovery — ${task.title ?? "partial work"}`,
           ),
           paths: ["."],
           cwd: repoCwd,
@@ -2629,7 +2679,7 @@ export class TaskService {
         job.cloneUrl,
       );
       if (!pushed) {
-        this.emit("git.push", task.id, "Timeout recovery push failed", {
+        this.emit("git.push", task.id, "Interruption recovery push failed", {
           branch: "main",
           recovery: true,
           timeout: true,
@@ -2638,7 +2688,7 @@ export class TaskService {
         return false;
       }
 
-      this.emit("git.push", task.id, "Pushed agent work after timeout", {
+      this.emit("git.push", task.id, "Pushed agent work after interruption", {
         branch: "main",
         recovery: true,
         timeout: true,
@@ -2650,7 +2700,7 @@ export class TaskService {
       this.emit(
         "agent.log",
         task.id,
-        `Greenfield timeout recovery failed: ${message}`,
+        `Greenfield interruption recovery failed: ${message}`,
       );
       return false;
     }
@@ -3133,10 +3183,10 @@ export class TaskService {
 
     const interval = setInterval(() => {
       void tick();
-    }, 90_000);
+    }, 30_000);
     const initial = setTimeout(() => {
       void tick();
-    }, 75_000);
+    }, 20_000);
 
     return () => {
       stopped = true;
@@ -5427,14 +5477,18 @@ function buildAgentPrompt(
     "Git / commits:",
     "- Commit incrementally after meaningful steps (API, UI, features, polish)",
     "- Make at least 3 focused commits beyond the scaffold — multiple commits are required",
+    "- NEVER use shell heredocs for commits (no `cat <<'EOF'`, no `$(cat <<EOF)`). They hang the sandbox.",
+    `- Commit with two -m flags only, e.g. git commit -m "feat: add feed API" -m "Co-authored-by: ${bot.name} <${bot.email}>"`,
+    "- Keep the subject under ~72 chars; put the co-author trailer only in the second -m",
     greenfieldRepo
       ? "- Do NOT run git push — commit locally only; the control plane syncs to GitHub automatically while you work and after you finish"
       : "- Push to the working branch as you go when possible",
-    `- Every commit MUST include this trailer on a new line in the commit message body: Co-authored-by: ${bot.name} <${bot.email}>`,
+    `- Every commit MUST include this trailer via a second -m (never a heredoc body): Co-authored-by: ${bot.name} <${bot.email}>`,
     `- ${bot.name} is the ONLY allowed co-author. Never attribute a commit or pull ` +
       "request to Cursor, Claude, an AI, an assistant, or an agent — no " +
       "`Co-authored-by: Cursor Agent`, no `Generated with ...` lines",
     "- If git push is rejected, stop retrying — the control plane finalizes and pushes on completion or timeout",
+    "- If a shell command hangs, stop retrying it and finish remaining file edits; control plane finalizes git",
     "",
     "Sandbox resilience:",
     "- If shell/npm commands fail (ENOMEM, spawn errors), keep writing files with edit tools",

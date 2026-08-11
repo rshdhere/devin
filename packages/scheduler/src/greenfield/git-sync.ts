@@ -6,7 +6,8 @@ export function isAgentTimeoutMessage(message: string): boolean {
     /did not finish within/i.test(message) ||
     /timed out after/i.test(message) ||
     /context deadline exceeded/i.test(message) ||
-    /exited with code -1/i.test(message)
+    /exited with code -1/i.test(message) ||
+    /idle-stalled/i.test(message)
   );
 }
 

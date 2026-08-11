@@ -19,6 +19,11 @@ describe("greenfield-git-sync", () => {
     expect(isAgentTimeoutMessage("cursor agent exited with code 1")).toBe(
       false,
     );
+    expect(
+      isAgentTimeoutMessage(
+        "cursor agent idle-stalled after 8m0s with no output — likely hung on a shell HEREDOC",
+      ),
+    ).toBe(true);
   });
 
   test("buildAlignHydratedRepoScript hard-resets by default", () => {
