@@ -25,10 +25,12 @@ umask 077
   echo "GITHUB_BOT_NAME=baby-devin-bot"
   echo "GITHUB_BOT_EMAIL=baby-devin-bot@users.noreply.github.com"
   echo "AGENT_RUN_TIMEOUT_MIN=60"
+  echo "DEVIN_SNAPSHOT_DIR=/var/lib/devin/task-snapshots"
   db="$(read_ssm "$SSM_PREFIX/database_url")"
   if [ -n "$db" ]; then echo "DATABASE_URL=$db"; fi
 } >/etc/devin/scheduler-secrets.env
 chmod 600 /etc/devin/scheduler-secrets.env
+mkdir -p /var/lib/devin/task-snapshots
 printf '[Service]\nEnvironmentFile=/etc/devin/scheduler-secrets.env\n' >/etc/systemd/system/devin-scheduler.service.d/secrets.conf
 systemctl daemon-reload
 systemctl restart devin-scheduler.service || true

@@ -72,9 +72,12 @@ func SyncPlatformConfig(ctx context.Context) error {
 	if agentModel == "" {
 		agentModel = "composer-2.5"
 	}
-	secrets := fmt.Sprintf("DEFAULT_AGENT=cursor\nSERVICE_MODE=worker\nCURSOR_API_KEY=%s\nANTHROPIC_API_KEY=%s\nOPENAI_API_KEY=%s\nGITHUB_BOT_TOKEN=%s\nGITHUB_BOT_NAME=baby-devin-bot\nGITHUB_BOT_EMAIL=baby-devin-bot@users.noreply.github.com\nAGENT_RUN_TIMEOUT_MIN=60\nAGENT_MODEL=%s\n", read("cursor_api_key"), read("anthropic_api_key"), read("openai_api_key"), read("github_bot_token"), agentModel)
+	secrets := fmt.Sprintf("DEFAULT_AGENT=cursor\nSERVICE_MODE=worker\nCURSOR_API_KEY=%s\nANTHROPIC_API_KEY=%s\nOPENAI_API_KEY=%s\nGITHUB_BOT_TOKEN=%s\nGITHUB_BOT_NAME=baby-devin-bot\nGITHUB_BOT_EMAIL=baby-devin-bot@users.noreply.github.com\nAGENT_RUN_TIMEOUT_MIN=60\nAGENT_MODEL=%s\nDEVIN_SNAPSHOT_DIR=/var/lib/devin/task-snapshots\n", read("cursor_api_key"), read("anthropic_api_key"), read("openai_api_key"), read("github_bot_token"), agentModel)
 	if db := read("database_url"); db != "" {
 		secrets += "DATABASE_URL=" + db + "\n"
+	}
+	if err := os.MkdirAll("/var/lib/devin/task-snapshots", 0o755); err != nil {
+		return err
 	}
 	if err := sysutil.WriteFile("/etc/devin/scheduler-secrets.env", secrets, 0600); err != nil {
 		return err

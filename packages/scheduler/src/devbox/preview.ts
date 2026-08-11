@@ -1,17 +1,25 @@
+/** Well-known dev server ports probed when no listener is discovered dynamically. */
+export const COMMON_DEVBOX_PORTS = [
+  8000, 3000, 5173, 8080, 5000, 4173, 3001, 3002, 4200, 9000, 8888, 1313, 4321,
+  24678,
+] as const;
+
+function commonPortsShellList(): string {
+  return COMMON_DEVBOX_PORTS.join(" ");
+}
+
 /** Shell script: print first localhost port with a responding dev server (HTTP 2xx/3xx). */
 export function buildDiscoverDevboxPortScript(): string {
   return [
     "set +e",
-    "COMMON='8000 3000 5173 8080 5000 4173 3001 4200 9000 1313 4321 24678'",
+    `COMMON='${commonPortsShellList()}'`,
     "LISTEN=''",
     "if command -v ss >/dev/null 2>&1; then",
-    "  for p in $COMMON; do",
-    '    if ss -ltn 2>/dev/null | grep -qE ":$p[[:space:]]"; then LISTEN="$LISTEN $p"; fi',
-    "  done",
+    "  LISTEN=$(ss -ltnH 2>/dev/null | awk '{print $4}' | sed -n 's/.*:\\([0-9][0-9]*\\)$/\\1/p' | sort -un | tr '\\n' ' ')",
     "fi",
     "try_port() {",
     "  p=$1",
-    "  for path in / /health; do",
+    "  for path in / /health /api/health; do",
     "    code=$(curl -s -o /dev/null -w '%{http_code}' -H 'Accept-Encoding: identity' --max-time 3 \"http://127.0.0.1:$p$path\" 2>/dev/null || true)",
     '    if echo "$code" | grep -qE "^(200|30[0-9])"; then return 0; fi',
     "  done",
@@ -27,17 +35,31 @@ export function buildDiscoverDevboxPortScript(): string {
   ].join("\n");
 }
 
-/** Start npm dev/start in background for a one-off Playwright snapshot. */
+/** Start a dev server in background for a one-off Playwright snapshot. */
 export function buildStartDevServerForSnapshotScript(): string {
   return [
     "set +e",
     "PIDFILE=/workspace/.home/devin-snapshot-server.pid",
     'if [ -f "$PIDFILE" ]; then kill $(cat "$PIDFILE") 2>/dev/null || true; rm -f "$PIDFILE"; fi',
-    "if [ ! -f package.json ]; then exit 0; fi",
     'CMD=""',
-    'if [ -d .next ] && grep -q \'"start"\' package.json 2>/dev/null; then CMD="npm start"',
-    'elif grep -q "\\"dev\\"" package.json 2>/dev/null; then CMD="npm run dev"',
-    'elif grep -q "\\"start\\"" package.json 2>/dev/null; then CMD="npm start"; fi',
+    "if [ -f package.json ]; then",
+    '  if [ -d .next ] && grep -q \'"start"\' package.json 2>/dev/null; then CMD="npm start"',
+    '  elif grep -q "\\"dev\\"" package.json 2>/dev/null; then CMD="npm run dev"',
+    '  elif grep -q "\\"start\\"" package.json 2>/dev/null; then CMD="npm start"; fi',
+    "fi",
+    'if [ -z "$CMD" ]; then',
+    "  if [ -f main.py ] && grep -qE 'FastAPI|fastapi' main.py 2>/dev/null; then",
+    '    CMD="python3 -m uvicorn main:app --host 127.0.0.1 --port 8000"',
+    "  elif [ -f app.py ] && grep -qE 'FastAPI|fastapi|Flask|flask' app.py 2>/dev/null; then",
+    '    if grep -qE "FastAPI|fastapi" app.py 2>/dev/null; then CMD="python3 -m uvicorn app:app --host 127.0.0.1 --port 8000";',
+    '    else CMD="python3 -m flask --app app run --host 127.0.0.1 --port 5000"; fi',
+    "  elif [ -f manage.py ]; then",
+    '    CMD="python3 manage.py runserver 127.0.0.1:8000"',
+    "  elif [ -f pyproject.toml ] || [ -f requirements.txt ]; then",
+    '    if [ -f main.py ]; then CMD="python3 -m uvicorn main:app --host 127.0.0.1 --port 8000";',
+    '    elif [ -f app.py ]; then CMD="python3 -m uvicorn app:app --host 127.0.0.1 --port 8000"; fi',
+    "  fi",
+    "fi",
     'if [ -z "$CMD" ]; then exit 0; fi',
     'nohup bash -lc "$CMD" >>/workspace/.home/devin-snapshot-server.log 2>&1 &',
     'echo $! > "$PIDFILE"',
@@ -55,10 +77,18 @@ export function buildStopDevServerForSnapshotScript(): string {
 export function buildWaitForDevServerScript(): string {
   return [
     "set +e",
-    "for i in $(seq 1 45); do",
-    "  for p in 3000 8000 5173 8080; do",
-    "    code=$(curl -s -o /dev/null -w '%{http_code}' -H 'Accept-Encoding: identity' --max-time 2 \"http://127.0.0.1:$p/\" 2>/dev/null || true)",
+    `COMMON='${commonPortsShellList()}'`,
+    "try_port() {",
+    "  p=$1",
+    "  for path in / /health /api/health; do",
+    "    code=$(curl -s -o /dev/null -w '%{http_code}' -H 'Accept-Encoding: identity' --max-time 2 \"http://127.0.0.1:$p$path\" 2>/dev/null || true)",
     '    if echo "$code" | grep -qE "^(200|30[0-9])"; then echo "$p"; exit 0; fi',
+    "  done",
+    "  return 1",
+    "}",
+    "for i in $(seq 1 45); do",
+    "  for p in $COMMON; do",
+    '    if try_port "$p"; then exit 0; fi',
     "  done",
     "  sleep 1",
     "done",

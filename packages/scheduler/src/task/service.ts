@@ -17,6 +17,7 @@ import {
   buildStartDevServerForSnapshotScript,
   buildStopDevServerForSnapshotScript,
   buildWaitForDevServerScript,
+  COMMON_DEVBOX_PORTS,
 } from "../devbox/preview.js";
 import {
   loadTaskDesktopSnapshot,
@@ -433,7 +434,10 @@ export class TaskService {
       githubToken: persisted.githubToken,
       createdNewRepo: persisted.createdNewRepo,
       guestHost: persisted.guestHost,
+      devboxPreviewPort: persisted.previewPort,
     };
+    session.lastDesktopScreenshot =
+      await this.loadCachedDesktopSnapshot(taskId);
 
     this.activeSessions.set(taskId, session);
     const task = this.tasks.get(taskId);
@@ -2689,9 +2693,10 @@ export class TaskService {
     if (!text) {
       return;
     }
+    this.maybeRememberPreviewPortFromText(taskId, text);
     const lower = text.toLowerCase();
     const looksLikeDevServer =
-      /compiled successfully|✓ compiled|ready in \d|ready on|local:\s*https?:\/\/|started server|listening on|http:\/\/127\.0\.0\.1:\d+/i.test(
+      /compiled successfully|✓ compiled|ready in \d|ready on|local:\s*https?:\/\/|started server|listening on|http:\/\/127\.0\.0\.1:\d+|uvicorn running on|application startup complete|started reloader process|watchfiles\.main/i.test(
         text,
       );
     const looksLikeBuildOk =
@@ -2703,6 +2708,32 @@ export class TaskService {
       return;
     }
     void this.triggerDesktopSnapshot(taskId);
+  }
+
+  private maybeRememberPreviewPortFromText(taskId: string, text: string): void {
+    const match =
+      text.match(
+        /https?:\/\/(?:127\.0\.0\.1|localhost|0\.0\.0\.0):(\d{2,5})\b/i,
+      ) ?? text.match(/\blistening on[^0-9\n]{0,40}(\d{2,5})\b/i);
+    if (!match?.[1]) {
+      return;
+    }
+    const port = Number.parseInt(match[1], 10);
+    if (!Number.isFinite(port) || port <= 0) {
+      return;
+    }
+    const session =
+      this.activeSessions.get(taskId) ?? this.reviewSessions.get(taskId);
+    if (!session) {
+      return;
+    }
+    if (session.devboxPreviewPort === port) {
+      return;
+    }
+    session.devboxPreviewPort = port;
+    void this.taskStore.setPreviewPort(taskId, port);
+    const previewPath = `/api/v1/tasks/${encodeURIComponent(taskId)}/devbox-preview?path=/`;
+    this.patchTask(taskId, { previewUrl: previewPath });
   }
 
   private async triggerDesktopSnapshot(taskId: string): Promise<void> {
@@ -4566,7 +4597,11 @@ export class TaskService {
         githubToken: persisted.githubToken,
         createdNewRepo: persisted.createdNewRepo,
         guestHost: persisted.guestHost,
+        devboxPreviewPort: persisted.previewPort,
       };
+      session.lastDesktopScreenshot = await this.loadCachedDesktopSnapshot(
+        persisted.taskId,
+      );
 
       if (persisted.state === "review") {
         this.reviewSessions.set(persisted.taskId, session);
@@ -4595,6 +4630,7 @@ export class TaskService {
       githubToken: session.githubToken,
       createdNewRepo: session.createdNewRepo,
       guestHost: session.guestHost,
+      previewPort: session.devboxPreviewPort,
       lastActiveAt: new Date().toISOString(),
     });
   }
@@ -4826,14 +4862,20 @@ export class TaskService {
     }
   }
 
-  async fetchDesktopScreenshot(taskId: string): Promise<Response> {
+  async fetchDesktopScreenshot(
+    taskId: string,
+    opts?: { fresh?: boolean },
+  ): Promise<Response> {
     if (this.mode === "brain") {
+      const freshQuery = opts?.fresh ? "?fresh=1" : "";
       return this.delegateRequestToWorker(
-        `/api/v1/tasks/${encodeURIComponent(taskId)}/desktop-screenshot`,
+        `/api/v1/tasks/${encodeURIComponent(taskId)}/desktop-screenshot${freshQuery}`,
       );
     }
 
-    const cached = await loadTaskDesktopSnapshot(taskId);
+    const cached = opts?.fresh
+      ? undefined
+      : await this.loadCachedDesktopSnapshot(taskId);
     if (cached) {
       return new Response(cached, {
         status: 200,
@@ -4859,7 +4901,7 @@ export class TaskService {
       taskId,
     );
     if (!buffer) {
-      const disk = await loadTaskDesktopSnapshot(taskId);
+      const disk = await this.loadCachedDesktopSnapshot(taskId);
       if (disk) {
         return new Response(disk, {
           status: 200,
@@ -4882,13 +4924,31 @@ export class TaskService {
     });
   }
 
+  private async loadCachedDesktopSnapshot(
+    taskId: string,
+  ): Promise<Buffer | undefined> {
+    const disk = await loadTaskDesktopSnapshot(taskId);
+    if (disk) {
+      return disk;
+    }
+    const fromDb = await this.taskStore.loadDesktopSnapshot(taskId);
+    if (fromDb) {
+      await saveTaskDesktopSnapshot(taskId, fromDb);
+      return fromDb;
+    }
+    return undefined;
+  }
+
   private async persistDesktopSnapshot(
     taskId: string,
     session: ReviewSession,
     buffer: Buffer,
   ): Promise<void> {
     session.lastDesktopScreenshot = buffer;
-    await saveTaskDesktopSnapshot(taskId, buffer);
+    await Promise.all([
+      saveTaskDesktopSnapshot(taskId, buffer),
+      this.taskStore.saveDesktopSnapshot(taskId, buffer),
+    ]);
     this.emit("agent.log", taskId, "Sandbox desktop snapshot saved", {
       desktop: true,
       desktopSnapshot: true,
@@ -4905,7 +4965,7 @@ export class TaskService {
       return buffer;
     }
 
-    const cached = await loadTaskDesktopSnapshot(taskId);
+    const cached = await this.loadCachedDesktopSnapshot(taskId);
     if (cached) {
       session.lastDesktopScreenshot = cached;
       return cached;
@@ -4952,7 +5012,7 @@ export class TaskService {
     taskId: string,
   ): Promise<Buffer | undefined> {
     await this.refreshDevboxPreviewPort(session, taskId);
-    const fallbackPorts = [8000, 3000, 5173, 8080, 5000, 4173];
+    const fallbackPorts = [...COMMON_DEVBOX_PORTS];
     const ports = session.devboxPreviewPort
       ? [
           session.devboxPreviewPort,
@@ -5066,6 +5126,7 @@ export class TaskService {
       const portChanged = session.devboxPreviewPort !== port;
       session.devboxPreviewPort = port;
       if (portChanged) {
+        void this.taskStore.setPreviewPort(taskId, port);
         const previewPath = `/api/v1/tasks/${encodeURIComponent(taskId)}/devbox-preview?path=/`;
         this.patchTask(taskId, { previewUrl: previewPath });
         this.emit("agent.log", taskId, "Devbox localhost preview available", {

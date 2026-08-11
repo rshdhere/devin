@@ -7,7 +7,14 @@ import {
   index,
   integer,
   jsonb,
+  customType,
 } from "drizzle-orm/pg-core";
+
+const bytea = customType<{ data: Buffer; driverData: Buffer }>({
+  dataType() {
+    return "bytea";
+  },
+});
 
 export const user = pgTable("user", {
   id: text("id").primaryKey(),
@@ -203,6 +210,8 @@ export const agentSessions = pgTable(
     githubToken: text("github_token"),
     createdNewRepo: boolean("created_new_repo").default(false).notNull(),
     guestHost: text("guest_host"),
+    previewPort: integer("preview_port"),
+    desktopSnapshot: bytea("desktop_snapshot"),
     lastActiveAt: timestamp("last_active_at").defaultNow().notNull(),
     sleepingAt: timestamp("sleeping_at"),
     createdAt: timestamp("created_at").defaultNow().notNull(),

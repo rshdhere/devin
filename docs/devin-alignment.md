@@ -49,14 +49,22 @@ Set `SCHEDULER_URL` on the API server to the brain URL in cloud deployments.
 | **Shell** | `POST /tasks/:id/terminal` (`stream: true`) | Streaming command output from devbox |
 | **Files** | `GET /tasks/:id/files`, `/files/read` | Repo file tree + read-only preview |
 | **Browser** | Embedded iframe when a legacy `previewUrl` exists | Preview deploy is not supported — Devin pushes to GitHub only |
+| **Desktop** | `GET /tasks/:id/desktop-screenshot` | Playwright/Chromium capture of localhost in the devbox |
+
+Desktop snapshots:
+
+1. Probe any listening TCP port (via `ss`), spin up npm/uvicorn when needed, capture with Playwright.
+2. Cache PNG on the execution host under `DEVIN_SNAPSHOT_DIR` (production: `/var/lib/devin/task-snapshots`).
+3. Persist PNG + preview port on `agent_sessions` (`desktop_snapshot` bytea, `preview_port`) so brain/worker restarts and sleep/wake still serve the last capture.
+4. Pass `?fresh=1` to bypass caches and recapture.
 
 ## Durable sessions (Postgres)
 
-Migration `0003_agent_sessions.sql` adds:
+Migrations `0003_agent_sessions.sql` and `0004_desktop_snapshot.sql` add:
 
 - `agent_tasks` — task state (survives scheduler/brain restart)
 - `agent_task_events` — append-only event log for SSE replay
-- `agent_sessions` — devbox lease metadata (`active` / `review` / `sleeping`)
+- `agent_sessions` — devbox lease metadata (`active` / `review` / `sleeping`), plus `preview_port` and `desktop_snapshot`
 
 On startup, scheduler/worker calls `TaskService.initialize()` to restore tasks, events, and reconnect live sessions when runtime health succeeds.
 
@@ -102,4 +110,5 @@ OpenAI plan → control-plane scaffold push → `nextjs` snapshot verify. Kept f
 - `SCHEDULER_HOST_NAME` must match `FirecrackerHost` CR name (pins devbox to execution host).
 - Cloud: `DATABASE_URL` on brain + worker; `EXECUTION_WORKER_URL` on brain; `SCHEDULER_URL` on API → brain.
 - Run `sudo devin-infra sync-platform-config` after SSM or image updates.
-- Apply migrations `0002_require_review_before_push.sql` and `0003_agent_sessions.sql`.
+- Apply migrations through `0004_desktop_snapshot.sql` (preview port + desktop PNG on `agent_sessions`).
+- Execution hosts: `DEVIN_SNAPSHOT_DIR=/var/lib/devin/task-snapshots` (mounted into the scheduler container).

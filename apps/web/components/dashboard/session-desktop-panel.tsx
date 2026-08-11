@@ -40,11 +40,13 @@ export function SessionDesktopPanel({
   const [shotError, setShotError] = useState(false);
   const [shotLoading, setShotLoading] = useState(false);
   const [shotUrl, setShotUrl] = useState<string | null>(null);
+  const [forceFresh, setForceFresh] = useState(false);
   const shotUrlRef = useRef<string | null>(null);
   shotUrlRef.current = shotUrl;
 
-  const refreshScreenshot = useCallback(() => {
+  const refreshScreenshot = useCallback((fresh = true) => {
     setShotError(false);
+    setForceFresh(fresh);
     setShotKey((k) => k + 1);
   }, []);
 
@@ -60,7 +62,8 @@ export function SessionDesktopPanel({
     }
     let cancelled = false;
     setShotLoading(true);
-    const url = `${screenshotSrc}?t=${shotKey}`;
+    const freshQuery = forceFresh ? "&fresh=1" : "";
+    const url = `${screenshotSrc}?t=${shotKey}${freshQuery}`;
     fetch(url, { credentials: "include" })
       .then(async (response) => {
         if (!response.ok) {
@@ -95,7 +98,7 @@ export function SessionDesktopPanel({
     return () => {
       cancelled = true;
     };
-  }, [canUse, screenshotSrc, shotKey]);
+  }, [canUse, forceFresh, screenshotSrc, shotKey]);
 
   const isAgentActive =
     task.status === "running" ||
@@ -111,7 +114,7 @@ export function SessionDesktopPanel({
     }
     const interval = setInterval(
       () => {
-        refreshScreenshot();
+        refreshScreenshot(false);
       },
       isAgentActive ? 8_000 : 20_000,
     );
@@ -152,7 +155,7 @@ export function SessionDesktopPanel({
         </span>
         <button
           type="button"
-          onClick={refreshScreenshot}
+          onClick={() => refreshScreenshot(true)}
           className="inline-flex cursor-pointer items-center gap-1 rounded-md px-2 py-1 text-[11px] text-zinc-400 hover:bg-white/[0.06] hover:text-zinc-200"
         >
           <RefreshCw className="size-3.5" />
@@ -172,10 +175,10 @@ export function SessionDesktopPanel({
         {shotError && !shotUrl ? (
           <p className="max-w-sm text-center text-[12px] text-zinc-500">
             {isAgentActive
-              ? "Capturing sandbox preview… we start npm start/dev briefly after build when needed."
+              ? "Capturing sandbox preview… we start npm/uvicorn briefly after build when needed."
               : task.sessionSleeping
                 ? "Waking devbox to load saved snapshot — try Refresh."
-                : "Click Refresh to capture the app with Playwright."}
+                : "No snapshot yet — click Refresh to capture localhost via Playwright."}
           </p>
         ) : null}
         {shotUrl ? (

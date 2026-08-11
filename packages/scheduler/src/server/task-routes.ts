@@ -192,7 +192,13 @@ export function createTaskRouter(tasks: TaskService): Router {
 
   router.get("/:id/desktop-screenshot", async (req, res) => {
     try {
-      const response = await tasks.fetchDesktopScreenshot(req.params.id);
+      const fresh =
+        req.query.fresh === "1" ||
+        req.query.fresh === "true" ||
+        req.query.refresh === "1";
+      const response = await tasks.fetchDesktopScreenshot(req.params.id, {
+        fresh,
+      });
       const body = await response.arrayBuffer();
       res.status(response.status);
       res.setHeader(

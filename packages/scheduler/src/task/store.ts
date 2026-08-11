@@ -20,6 +20,8 @@ export interface PersistedSession {
   githubToken?: string;
   createdNewRepo: boolean;
   guestHost?: string;
+  /** Last discovered localhost preview port inside the devbox. */
+  previewPort?: number;
   lastActiveAt: string;
   sleepingAt?: string;
 }
@@ -105,6 +107,13 @@ export class TaskStore {
       return;
     }
 
+    const previewPort =
+      typeof session.previewPort === "number" &&
+      Number.isFinite(session.previewPort) &&
+      session.previewPort > 0
+        ? Math.trunc(session.previewPort)
+        : null;
+
     await db
       .insert(agentSessions)
       .values({
@@ -117,6 +126,7 @@ export class TaskStore {
         githubToken: session.githubToken,
         createdNewRepo: session.createdNewRepo,
         guestHost: session.guestHost,
+        previewPort,
         lastActiveAt: new Date(session.lastActiveAt),
         sleepingAt: session.sleepingAt ? new Date(session.sleepingAt) : null,
         updatedAt: new Date(),
@@ -132,11 +142,58 @@ export class TaskStore {
           githubToken: session.githubToken,
           createdNewRepo: session.createdNewRepo,
           guestHost: session.guestHost,
+          ...(previewPort != null ? { previewPort } : {}),
           lastActiveAt: new Date(session.lastActiveAt),
           sleepingAt: session.sleepingAt ? new Date(session.sleepingAt) : null,
           updatedAt: new Date(),
         },
       });
+  }
+
+  async saveDesktopSnapshot(taskId: string, data: Buffer): Promise<void> {
+    if (!this.enabled || data.length < 128) {
+      return;
+    }
+
+    await db
+      .update(agentSessions)
+      .set({
+        desktopSnapshot: data,
+        updatedAt: new Date(),
+      })
+      .where(eq(agentSessions.taskId, taskId));
+  }
+
+  async loadDesktopSnapshot(taskId: string): Promise<Buffer | undefined> {
+    if (!this.enabled) {
+      return undefined;
+    }
+
+    const rows = await db
+      .select({ desktopSnapshot: agentSessions.desktopSnapshot })
+      .from(agentSessions)
+      .where(eq(agentSessions.taskId, taskId))
+      .limit(1);
+
+    const data = rows[0]?.desktopSnapshot;
+    if (!data || !Buffer.isBuffer(data) || data.length < 128) {
+      return undefined;
+    }
+    return data;
+  }
+
+  async setPreviewPort(taskId: string, port: number): Promise<void> {
+    if (!this.enabled || !Number.isFinite(port) || port <= 0) {
+      return;
+    }
+
+    await db
+      .update(agentSessions)
+      .set({
+        previewPort: Math.trunc(port),
+        updatedAt: new Date(),
+      })
+      .where(eq(agentSessions.taskId, taskId));
   }
 
   async deleteSession(taskId: string): Promise<void> {
@@ -387,6 +444,10 @@ function rowToSession(
     githubToken: row.githubToken ?? undefined,
     createdNewRepo: row.createdNewRepo,
     guestHost: row.guestHost ?? undefined,
+    previewPort:
+      typeof row.previewPort === "number" && row.previewPort > 0
+        ? row.previewPort
+        : undefined,
     lastActiveAt: row.lastActiveAt.toISOString(),
     sleepingAt: row.sleepingAt?.toISOString(),
   };

@@ -149,9 +149,13 @@ export async function fetchDevboxPreview(
   );
 }
 
-export async function fetchDesktopScreenshot(id: string): Promise<Response> {
+export async function fetchDesktopScreenshot(
+  id: string,
+  opts?: { fresh?: boolean },
+): Promise<Response> {
+  const freshQuery = opts?.fresh ? "?fresh=1" : "";
   return proxyScheduler(
-    `/api/v1/tasks/${encodeURIComponent(id)}/desktop-screenshot`,
+    `/api/v1/tasks/${encodeURIComponent(id)}/desktop-screenshot${freshQuery}`,
   );
 }
 

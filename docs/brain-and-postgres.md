@@ -150,7 +150,7 @@ When staging shares the production EC2 execution host, the staging `FirecrackerH
 | Brain app | `apps/brain/` |
 | Docker | `docker/brain/Dockerfile` |
 | CI images | `.github/workflows/registry.yaml` |
-| Migrations | `packages/drizzle/drizzle/0003_agent_sessions.sql` |
+| Migrations | `packages/drizzle/drizzle/0004_desktop_snapshot.sql` |
 | Worker SSM sync | `devin-infra sync-platform-config` (see `infra/README-cli.md`) |
 | Alignment | `docs/devin-alignment.md` |
 

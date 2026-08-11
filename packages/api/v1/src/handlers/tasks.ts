@@ -316,7 +316,11 @@ tasksRouter.get("/:id/devbox-preview", async (req, res) => {
 
 tasksRouter.get("/:id/desktop-screenshot", async (req, res) => {
   try {
-    const response = await fetchDesktopScreenshot(req.params.id);
+    const fresh =
+      req.query.fresh === "1" ||
+      req.query.fresh === "true" ||
+      req.query.refresh === "1";
+    const response = await fetchDesktopScreenshot(req.params.id, { fresh });
     res.status(response.status);
     res.setHeader(
       "Content-Type",

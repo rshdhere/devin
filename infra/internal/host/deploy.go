@@ -68,12 +68,15 @@ RestartSec=5
 Environment=ORCHESTRATOR_URL=http://pending-ssm-sync:9090
 EnvironmentFile=-/etc/devin/scheduler-secrets.env
 ExecStartPre=-/usr/bin/docker rm -f scheduler
-ExecStart=/usr/bin/docker run --rm --name scheduler --network host --env-file /etc/devin/scheduler-secrets.env -e SCHEDULER_PORT=9091 -e ORCHESTRATOR_URL=${ORCHESTRATOR_URL} -e FIRECRACKER_HOST_URL=http://127.0.0.1:9092 -e SCHEDULER_HOST_NAME=%s -e FIRECRACKER_HOST_NAME=%s -e QUEUE_DRIVER=${QUEUE_DRIVER} -e SQS_QUEUE_URL=${SQS_QUEUE_URL} -e AWS_REGION=%s -e DEFAULT_AGENT=cursor -e SANDBOX_READY_TIMEOUT_SECONDS=300 -e RUNTIME_READY_TIMEOUT_SECONDS=120 -e AGENT_RUN_TIMEOUT_MIN=60 %s
+ExecStart=/usr/bin/docker run --rm --name scheduler --network host --env-file /etc/devin/scheduler-secrets.env -v /var/lib/devin/task-snapshots:/var/lib/devin/task-snapshots -e DEVIN_SNAPSHOT_DIR=/var/lib/devin/task-snapshots -e SCHEDULER_PORT=9091 -e ORCHESTRATOR_URL=${ORCHESTRATOR_URL} -e FIRECRACKER_HOST_URL=http://127.0.0.1:9092 -e SCHEDULER_HOST_NAME=%s -e FIRECRACKER_HOST_NAME=%s -e QUEUE_DRIVER=${QUEUE_DRIVER} -e SQS_QUEUE_URL=${SQS_QUEUE_URL} -e AWS_REGION=%s -e DEFAULT_AGENT=cursor -e SANDBOX_READY_TIMEOUT_SECONDS=300 -e RUNTIME_READY_TIMEOUT_SECONDS=120 -e AGENT_RUN_TIMEOUT_MIN=60 %s
 ExecStop=/usr/bin/docker stop scheduler
 [Install]
 WantedBy=multi-user.target
 `, hostName, hostName, envx.Region(""), registry+"/devin-scheduler:"+tag)
 	if err := sysutil.WriteFile("/etc/systemd/system/devin-firecracker.service", fc, 0644); err != nil {
+		return err
+	}
+	if err := os.MkdirAll("/var/lib/devin/task-snapshots", 0o755); err != nil {
 		return err
 	}
 	if err := sysutil.WriteFile("/etc/systemd/system/devin-scheduler.service", scheduler, 0644); err != nil {

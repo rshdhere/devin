@@ -1,7 +1,14 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 
-function snapshotDir(): string {
+/**
+ * Host-local PNG cache for desktop snapshots (scheduler worker).
+ *
+ * Prefer Postgres (`agent_sessions.desktop_snapshot`) for cross-worker / brain
+ * durability. Disk is a fast local cache — set `DEVIN_SNAPSHOT_DIR` to a
+ * persistent host path (default `/var/lib/devin/task-snapshots` in production).
+ */
+export function snapshotDir(): string {
   return (
     process.env.DEVIN_SNAPSHOT_DIR?.trim() ||
     path.join(process.env.TMPDIR || "/tmp", "devin-task-snapshots")

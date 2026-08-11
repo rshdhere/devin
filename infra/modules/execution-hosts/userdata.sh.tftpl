@@ -43,7 +43,7 @@ if ! command -v docker &>/dev/null; then
   systemctl enable --now docker
 fi
 
-mkdir -p /etc/cni/conf.d /opt/cni/bin /var/lib/devin/linux /var/lib/devin/snapshots /var/lib/devin/vms
+mkdir -p /etc/cni/conf.d /opt/cni/bin /var/lib/devin/linux /var/lib/devin/snapshots /var/lib/devin/vms /var/lib/devin/task-snapshots
 
 # Install /usr/local/bin/devin-infra from the published image, or build from git.
 install_devin_infra() {
@@ -128,6 +128,8 @@ ExecStartPre=-/usr/bin/docker rm -f scheduler
 ExecStart=/usr/bin/docker run --rm --name scheduler \\
   --network host \\
   --env-file /etc/devin/scheduler-secrets.env \\
+  -v /var/lib/devin/task-snapshots:/var/lib/devin/task-snapshots \\
+  -e DEVIN_SNAPSHOT_DIR=/var/lib/devin/task-snapshots \\
   -e SCHEDULER_PORT=9091 \\
   -e ORCHESTRATOR_URL=$${ORCHESTRATOR_URL} \\
   -e FIRECRACKER_HOST_URL=http://127.0.0.1:9092 \\
