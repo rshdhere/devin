@@ -44,8 +44,8 @@ const browser = await chromium.launch({
   args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
 });
 const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
-await page.goto(url, { waitUntil: 'networkidle', timeout: 45000 });
-await page.waitForTimeout(1500);
+await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 15000 });
+await page.waitForTimeout(800);
 await page.screenshot({ path: out, fullPage: false, type: 'png' });
 await browser.close();
 `,
@@ -94,18 +94,29 @@ func (s *Server) captureDesktopScreenshotToFile(
 	ctx context.Context,
 	targetURL, outPath string,
 ) error {
-	result, err := s.runPlaywrightScreenshot(ctx, targetURL, outPath)
+	// Prefer Chromium CLI first — Playwright networkidle used to hang forever on
+	// Next.js HMR websockets. CLI is bounded and good enough for sandbox previews.
+	result, err := s.runChromiumCLIScreenshot(ctx, targetURL, outPath)
 	if err == nil && result.ExitCode == 0 {
 		if data, readErr := os.ReadFile(outPath); readErr == nil && len(data) > 128 {
 			return nil
 		}
 	}
-	result, err = s.runChromiumCLIScreenshot(ctx, targetURL, outPath)
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	result, err = s.runPlaywrightScreenshot(ctx, targetURL, outPath)
 	if err != nil {
 		return err
 	}
 	if result.ExitCode != 0 {
 		return fmt.Errorf("%s", executil.CombinedOutput(result))
+	}
+	if data, readErr := os.ReadFile(outPath); readErr != nil || len(data) < 128 {
+		if readErr != nil {
+			return readErr
+		}
+		return fmt.Errorf("screenshot file empty")
 	}
 	return nil
 }

@@ -64,7 +64,9 @@ export function SessionDesktopPanel({
     setShotLoading(true);
     const freshQuery = forceFresh ? "&fresh=1" : "";
     const url = `${screenshotSrc}?t=${shotKey}${freshQuery}`;
-    fetch(url, { credentials: "include" })
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), 25_000);
+    fetch(url, { credentials: "include", signal: controller.signal })
       .then(async (response) => {
         if (!response.ok) {
           throw new Error(`snapshot HTTP ${response.status}`);
@@ -90,6 +92,7 @@ export function SessionDesktopPanel({
         }
       })
       .finally(() => {
+        window.clearTimeout(timeout);
         if (!cancelled) {
           setShotLoading(false);
         }
@@ -97,6 +100,8 @@ export function SessionDesktopPanel({
 
     return () => {
       cancelled = true;
+      controller.abort();
+      window.clearTimeout(timeout);
     };
   }, [canUse, forceFresh, screenshotSrc, shotKey]);
 

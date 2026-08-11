@@ -17,7 +17,6 @@ import {
   buildStartDevServerForSnapshotScript,
   buildStopDevServerForSnapshotScript,
   buildWaitForDevServerScript,
-  COMMON_DEVBOX_PORTS,
 } from "../devbox/preview.js";
 import {
   loadTaskDesktopSnapshot,
@@ -144,6 +143,10 @@ export class TaskService {
   private readonly snapshotSpinCooldownMs = 45_000;
   private readonly lastSnapshotSpinAt = new Map<string, number>();
   private readonly lastSnapshotTriggerAt = new Map<string, number>();
+  private readonly desktopCaptureInFlight = new Map<
+    string,
+    Promise<Buffer | undefined>
+  >();
 
   constructor(options: TaskServiceOptions) {
     this.orchestratorUrl = options.orchestratorUrl.replace(/\/$/, "");
@@ -1388,14 +1391,13 @@ export class TaskService {
       const sessionBeforeComplete =
         this.activeSessions.get(task.id) ?? this.reviewSessions.get(task.id);
       if (sessionBeforeComplete) {
-        try {
-          await this.captureDesktopScreenshotWithDevServer(
-            sessionBeforeComplete,
-            task.id,
-          );
-        } catch {
-          // best-effort final sandbox snapshot
-        }
+        // Never block task completion on Playwright — a hung capture kept
+        // sessions "Working…" for 30+ minutes after GitHub already had commits.
+        void this.captureDesktopScreenshotWithDevServer(
+          sessionBeforeComplete,
+          task.id,
+          { allowSpin: true },
+        );
       }
 
       this.updateTask(task.id, "completed", completionMessage);
@@ -2749,7 +2751,9 @@ export class TaskService {
       return;
     }
     try {
-      await this.captureDesktopScreenshotWithDevServer(session, taskId);
+      await this.captureDesktopScreenshotWithDevServer(session, taskId, {
+        allowSpin: true,
+      });
     } catch {
       // best-effort
     }
@@ -4899,6 +4903,7 @@ export class TaskService {
     const buffer = await this.captureDesktopScreenshotWithDevServer(
       session,
       taskId,
+      { allowSpin: Boolean(opts?.fresh) },
     );
     if (!buffer) {
       const disk = await this.loadCachedDesktopSnapshot(taskId);
@@ -4959,6 +4964,30 @@ export class TaskService {
   private async captureDesktopScreenshotWithDevServer(
     session: ReviewSession,
     taskId: string,
+    opts?: { allowSpin?: boolean },
+  ): Promise<Buffer | undefined> {
+    const existing = this.desktopCaptureInFlight.get(taskId);
+    if (existing) {
+      return existing;
+    }
+
+    const promise = this.runDesktopScreenshotWithDevServer(
+      session,
+      taskId,
+      opts?.allowSpin !== false,
+    ).finally(() => {
+      if (this.desktopCaptureInFlight.get(taskId) === promise) {
+        this.desktopCaptureInFlight.delete(taskId);
+      }
+    });
+    this.desktopCaptureInFlight.set(taskId, promise);
+    return promise;
+  }
+
+  private async runDesktopScreenshotWithDevServer(
+    session: ReviewSession,
+    taskId: string,
+    allowSpin: boolean,
   ): Promise<Buffer | undefined> {
     let buffer = await this.captureDesktopScreenshot(session, taskId);
     if (buffer) {
@@ -4969,6 +4998,10 @@ export class TaskService {
     if (cached) {
       session.lastDesktopScreenshot = cached;
       return cached;
+    }
+
+    if (!allowSpin) {
+      return session.lastDesktopScreenshot;
     }
 
     const now = Date.now();
@@ -4992,6 +5025,7 @@ export class TaskService {
       const port = Number.parseInt(wait.stdout.trim(), 10);
       if (Number.isFinite(port) && port > 0) {
         session.devboxPreviewPort = port;
+        void this.taskStore.setPreviewPort(taskId, port);
       }
       buffer = await this.captureDesktopScreenshot(session, taskId);
     } catch {
@@ -5012,44 +5046,33 @@ export class TaskService {
     taskId: string,
   ): Promise<Buffer | undefined> {
     await this.refreshDevboxPreviewPort(session, taskId);
-    const fallbackPorts = [...COMMON_DEVBOX_PORTS];
-    const ports = session.devboxPreviewPort
-      ? [
-          session.devboxPreviewPort,
-          ...fallbackPorts.filter((p) => p !== session.devboxPreviewPort),
-        ]
-      : fallbackPorts;
+
+    // Only hit ports we know respond — spraying every common port with
+    // Playwright (90s each) is what froze sessions after the agent finished.
+    const ports = session.devboxPreviewPort ? [session.devboxPreviewPort] : [];
 
     let buffer: Buffer | undefined;
     for (const port of ports) {
       const target = `http://127.0.0.1:${port}/`;
       buffer = await this.fetchRuntimeLiveScreenshot(taskId, target);
       if (buffer) {
-        session.devboxPreviewPort = port;
         break;
       }
-    }
-
-    if (!buffer) {
-      for (const port of ports) {
-        const target = `http://127.0.0.1:${port}/`;
-        try {
-          await session.runtime.terminalAllowFailure({
-            taskId,
-            cwd: session.repoCwd,
-            command: buildDesktopScreenshotScript(
-              target,
-              "/workspace/.home/desktop-preview.png",
-            ),
-          });
-        } catch {
-          // playwright/chromium may be missing in older snapshots
-        }
-        buffer = await this.fetchRuntimePersistedScreenshot(taskId);
-        if (buffer) {
-          session.devboxPreviewPort = port;
-          break;
-        }
+      try {
+        await session.runtime.terminalAllowFailure({
+          taskId,
+          cwd: session.repoCwd,
+          command: buildDesktopScreenshotScript(
+            target,
+            "/workspace/.home/desktop-preview.png",
+          ),
+        });
+      } catch {
+        // playwright/chromium may be missing in older snapshots
+      }
+      buffer = await this.fetchRuntimePersistedScreenshot(taskId);
+      if (buffer) {
+        break;
       }
     }
 
@@ -5072,7 +5095,7 @@ export class TaskService {
       const upstream = await this.proxyRuntimeRequest(
         taskId,
         `/browser/screenshot?url=${encodeURIComponent(targetUrl)}`,
-        { signal: AbortSignal.timeout(90_000) },
+        { signal: AbortSignal.timeout(25_000) },
       );
       if (!upstream.ok) {
         return undefined;
@@ -5164,7 +5187,10 @@ export class TaskService {
         return;
       }
       await this.refreshDevboxPreviewPort(session, taskId);
-      void this.captureDesktopScreenshotWithDevServer(session, taskId);
+      // Watcher must not spin npm/uvicorn — that races the agent and can hang.
+      void this.captureDesktopScreenshotWithDevServer(session, taskId, {
+        allowSpin: false,
+      });
     };
 
     const interval = setInterval(() => {

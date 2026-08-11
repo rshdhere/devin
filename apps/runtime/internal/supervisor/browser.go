@@ -1,6 +1,7 @@
 package supervisor
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -8,6 +9,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/rshdhere/devin/apps/runtime/internal/executil"
 	"github.com/rshdhere/devin/apps/runtime/internal/workspace"
@@ -148,8 +150,10 @@ func (s *Server) handleDesktopScreenshot(w http.ResponseWriter, r *http.Request)
 	if targetURL == "" {
 		targetURL = "http://127.0.0.1:8000/"
 	}
+	ctx, cancel := context.WithTimeout(r.Context(), 22*time.Second)
+	defer cancel()
 	outPath := filepath.Join(workspace.WritableHome(s.workspace), "desktop-preview.png")
-	if err := s.captureDesktopScreenshotToFile(r.Context(), targetURL, outPath); err != nil {
+	if err := s.captureDesktopScreenshotToFile(ctx, targetURL, outPath); err != nil {
 		msg := err.Error()
 		if msg == "" {
 			msg = "playwright/chromium screenshot failed in sandbox"
