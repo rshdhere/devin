@@ -76,7 +76,8 @@ func (s *Server) runChromiumCLIScreenshot(
 ) (*executil.Result, error) {
 	chrome := chromiumExecutable()
 	script := fmt.Sprintf(
-		"set -e; %s --headless --disable-gpu --no-sandbox --window-size=1024,768 --hide-scrollbars --run-all-compositor-stages-before-draw --virtual-time-budget=10000 --screenshot=%s %s",
+		"set -e; mkdir -p %s 2>/dev/null || true; %s --headless --disable-gpu --no-sandbox --disable-dev-shm-usage --window-size=1024,768 --hide-scrollbars --run-all-compositor-stages-before-draw --virtual-time-budget=10000 --screenshot=%s %s",
+		shellQuote(filepath.Dir(outPath)),
 		shellQuote(chrome),
 		shellQuote(outPath),
 		shellQuote(targetURL),

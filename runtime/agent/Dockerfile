@@ -38,7 +38,15 @@ RUN npm install -g @anthropic-ai/claude-code@latest \
 
 RUN npm install -g playwright-core@1.60.0
 
-ENV PATH="/root/.local/bin:/usr/local/bin:${PATH}"
+# Go toolchain so greenfield Go apps can build/run for Desktop snapshots after Done.
+RUN curl -fsSL https://go.dev/dl/go1.23.6.linux-amd64.tar.gz -o /tmp/go.tgz \
+    && tar -C /usr/local -xzf /tmp/go.tgz \
+    && rm -f /tmp/go.tgz \
+    && /usr/local/go/bin/go version
+
+ENV PATH="/usr/local/go/bin:/root/.local/bin:/usr/local/bin:${PATH}"
+ENV GOPATH=/go
+ENV CGO_ENABLED=0
 ENV AGENT_PROVIDER=mock
 ENV AGENT_RUN_TIMEOUT_MIN=120
 ENV RUNTIME_PORT=8081

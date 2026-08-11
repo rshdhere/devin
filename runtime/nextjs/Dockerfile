@@ -1,11 +1,13 @@
 FROM node:22-bookworm-slim
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    bash ca-certificates curl git openssh-client unzip \
+    bash ca-certificates curl git openssh-client unzip chromium \
     && rm -rf /var/lib/apt/lists/*
 
 RUN curl -fsSL https://bun.sh/install | bash \
     && ln -sf /root/.bun/bin/bun /usr/local/bin/bun
+
+RUN npm install -g playwright-core@1.60.0 || true
 
 ENV PATH="/root/.bun/bin:${PATH}"
 ENV NEXT_TELEMETRY_DISABLED=1

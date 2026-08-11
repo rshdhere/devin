@@ -1,7 +1,7 @@
 FROM golang:1.23-bookworm
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates git \
+    ca-certificates curl git chromium \
     && rm -rf /var/lib/apt/lists/*
 
 ENV CGO_ENABLED=0

@@ -17,6 +17,7 @@ import {
   buildStartDevServerForSnapshotScript,
   buildStopDevServerForSnapshotScript,
   buildWaitForDevServerScript,
+  RUNTIME_SUPERVISOR_PORTS,
 } from "../devbox/preview.js";
 import {
   loadTaskDesktopSnapshot,
@@ -1498,7 +1499,7 @@ export class TaskService {
             bypassSpinCooldown: true,
           }),
           new Promise<undefined>((resolve) =>
-            setTimeout(() => resolve(undefined), 45_000),
+            setTimeout(() => resolve(undefined), 120_000),
           ),
         ]);
       } else if (sessionBeforeComplete) {
@@ -1513,7 +1514,7 @@ export class TaskService {
             },
           ),
           new Promise<undefined>((resolve) =>
-            setTimeout(() => resolve(undefined), 45_000),
+            setTimeout(() => resolve(undefined), 120_000),
           ),
         ]);
       }
@@ -3861,6 +3862,21 @@ export class TaskService {
           `go mod tidy failed: ${tidy.stderr || tidy.stdout}`.trim(),
         );
       }
+      await this.smokeAndCaptureDevboxPreview(runtime, task, repoCwd, {
+        startCommand: [
+          "set +e",
+          "mkdir -p /workspace/.home",
+          'export PATH="/usr/local/go/bin:/usr/local/bin:$PATH"',
+          "export HOST=127.0.0.1 PORT=3000 HOSTNAME=127.0.0.1",
+          "BIN=/workspace/.home/devin-app",
+          'if [ ! -x "$BIN" ]; then go build -o "$BIN" . || exit 1; fi',
+          'nohup "$BIN" >/workspace/.home/devin-snapshot-server.log 2>&1 &',
+          "echo $! > /workspace/.home/devin-snapshot-server.pid",
+          "exit 0",
+        ].join("\n"),
+        port: 3000,
+        waitSeconds: 90,
+      });
     } else if (
       stackRuntime === "rust" ||
       hasCargoToml.stdout.trim() === "yes"
@@ -3892,6 +3908,20 @@ export class TaskService {
       if (install.exitCode === 124) {
         throw new Error("Python dependency install timed out after 180s");
       }
+      await this.smokeAndCaptureDevboxPreview(runtime, task, repoCwd, {
+        startCommand: [
+          "set +e",
+          "mkdir -p /workspace/.home",
+          "export HOST=127.0.0.1",
+          "if [ -f main.py ]; then nohup python3 -m uvicorn main:app --host 127.0.0.1 --port 8000 >/workspace/.home/devin-snapshot-server.log 2>&1 &",
+          "elif [ -f app.py ]; then nohup python3 -m uvicorn app:app --host 127.0.0.1 --port 8000 >/workspace/.home/devin-snapshot-server.log 2>&1 &",
+          "else exit 0; fi",
+          "echo $! > /workspace/.home/devin-snapshot-server.pid",
+          "exit 0",
+        ].join("\n"),
+        port: 8000,
+        waitSeconds: 45,
+      });
     } else if (hasPackageJson.stdout.trim() === "yes") {
       this.emit("agent.log", task.id, "Installing dependencies (npm install)", {
         cwd: repoCwd,
@@ -3919,31 +3949,20 @@ export class TaskService {
         exitCode: install.exitCode,
       });
 
-      const smoke = await runtime.terminalAllowFailure({
-        taskId: task.id,
-        cwd: repoCwd,
-        command:
-          'bash -lc \'if ! grep -q "\\"start\\"" package.json 2>/dev/null; then exit 0; fi; npm start >/tmp/devin-smoke.log 2>&1 & pid=$!; ok=0; for i in $(seq 1 30); do if curl -sf http://127.0.0.1:3000/health >/dev/null 2>&1; then ok=1; break; fi; if curl -sf http://127.0.0.1:3000/ >/dev/null 2>&1; then ok=1; break; fi; if ! kill -0 $pid 2>/dev/null; then break; fi; sleep 1; done; kill $pid 2>/dev/null || true; wait $pid 2>/dev/null || true; test $ok -eq 1\'',
+      // Leave the server running so Desktop can capture after Done.
+      await this.smokeAndCaptureDevboxPreview(runtime, task, repoCwd, {
+        startCommand: [
+          "set +e",
+          "mkdir -p /workspace/.home",
+          "if ! grep -q '\"start\"' package.json 2>/dev/null; then exit 0; fi",
+          "export HOST=127.0.0.1 PORT=3000 HOSTNAME=127.0.0.1",
+          "nohup npm start >/workspace/.home/devin-snapshot-server.log 2>&1 &",
+          "echo $! > /workspace/.home/devin-snapshot-server.pid",
+          "exit 0",
+        ].join("\n"),
+        port: 3000,
+        waitSeconds: 45,
       });
-
-      if (smoke.exitCode === 0) {
-        this.emit("agent.log", task.id, "Smoke check passed (HTTP 200)", {
-          endpoint: "http://127.0.0.1:3000",
-        });
-        const shotSession = this.activeSessions.get(task.id);
-        if (shotSession) {
-          void this.captureDesktopScreenshotWithDevServer(shotSession, task.id);
-        }
-      } else {
-        this.emit(
-          "agent.log",
-          task.id,
-          "Smoke check skipped or failed — continuing with scaffold push",
-          {
-            detail: (smoke.stderr || smoke.stdout).trim(),
-          },
-        );
-      }
     } else {
       this.emit(
         "agent.log",
@@ -5042,11 +5061,12 @@ export class TaskService {
       return new Response("No devbox session", { status: 404 });
     }
 
+    // Spin whenever Refresh asks OR there is no cached PNG yet (polls / Done).
     const buffer = await this.captureDesktopScreenshotWithDevServer(
       session,
       taskId,
       {
-        allowSpin: Boolean(opts?.fresh),
+        allowSpin: true,
         keepServer: true,
         bypassSpinCooldown: Boolean(opts?.fresh),
       },
@@ -5103,6 +5123,69 @@ export class TaskService {
     this.emit("agent.log", taskId, "Sandbox desktop snapshot saved", {
       desktop: true,
       desktopSnapshot: true,
+    });
+  }
+
+  /**
+   * Start the product server, wait for HTTP on a known app port, keep it running,
+   * and kick off a Desktop snapshot. Used after greenfield verify so Done has a PNG.
+   */
+  private async smokeAndCaptureDevboxPreview(
+    runtime: RuntimeClient,
+    task: Task,
+    repoCwd: string,
+    opts: { startCommand: string; port: number; waitSeconds: number },
+  ): Promise<void> {
+    await runtime.terminalAllowFailure({
+      taskId: task.id,
+      cwd: repoCwd,
+      command: opts.startCommand,
+    });
+
+    const wait = await runtime.terminalAllowFailure({
+      taskId: task.id,
+      cwd: repoCwd,
+      command: [
+        "set +e",
+        `port=${opts.port}`,
+        `for i in $(seq 1 ${opts.waitSeconds}); do`,
+        '  if curl -sf --max-time 2 "http://127.0.0.1:$port/health" >/dev/null 2>&1; then echo "$port"; exit 0; fi',
+        '  if curl -sf --max-time 2 "http://127.0.0.1:$port/" >/dev/null 2>&1; then echo "$port"; exit 0; fi',
+        "  sleep 1",
+        "done",
+        "exit 1",
+      ].join("\n"),
+    });
+
+    const port = Number.parseInt(wait.stdout.trim(), 10);
+    if (!Number.isFinite(port) || port <= 0) {
+      this.emit(
+        "agent.log",
+        task.id,
+        "Smoke check skipped or failed — continuing",
+        {
+          detail: (wait.stderr || wait.stdout).trim(),
+          port: opts.port,
+        },
+      );
+      return;
+    }
+
+    this.emit("agent.log", task.id, "Smoke check passed (HTTP 200)", {
+      endpoint: `http://127.0.0.1:${port}`,
+    });
+
+    const shotSession = this.activeSessions.get(task.id);
+    if (!shotSession) {
+      return;
+    }
+    shotSession.devboxPreviewPort = port;
+    void this.taskStore.setPreviewPort(task.id, port);
+    const previewPath = `/api/v1/tasks/${encodeURIComponent(task.id)}/devbox-preview?path=/`;
+    this.patchTask(task.id, { previewUrl: previewPath });
+    void this.captureDesktopScreenshotWithDevServer(shotSession, task.id, {
+      allowSpin: false,
+      keepServer: true,
     });
   }
 
@@ -5321,6 +5404,16 @@ export class TaskService {
     taskId: string,
   ): Promise<void> {
     try {
+      // Drop a previously cached supervisor port so capture can re-discover.
+      if (
+        session.devboxPreviewPort &&
+        (RUNTIME_SUPERVISOR_PORTS as readonly number[]).includes(
+          session.devboxPreviewPort,
+        )
+      ) {
+        session.devboxPreviewPort = undefined;
+      }
+
       const result = await session.runtime.terminalAllowFailure({
         taskId,
         cwd: session.repoCwd,
@@ -5328,6 +5421,9 @@ export class TaskService {
       });
       const port = Number.parseInt(result.stdout.trim(), 10);
       if (!Number.isFinite(port) || port <= 0) {
+        return;
+      }
+      if ((RUNTIME_SUPERVISOR_PORTS as readonly number[]).includes(port)) {
         return;
       }
       const portChanged = session.devboxPreviewPort !== port;

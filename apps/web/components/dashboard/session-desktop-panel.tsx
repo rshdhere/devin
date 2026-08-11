@@ -36,47 +36,50 @@ export function SessionDesktopPanel({
     `/${encodeURIComponent(task.id)}/desktop-screenshot`,
   );
 
-  const [shotKey, setShotKey] = useState(0);
   const [shotError, setShotError] = useState(false);
   const [shotLoading, setShotLoading] = useState(false);
   const [shotUrl, setShotUrl] = useState<string | null>(null);
-  const [forceFresh, setForceFresh] = useState(false);
   const shotUrlRef = useRef<string | null>(null);
+  const inFlightRef = useRef(false);
+  const freshInFlightRef = useRef(false);
+  const autoFreshDoneRef = useRef(false);
   shotUrlRef.current = shotUrl;
 
-  const refreshScreenshot = useCallback((fresh = true) => {
-    setShotError(false);
-    setForceFresh(fresh);
-    setShotKey((k) => k + 1);
-  }, []);
+  const loadScreenshot = useCallback(
+    async (fresh: boolean) => {
+      if (!canUse) {
+        return;
+      }
+      // Soft polls must not abort / stack on top of a fresh spin+capture.
+      if (inFlightRef.current) {
+        if (!fresh || freshInFlightRef.current) {
+          return;
+        }
+      }
 
-  useEffect(() => {
-    if (externalRefreshKey > 0) {
-      refreshScreenshot();
-    }
-  }, [externalRefreshKey, refreshScreenshot]);
+      inFlightRef.current = true;
+      if (fresh) {
+        freshInFlightRef.current = true;
+      }
+      setShotError(false);
+      setShotLoading(true);
 
-  useEffect(() => {
-    if (!canUse) {
-      return;
-    }
-    let cancelled = false;
-    setShotLoading(true);
-    const freshQuery = forceFresh ? "&fresh=1" : "";
-    const url = `${screenshotSrc}?t=${shotKey}${freshQuery}`;
-    const controller = new AbortController();
-    // Fresh captures may spin npm/tsx + Chromium; allow enough time.
-    const timeoutMs = forceFresh ? 70_000 : 25_000;
-    const timeout = window.setTimeout(() => controller.abort(), timeoutMs);
-    fetch(url, { credentials: "include", signal: controller.signal })
-      .then(async (response) => {
+      const controller = new AbortController();
+      // Go cold build + Chromium can exceed 70s.
+      const timeoutMs = fresh ? 120_000 : 25_000;
+      const timeout = window.setTimeout(() => controller.abort(), timeoutMs);
+      const freshQuery = fresh ? "&fresh=1" : "";
+      const url = `${screenshotSrc}?t=${Date.now()}${freshQuery}`;
+
+      try {
+        const response = await fetch(url, {
+          credentials: "include",
+          signal: controller.signal,
+        });
         if (!response.ok) {
           throw new Error(`snapshot HTTP ${response.status}`);
         }
         const blob = await response.blob();
-        if (cancelled) {
-          return;
-        }
         if (!(await blobLooksLikePng(blob))) {
           throw new Error("snapshot is not an image");
         }
@@ -87,25 +90,51 @@ export function SessionDesktopPanel({
           return URL.createObjectURL(blob);
         });
         setShotError(false);
-      })
-      .catch(() => {
-        if (!cancelled && !shotUrlRef.current) {
+      } catch {
+        if (!shotUrlRef.current) {
           setShotError(true);
         }
-      })
-      .finally(() => {
+      } finally {
         window.clearTimeout(timeout);
-        if (!cancelled) {
-          setShotLoading(false);
+        inFlightRef.current = false;
+        if (fresh) {
+          freshInFlightRef.current = false;
         }
-      });
+        setShotLoading(false);
+      }
+    },
+    [canUse, screenshotSrc],
+  );
 
-    return () => {
-      cancelled = true;
-      controller.abort();
-      window.clearTimeout(timeout);
-    };
-  }, [canUse, forceFresh, screenshotSrc, shotKey]);
+  const refreshScreenshot = useCallback(
+    (fresh = true) => {
+      void loadScreenshot(fresh);
+    },
+    [loadScreenshot],
+  );
+
+  useEffect(() => {
+    if (externalRefreshKey > 0) {
+      void loadScreenshot(true);
+    }
+  }, [externalRefreshKey, loadScreenshot]);
+
+  // Initial load + one auto-fresh when completed/empty so Desktop fills without a click.
+  useEffect(() => {
+    if (!canUse) {
+      return;
+    }
+    void loadScreenshot(false).then(() => {
+      if (
+        !autoFreshDoneRef.current &&
+        !shotUrlRef.current &&
+        (task.status === "completed" || task.status === "awaiting_review")
+      ) {
+        autoFreshDoneRef.current = true;
+        void loadScreenshot(true);
+      }
+    });
+  }, [canUse, loadScreenshot, task.id, task.status]);
 
   const isAgentActive =
     task.status === "running" ||
@@ -121,12 +150,16 @@ export function SessionDesktopPanel({
     }
     const interval = setInterval(
       () => {
-        refreshScreenshot(false);
+        // Soft poll only when idle — never cancel a fresh capture mid-flight.
+        if (inFlightRef.current || freshInFlightRef.current) {
+          return;
+        }
+        void loadScreenshot(false);
       },
       isAgentActive ? 8_000 : 20_000,
     );
     return () => clearInterval(interval);
-  }, [canUse, isAgentActive, refreshScreenshot]);
+  }, [canUse, isAgentActive, loadScreenshot]);
 
   useEffect(() => {
     return () => {
@@ -163,9 +196,12 @@ export function SessionDesktopPanel({
         <button
           type="button"
           onClick={() => refreshScreenshot(true)}
-          className="inline-flex cursor-pointer items-center gap-1 rounded-md px-2 py-1 text-[11px] text-zinc-400 hover:bg-white/[0.06] hover:text-zinc-200"
+          disabled={shotLoading}
+          className="inline-flex cursor-pointer items-center gap-1 rounded-md px-2 py-1 text-[11px] text-zinc-400 hover:bg-white/[0.06] hover:text-zinc-200 disabled:opacity-50"
         >
-          <RefreshCw className="size-3.5" />
+          <RefreshCw
+            className={cn("size-3.5", shotLoading && "animate-spin")}
+          />
           Refresh
         </button>
       </div>

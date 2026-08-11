@@ -1,35 +1,71 @@
-/** Well-known dev server ports probed when no listener is discovered dynamically. */
+/** Well-known app ports probed before arbitrary listeners. */
 export const COMMON_DEVBOX_PORTS = [
-  8000, 3000, 5173, 8080, 5000, 4173, 3001, 3002, 4200, 9000, 8888, 1313, 4321,
+  3000, 8000, 5173, 8080, 5000, 4173, 3001, 3002, 4200, 9000, 8888, 1313, 4321,
   24678,
 ] as const;
+
+/** Runtime supervisor port — must never be treated as the product app. */
+export const RUNTIME_SUPERVISOR_PORTS = [8081, 8090] as const;
 
 function commonPortsShellList(): string {
   return COMMON_DEVBOX_PORTS.join(" ");
 }
 
-/** Shell script: print first localhost port with a responding dev server (HTTP 2xx/3xx). */
+function skipPortsShellList(): string {
+  return RUNTIME_SUPERVISOR_PORTS.join(" ");
+}
+
+/**
+ * Shared shell helpers for discover/wait: skip supervisor ports, prefer COMMON
+ * app ports, and require a real HTTP response (prefer `/` over `/health` alone
+ * so runtime `:8081/health` is never mistaken for the product).
+ */
+function portProbeHelpers(): string[] {
+  return [
+    `COMMON='${commonPortsShellList()}'`,
+    `SKIP='${skipPortsShellList()}'`,
+    'SKIP="$SKIP ${RUNTIME_PORT:-}"',
+    "is_skipped() {",
+    '  case " $SKIP " in',
+    '    *" $1 "*) return 0 ;;',
+    "  esac",
+    "  return 1",
+    "}",
+    "try_port() {",
+    "  p=$1",
+    '  if is_skipped "$p"; then return 1; fi',
+    "  # Prefer / (product UI) — supervisor only exposes /health.",
+    "  for path in / /api/health /health; do",
+    "    code=$(curl -s -o /dev/null -w '%{http_code}' -H 'Accept-Encoding: identity' --max-time 2 \"http://127.0.0.1:$p$path\" 2>/dev/null || true)",
+    '    if echo "$code" | grep -qE "^(200|30[0-9])"; then',
+    '      if [ "$path" = "/health" ]; then',
+    "        root=$(curl -s -o /dev/null -w '%{http_code}' -H 'Accept-Encoding: identity' --max-time 2 \"http://127.0.0.1:$p/\" 2>/dev/null || true)",
+    '        if echo "$root" | grep -qE "^(200|30[0-9])"; then return 0; fi',
+    '        case " $COMMON " in',
+    '          *" $p "*) return 0 ;;',
+    "        esac",
+    "        return 1",
+    "      fi",
+    "      return 0",
+    "    fi",
+    "  done",
+    "  return 1",
+    "}",
+  ];
+}
+
+/** Shell script: print first localhost port with a responding product server. */
 export function buildDiscoverDevboxPortScript(): string {
   return [
     "set +e",
-    `COMMON='${commonPortsShellList()}'`,
+    ...portProbeHelpers(),
     "LISTEN=''",
     "if command -v ss >/dev/null 2>&1; then",
     "  LISTEN=$(ss -ltnH 2>/dev/null | awk '{print $4}' | sed -n 's/.*:\\([0-9][0-9]*\\)$/\\1/p' | sort -un | tr '\\n' ' ')",
     "fi",
-    "try_port() {",
-    "  p=$1",
-    "  for path in / /health /api/health; do",
-    "    code=$(curl -s -o /dev/null -w '%{http_code}' -H 'Accept-Encoding: identity' --max-time 3 \"http://127.0.0.1:$p$path\" 2>/dev/null || true)",
-    '    if echo "$code" | grep -qE "^(200|30[0-9])"; then return 0; fi',
-    "  done",
-    "  return 1",
-    "}",
-    "for p in $LISTEN $COMMON; do",
+    // Prefer well-known app ports before arbitrary ss listeners (avoids 8081).
+    "for p in $COMMON $LISTEN; do",
     '  if try_port "$p"; then echo "$p"; exit 0; fi',
-    "done",
-    "for p in $LISTEN $COMMON; do",
-    '  if command -v ss >/dev/null 2>&1 && ss -ltn 2>/dev/null | grep -qE ":$p[[:space:]]"; then echo "$p"; exit 0; fi',
     "done",
     "exit 1",
   ].join("\n");
@@ -39,11 +75,25 @@ export function buildDiscoverDevboxPortScript(): string {
 export function buildStartDevServerForSnapshotScript(): string {
   return [
     "set +e",
+    "mkdir -p /workspace/.home 2>/dev/null || true",
     "PIDFILE=/workspace/.home/devin-snapshot-server.pid",
     "LOG=/workspace/.home/devin-snapshot-server.log",
-    'if [ -f "$PIDFILE" ]; then kill $(cat "$PIDFILE") 2>/dev/null || true; rm -f "$PIDFILE"; fi',
+    "BIN=/workspace/.home/devin-app",
+    'if [ -f "$PIDFILE" ]; then',
+    '  old=$(cat "$PIDFILE" 2>/dev/null || true)',
+    '  if [ -n "$old" ]; then kill -- -$old 2>/dev/null || kill "$old" 2>/dev/null || true; fi',
+    '  rm -f "$PIDFILE"',
+    "fi",
     'CMD=""',
-    "if [ -f package.json ]; then",
+    // Prefer Go when go.mod/main.go exist — greenfield agents often leave a Node
+    // package.json scaffold whose npm start would otherwise win and blank Desktop.
+    "if [ -f go.mod ] || [ -f main.go ]; then",
+    "  if command -v go >/dev/null 2>&1; then",
+    '    if [ -x "$BIN" ]; then CMD="$BIN";',
+    '    else CMD="go build -o $BIN . && exec $BIN"; fi',
+    "  fi",
+    "fi",
+    'if [ -z "$CMD" ] && [ -f package.json ]; then',
     '  if [ -d .next ] && grep -q \'"start"\' package.json 2>/dev/null; then CMD="npm start"',
     '  elif grep -q \'"dev"\' package.json 2>/dev/null; then CMD="npm run dev"',
     '  elif grep -q \'"start"\' package.json 2>/dev/null; then CMD="npm start"; fi',
@@ -74,14 +124,11 @@ export function buildStartDevServerForSnapshotScript(): string {
     'if [ -z "$CMD" ] && [ -f Cargo.toml ]; then',
     '  if command -v cargo >/dev/null 2>&1; then CMD="cargo run --release"; fi',
     "fi",
-    // Prefer Go when go.mod/main.go exist — greenfield agents often leave a Node
-    // package.json scaffold whose npm start would otherwise win and blank Desktop.
-    "if [ -f go.mod ] || [ -f main.go ]; then",
-    '  if command -v go >/dev/null 2>&1; then CMD="go run ."; fi',
-    "fi",
     'if [ -z "$CMD" ]; then echo "no snapshot start command" >>"$LOG"; exit 0; fi',
     "export HOST=127.0.0.1 PORT=3000 HOSTNAME=127.0.0.1",
-    'nohup bash -lc "$CMD" >>"$LOG" 2>&1 &',
+    'export PATH="/usr/local/go/bin:/usr/local/bin:/root/.local/bin:$PATH"',
+    // New process group so stop can kill the whole tree (go build + server).
+    'nohup bash -lc "set -m; $CMD" >>"$LOG" 2>&1 &',
     'echo $! > "$PIDFILE"',
     'echo "started: $CMD" >>"$LOG"',
   ].join("\n");
@@ -91,29 +138,26 @@ export function buildStopDevServerForSnapshotScript(): string {
   return [
     "set +e",
     "PIDFILE=/workspace/.home/devin-snapshot-server.pid",
-    'if [ -f "$PIDFILE" ]; then kill $(cat "$PIDFILE") 2>/dev/null || true; rm -f "$PIDFILE"; fi',
+    'if [ -f "$PIDFILE" ]; then',
+    '  old=$(cat "$PIDFILE" 2>/dev/null || true)',
+    '  if [ -n "$old" ]; then kill -- -$old 2>/dev/null || kill "$old" 2>/dev/null || true; fi',
+    '  rm -f "$PIDFILE"',
+    "fi",
   ].join("\n");
 }
 
 export function buildWaitForDevServerScript(): string {
   return [
     "set +e",
-    `COMMON='${commonPortsShellList()}'`,
-    "try_port() {",
-    "  p=$1",
-    "  for path in / /health /api/health; do",
-    "    code=$(curl -s -o /dev/null -w '%{http_code}' -H 'Accept-Encoding: identity' --max-time 2 \"http://127.0.0.1:$p$path\" 2>/dev/null || true)",
-    '    if echo "$code" | grep -qE "^(200|30[0-9])"; then echo "$p"; exit 0; fi',
-    "  done",
-    "  return 1",
-    "}",
-    "for i in $(seq 1 30); do",
+    ...portProbeHelpers(),
+    // Cold go build + listen often exceeds 30s.
+    "for i in $(seq 1 90); do",
     "  LISTEN=''",
     "  if command -v ss >/dev/null 2>&1; then",
     "    LISTEN=$(ss -ltnH 2>/dev/null | awk '{print $4}' | sed -n 's/.*:\\([0-9][0-9]*\\)$/\\1/p' | sort -un | tr '\\n' ' ')",
     "  fi",
-    "  for p in $LISTEN $COMMON; do",
-    '    if try_port "$p"; then exit 0; fi',
+    "  for p in $COMMON $LISTEN; do",
+    '    if try_port "$p"; then echo "$p"; exit 0; fi',
     "  done",
     "  sleep 1",
     "done",
@@ -130,6 +174,7 @@ export function buildDesktopScreenshotScript(
   const safeOut = outputPath.replace(/'/g, `'\"'\"'`);
   return [
     "set +e",
+    "mkdir -p /workspace/.home 2>/dev/null || true",
     "SCRIPT=/workspace/.home/desktop-screenshot.mjs",
     "cat > \"$SCRIPT\" <<'EOS'",
     "import { chromium } from 'playwright-core';",
@@ -153,7 +198,7 @@ export function buildDesktopScreenshotScript(
     "export CHROMIUM_PATH=/usr/bin/chromium",
     "if command -v chromium >/dev/null 2>&1; then B=chromium; elif command -v chromium-browser >/dev/null 2>&1; then B=chromium-browser; else B=; fi",
     'if [ -n "$B" ]; then',
-    `"$B" --headless --disable-gpu --no-sandbox --window-size=1024,768 --hide-scrollbars --run-all-compositor-stages-before-draw --virtual-time-budget=10000 --screenshot='${safeOut}' '${safeUrl}' && exit 0`,
+    `"$B" --headless --disable-gpu --no-sandbox --disable-dev-shm-usage --window-size=1024,768 --hide-scrollbars --run-all-compositor-stages-before-draw --virtual-time-budget=10000 --screenshot='${safeOut}' '${safeUrl}' && exit 0`,
     "fi",
     'node "$SCRIPT"',
   ].join("\n");
