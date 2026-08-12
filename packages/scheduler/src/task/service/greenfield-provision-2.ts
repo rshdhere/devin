@@ -485,8 +485,6 @@ export {
   findCursorAgentBinary,
   linkCursorAgentBinary,
   runTemplateGreenfieldVerify,
-  startWorkspaceDiskPruneWatcher,
 } from "./greenfield-provision-agent.js";
-export { runTemplateGreenfieldVerify } from "./greenfield-template-verify.js";
 
 export { startWorkspaceDiskPruneWatcher } from "./greenfield-disk-prune.js";

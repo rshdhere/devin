@@ -1,8 +1,8 @@
 import { RuntimeClient } from "@devin/agent-sdk";
-import { usesRuntimeAgent } from "../../agent/defaults.js";
+import { usesRuntimeAgent } from "../../../agent/defaults.js";
 import { resolveRuntimeForTask } from "@devin/types";
-import { validateFirecrackerHostForRuntime } from "../../diagnostics/collect.js";
-import { ensureExecutionHostRegistered } from "../../host/register-execution-host.js";
+import { validateFirecrackerHostForRuntime } from "../../../diagnostics/collect.js";
+import { ensureExecutionHostRegistered } from "../../../host/register-execution-host.js";
 import type { ScheduleJob, Task } from "../types.js";
 import type { TaskService } from "../task-service.js";
 import {

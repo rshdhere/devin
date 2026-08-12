@@ -1,5 +1,5 @@
 import type { RuntimeClient } from "@devin/agent-sdk";
-import type { GitHubUserIdentity } from "../../github/client.js";
+import type { GitHubUserIdentity } from "../../../github/client.js";
 import type { ScheduleJob, Task } from "../types.js";
 
 export type ProcessJobState = {

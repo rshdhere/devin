@@ -1,7 +1,7 @@
 import { RuntimeClient, type RunResponse } from "@devin/agent-sdk";
-import { usesRuntimeAgent } from "../../agent/defaults.js";
-import { buildPruneWorkspaceDiskScript } from "../../devbox/preview.js";
-import { isRecoverableAgentInterruption } from "../../greenfield/git-sync.js";
+import { usesRuntimeAgent } from "../../../agent/defaults.js";
+import { buildPruneWorkspaceDiskScript } from "../../../devbox/preview.js";
+import { isRecoverableAgentInterruption } from "../../../greenfield/git-sync.js";
 import type { ScheduleJob, Task } from "../types.js";
 import type { TaskService } from "../task-service.js";
 import { buildAgentPrompt } from "../agent-prompt.js";

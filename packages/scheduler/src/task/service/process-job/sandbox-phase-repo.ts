@@ -1,9 +1,9 @@
-import { usesRuntimeAgent } from "../../agent/defaults.js";
+import { usesRuntimeAgent } from "../../../agent/defaults.js";
 import {
   authenticatedCloneUrl,
   fetchGitHubUserIdentity,
-} from "../../github/client.js";
-import { bootstrapGreenfieldProject } from "../../greenfield/bootstrap.js";
+} from "../../../github/client.js";
+import { bootstrapGreenfieldProject } from "../../../greenfield/bootstrap.js";
 import type { TaskEventType } from "@devin/types";
 import type { ScheduleJob, Task } from "../types.js";
 import type { TaskService } from "../task-service.js";
