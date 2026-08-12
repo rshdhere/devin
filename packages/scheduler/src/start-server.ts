@@ -6,6 +6,7 @@ import {
 } from "./preview/proxy.js";
 import { TaskService } from "./task/service.js";
 import { attachDesktopVNCWebSocketUpgrade } from "./task/service/desktop-computer.js";
+import { resolveOrchestratorUrl } from "../config/orchestrator-url.js";
 import {
   registerExecutionHostOnce,
   resolvePinnedHost,
@@ -27,9 +28,10 @@ export async function startSchedulerServer(
   options: StartSchedulerServerOptions,
 ): Promise<void> {
   const preferredHost = resolvePinnedHost();
+  const orchestratorUrl = await resolveOrchestratorUrl(options.orchestratorUrl);
 
   const tasks = new TaskService({
-    orchestratorUrl: options.orchestratorUrl,
+    orchestratorUrl,
     runtimeUrl: options.runtimeUrl,
     firecrackerHostUrl: options.firecrackerHostUrl,
     preferredHost,
@@ -41,14 +43,14 @@ export async function startSchedulerServer(
   await tasks.initialize();
 
   await registerExecutionHostOnce({
-    orchestratorUrl: options.orchestratorUrl,
+    orchestratorUrl,
     hostName: preferredHost,
     firecrackerHostUrl: options.firecrackerHostUrl,
   });
 
   if (preferredHost) {
     startExecutionHostReRegistration({
-      orchestratorUrl: options.orchestratorUrl,
+      orchestratorUrl,
       hostName: preferredHost,
       firecrackerHostUrl: options.firecrackerHostUrl,
     });
@@ -88,5 +90,6 @@ export async function startSchedulerServer(
     console.log(
       `${options.mode ?? "standalone"} listening @ http://0.0.0.0:${options.port}`,
     );
+    console.log(`orchestrator: ${orchestratorUrl}`);
   });
 }

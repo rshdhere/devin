@@ -3,6 +3,7 @@ import {
   listSandboxes,
   validateFirecrackerHostForRuntime,
 } from "../../diagnostics/collect.js";
+import { formatOrchestratorConnectionError } from "../../config/orchestrator-url.js";
 import type { ScheduleJob, Task } from "../types.js";
 import type { TaskService } from "./task-service.js";
 import type { SandboxRecord } from "./types.js";
@@ -131,15 +132,22 @@ export async function ensureSandbox(
   spec: Record<string, unknown>,
 ): Promise<void> {
   const create = async (): Promise<number> => {
-    const response = await fetch(
-      `${svc.orchestratorUrl}/internal/v1/sandboxes`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: sandboxName, spec }),
-      },
-    );
-    return response.status;
+    try {
+      const response = await fetch(
+        `${svc.orchestratorUrl}/internal/v1/sandboxes`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name: sandboxName, spec }),
+          signal: AbortSignal.timeout(20_000),
+        },
+      );
+      return response.status;
+    } catch (error) {
+      throw new Error(
+        formatOrchestratorConnectionError(svc.orchestratorUrl, error),
+      );
+    }
   };
 
   let status = await create();

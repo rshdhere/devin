@@ -72,7 +72,13 @@ export async function probeService(
     return {
       url: target,
       reachable: false,
-      error: error instanceof Error ? error.message : "probe failed",
+      error:
+        error instanceof Error &&
+        /unable to connect|computer able to access/i.test(error.message)
+          ? `Cannot connect to ${target} — check ORCHESTRATOR_URL and network path from this pod/host`
+          : error instanceof Error
+            ? error.message
+            : "probe failed",
       latencyMs: Date.now() - started,
     };
   }

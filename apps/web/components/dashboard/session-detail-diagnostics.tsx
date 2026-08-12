@@ -84,6 +84,23 @@ export function DiagnosticsPanel({
               dashboard to verify the brain and worker are connected.
             </p>
           ) : null}
+          {/cannot reach orchestrator|unable to connect|computer able to access/i.test(
+            task.message,
+          ) ? (
+            <p className="text-[12px] leading-relaxed text-amber-200/90">
+              The scheduler cannot reach the orchestrator API. In EKS set{" "}
+              <span className="font-mono text-amber-100">ORCHESTRATOR_URL</span>{" "}
+              to{" "}
+              <span className="font-mono text-amber-100">
+                http://devin-orchestrator-lb.devin-system.svc:9090
+              </span>
+              , or on execution hosts run{" "}
+              <span className="font-mono text-amber-100">
+                sudo devin-infra sync-platform-config
+              </span>
+              .
+            </p>
+          ) : null}
           {/EXECUTION_WORKER_URL|worker rejected job|worker unavailable/i.test(
             task.message,
           ) ? (
