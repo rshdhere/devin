@@ -1,7 +1,7 @@
 import express from "express";
 import { toNodeHandler } from "better-auth/node";
 import { auth } from "./lib/auth.js";
-import { isAllowedOrigin } from "./lib/cors.js";
+import { applyCorsHeaders } from "./lib/cors.js";
 import { router } from "./routes/index.js";
 
 export const app = express();
@@ -9,20 +9,7 @@ export const app = express();
 app.set("trust proxy", true);
 
 app.use((req, res, next) => {
-  const origin = req.headers.origin;
-
-  if (isAllowedOrigin(origin)) {
-    res.setHeader("Access-Control-Allow-Origin", origin);
-    res.setHeader("Access-Control-Allow-Credentials", "true");
-    res.setHeader(
-      "Access-Control-Allow-Headers",
-      "Content-Type, Authorization, Cookie",
-    );
-    res.setHeader(
-      "Access-Control-Allow-Methods",
-      "GET, POST, PUT, PATCH, DELETE, OPTIONS",
-    );
-  }
+  applyCorsHeaders(res, req.headers.origin, req.hostname);
 
   if (req.method === "OPTIONS") {
     res.sendStatus(204);
@@ -71,3 +58,19 @@ app.all("/api/v1/auth/{*any}", (req, res, _next) => {
 
 app.use(express.json());
 app.use("/api/v1/", router);
+
+app.use(
+  (
+    err: unknown,
+    req: express.Request,
+    res: express.Response,
+    _next: express.NextFunction,
+  ) => {
+    applyCorsHeaders(res, req.headers.origin, req.hostname);
+    const message =
+      err instanceof Error ? err.message : "Internal server error";
+    if (!res.headersSent) {
+      res.status(500).json({ error: message });
+    }
+  },
+);

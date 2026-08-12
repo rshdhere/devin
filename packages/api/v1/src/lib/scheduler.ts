@@ -1,6 +1,14 @@
 const schedulerBaseUrl = () =>
   (process.env.SCHEDULER_URL ?? "http://localhost:9091").replace(/\/$/, "");
 
+const schedulerFetchTimeoutMs = () => {
+  const raw = Number.parseInt(
+    process.env.SCHEDULER_FETCH_TIMEOUT_MS ?? "25000",
+    10,
+  );
+  return Number.isFinite(raw) && raw > 0 ? raw : 25_000;
+};
+
 async function proxyScheduler(
   path: string,
   init?: RequestInit,
@@ -15,14 +23,32 @@ async function proxyScheduler(
     headers["Content-Type"] = "application/json";
   }
 
+  const timeoutMs = schedulerFetchTimeoutMs();
+  const signal =
+    init?.signal ??
+    (typeof AbortSignal.timeout === "function"
+      ? AbortSignal.timeout(timeoutMs)
+      : undefined);
+
   try {
     return await fetch(url, {
       ...init,
       headers,
+      signal,
     });
   } catch (error) {
     const detail =
       error instanceof Error ? error.message : "Scheduler request failed";
+    if (error instanceof Error && error.name === "TimeoutError") {
+      throw new Error(
+        `Scheduler timed out after ${timeoutMs}ms at ${schedulerBaseUrl()}`,
+      );
+    }
+    if (error instanceof Error && error.name === "AbortError") {
+      throw new Error(
+        `Scheduler request aborted or timed out at ${schedulerBaseUrl()}`,
+      );
+    }
     throw new Error(
       `Scheduler unavailable at ${schedulerBaseUrl()}: ${detail}`,
     );

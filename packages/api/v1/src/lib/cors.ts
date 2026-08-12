@@ -9,6 +9,27 @@ function parseOriginList(value: string | undefined): string[] {
     .filter(Boolean);
 }
 
+function registrableDomain(hostname: string): string | undefined {
+  const host = hostname.trim().toLowerCase();
+  if (!host || host === "localhost" || host === "127.0.0.1") {
+    return undefined;
+  }
+  const parts = host.split(".").filter(Boolean);
+  if (parts.length < 2) {
+    return undefined;
+  }
+  return parts.slice(-2).join(".");
+}
+
+function hostnameMatchesRegistrableDomain(
+  hostname: string,
+  rootDomain: string,
+): boolean {
+  const host = hostname.trim().toLowerCase();
+  const root = rootDomain.trim().toLowerCase();
+  return host === root || host.endsWith(`.${root}`);
+}
+
 function deriveWildcardOrigins(urls: string[]): string[] {
   const derived = new Set<string>();
 
@@ -84,12 +105,60 @@ export function getAllowedOrigins(): string[] {
   return [...origins];
 }
 
-export function isAllowedOrigin(origin: string | undefined): origin is string {
+export function isAllowedOrigin(
+  origin: string | undefined,
+  apiHostname?: string,
+): origin is string {
   if (!origin) {
     return false;
   }
 
-  return getAllowedOrigins().some((pattern) =>
-    matchesWildcardOrigin(origin, pattern),
+  if (
+    getAllowedOrigins().some((pattern) =>
+      matchesWildcardOrigin(origin, pattern),
+    )
+  ) {
+    return true;
+  }
+
+  // Staging often sets BETTER_AUTH_URL on the API host but forgets WEB_APP_URL.
+  // Allow any browser origin on the same registrable domain as this API host
+  // (e.g. staging.devin.ba → staging-api.devin.ba).
+  const apiRoot = apiHostname ? registrableDomain(apiHostname) : undefined;
+  if (apiRoot) {
+    try {
+      const originHost = new URL(origin).hostname;
+      if (hostnameMatchesRegistrableDomain(originHost, apiRoot)) {
+        return true;
+      }
+    } catch {
+      return false;
+    }
+  }
+
+  return false;
+}
+
+export function applyCorsHeaders(
+  res: {
+    setHeader(name: string, value: string): void;
+  },
+  origin: string | undefined,
+  apiHostname?: string,
+): boolean {
+  if (!isAllowedOrigin(origin, apiHostname)) {
+    return false;
+  }
+  res.setHeader("Access-Control-Allow-Origin", origin);
+  res.setHeader("Access-Control-Allow-Credentials", "true");
+  res.setHeader("Vary", "Origin");
+  res.setHeader(
+    "Access-Control-Allow-Headers",
+    "Content-Type, Authorization, Cookie",
   );
+  res.setHeader(
+    "Access-Control-Allow-Methods",
+    "GET, POST, PUT, PATCH, DELETE, OPTIONS",
+  );
+  return true;
 }
