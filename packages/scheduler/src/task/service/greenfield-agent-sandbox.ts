@@ -6,7 +6,10 @@ import {
 } from "../../greenfield/git-sync.js";
 import { scaffoldFilesFromDraft } from "../../greenfield/scaffold-from-draft.js";
 import type { GitHubUserIdentity } from "../../github/client.js";
-import { shellPrepareWritableHome } from "../../sandbox/env.js";
+import {
+  SANDBOX_WRITABLE_HOME,
+  shellPrepareWritableHome,
+} from "../../sandbox/env.js";
 import {
   buildPruneWorkspaceDiskScript,
   buildSnapshotSmokeStartScript,
