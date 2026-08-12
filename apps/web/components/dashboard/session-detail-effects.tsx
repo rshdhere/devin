@@ -1,8 +1,7 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import type { Task, TaskEvent } from "@devin/types";
-import { usesRuntimeAgent } from "@devin/types";
 import {
   fetchTask,
   fetchTaskEventHistory,
@@ -28,6 +27,9 @@ export function useSessionDetailEffects({
   refreshTasks: () => Promise<void>;
   loadDiagnostics: (taskId: string) => Promise<void>;
 }) {
+  const taskRef = useRef(task);
+  taskRef.current = task;
+
   useEffect(() => {
     setTask(initialTask);
   }, [initialTask, setTask]);
@@ -38,14 +40,26 @@ export function useSessionDetailEffects({
     const taskId = task.id;
     let cancelled = false;
 
-    void fetchTaskEventHistory(taskId)
-      .then((history) => {
-        if (!cancelled && history.length > 0) {
-          setEvents(
-            [...history].sort((a, b) => a.timestamp.localeCompare(b.timestamp)),
-          );
+    const mergeHistory = (history: TaskEvent[]) => {
+      if (cancelled || history.length === 0) {
+        return;
+      }
+      setEvents((current) => {
+        const merged = new Map<string, TaskEvent>();
+        for (const event of current) {
+          merged.set(event.id, event);
         }
-      })
+        for (const event of history) {
+          merged.set(event.id, event);
+        }
+        return [...merged.values()].sort((a, b) =>
+          a.timestamp.localeCompare(b.timestamp),
+        );
+      });
+    };
+
+    void fetchTaskEventHistory(taskId)
+      .then(mergeHistory)
       .catch(() => {
         // SSE replay remains the fallback.
       });
@@ -107,23 +121,9 @@ export function useSessionDetailEffects({
         }
       },
       {
-        reconnect:
-          task.status !== "failed" &&
-          task.status !== "cancelled" &&
-          (task.status !== "completed" ||
-            task.sessionActive === true ||
-            task.sessionSleeping === true ||
-            usesRuntimeAgent(task.agent)),
+        reconnect: true,
       },
     );
-
-    if (
-      task.status === "failed" ||
-      task.status === "sandbox_starting" ||
-      task.status === "scheduling"
-    ) {
-      void loadDiagnostics(taskId);
-    }
 
     return () => {
       cancelled = true;
@@ -131,16 +131,63 @@ export function useSessionDetailEffects({
     };
   }, [
     task.id,
-    task.status,
-    task.sessionActive,
-    task.sessionSleeping,
-    task.agent,
     refreshTasks,
     loadDiagnostics,
     setEvents,
     setStreamError,
     setTask,
   ]);
+
+  useEffect(() => {
+    const terminal =
+      task.status === "completed" ||
+      task.status === "failed" ||
+      task.status === "cancelled";
+    if (terminal) {
+      return;
+    }
+
+    let cancelled = false;
+    const pollHistory = () => {
+      void fetchTaskEventHistory(task.id)
+        .then((history) => {
+          if (cancelled || history.length === 0) {
+            return;
+          }
+          setEvents((current) => {
+            const merged = new Map<string, TaskEvent>();
+            for (const event of current) {
+              merged.set(event.id, event);
+            }
+            for (const event of history) {
+              merged.set(event.id, event);
+            }
+            return [...merged.values()].sort((a, b) =>
+              a.timestamp.localeCompare(b.timestamp),
+            );
+          });
+        })
+        .catch(() => undefined);
+    };
+
+    pollHistory();
+    const interval = setInterval(pollHistory, 8_000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [task.id, task.status, setEvents]);
+
+  useEffect(() => {
+    const current = taskRef.current;
+    if (
+      current.status === "failed" ||
+      current.status === "sandbox_starting" ||
+      current.status === "scheduling"
+    ) {
+      void loadDiagnostics(current.id);
+    }
+  }, [task.status, loadDiagnostics]);
 
   useEffect(() => {
     if (!streamError) {
