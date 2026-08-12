@@ -212,6 +212,7 @@ export const agentSessions = pgTable(
     guestHost: text("guest_host"),
     previewPort: integer("preview_port"),
     desktopSnapshot: bytea("desktop_snapshot"),
+    sessionRecordingS3Key: text("session_recording_s3_key"),
     lastActiveAt: timestamp("last_active_at").defaultNow().notNull(),
     sleepingAt: timestamp("sleeping_at"),
     createdAt: timestamp("created_at").defaultNow().notNull(),

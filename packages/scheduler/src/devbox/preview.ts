@@ -7,12 +7,22 @@ export const COMMON_DEVBOX_PORTS = [
 /** Runtime supervisor port — must never be treated as the product app. */
 export const RUNTIME_SUPERVISOR_PORTS = [8081, 8090] as const;
 
+/** Devin computer-use CDP port (Playwright connectOverCDP). */
+export const CDP_DEBUG_PORT = 29229;
+
+/** VNC / noVNC ports started by runtime desktop ensure. */
+export const DESKTOP_VNC_PORTS = [5900, 6080] as const;
+
 function commonPortsShellList(): string {
   return COMMON_DEVBOX_PORTS.join(" ");
 }
 
 function skipPortsShellList(): string {
-  return RUNTIME_SUPERVISOR_PORTS.join(" ");
+  return [
+    ...RUNTIME_SUPERVISOR_PORTS,
+    CDP_DEBUG_PORT,
+    ...DESKTOP_VNC_PORTS,
+  ].join(" ");
 }
 
 /** Shell lines that set CMD for Node/Next snapshot servers. */

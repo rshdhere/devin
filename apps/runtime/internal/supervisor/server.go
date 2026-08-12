@@ -54,6 +54,14 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /browser/screenshot", s.handleDesktopScreenshot)
 	mux.HandleFunc("GET /browser/last-screenshot", s.handleLastDesktopScreenshot)
 	mux.HandleFunc("GET /browser/proxy", s.handleBrowserProxy)
+	mux.HandleFunc("GET /browser/cdp/", s.handleBrowserCDPJSON)
+	mux.HandleFunc("POST /desktop/ensure", s.handleDesktopEnsure)
+	mux.HandleFunc("GET /desktop/status", s.handleDesktopStatus)
+	mux.HandleFunc("GET /desktop/vnc", s.handleDesktopVNCPage)
+	mux.HandleFunc("GET /desktop/vnc/ws", s.handleDesktopVNCWebSocket)
+	mux.HandleFunc("POST /desktop/recording/start", s.handleRecordingStart)
+	mux.HandleFunc("POST /desktop/recording/stop", s.handleRecordingStop)
+	mux.HandleFunc("GET /desktop/recording", s.handleRecordingGet)
 	mux.HandleFunc("GET /events", s.handleEvents)
 	return mux
 }

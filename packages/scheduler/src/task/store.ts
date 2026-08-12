@@ -196,6 +196,19 @@ export class TaskStore {
       .where(eq(agentSessions.taskId, taskId));
   }
 
+  async saveSessionRecordingKey(taskId: string): Promise<void> {
+    if (!this.enabled) {
+      return;
+    }
+    await db
+      .update(agentSessions)
+      .set({
+        sessionRecordingS3Key: taskId,
+        updatedAt: new Date(),
+      })
+      .where(eq(agentSessions.taskId, taskId));
+  }
+
   async deleteSession(taskId: string): Promise<void> {
     if (!this.enabled) {
       return;

@@ -1,9 +1,11 @@
 import express from "express";
+import { createServer } from "node:http";
 import {
   handlePreviewProxy,
   shouldHandlePreviewHost,
 } from "./preview/proxy.js";
 import { TaskService } from "./task/service.js";
+import { attachDesktopVNCWebSocketUpgrade } from "./task/service/desktop-computer.js";
 import {
   registerExecutionHostOnce,
   resolvePinnedHost,
@@ -80,7 +82,9 @@ export async function startSchedulerServer(
     },
   );
 
-  app.listen(options.port, "0.0.0.0", () => {
+  const server = createServer(app);
+  attachDesktopVNCWebSocketUpgrade(tasks, server);
+  server.listen(options.port, "0.0.0.0", () => {
     console.log(
       `${options.mode ?? "standalone"} listening @ http://0.0.0.0:${options.port}`,
     );

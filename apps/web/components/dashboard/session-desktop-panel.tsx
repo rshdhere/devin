@@ -7,7 +7,7 @@ import { tasksApiUrl } from "@/lib/api/http";
 import { canUseDevbox } from "@/lib/sessions/devbox";
 import { cn } from "@/lib/utils";
 
-type DesktopView = "live" | "snapshot";
+type DesktopView = "live" | "snapshot" | "interactive" | "recording";
 
 async function blobLooksLikePng(blob: Blob): Promise<boolean> {
   if (blob.type.includes("image")) {
@@ -42,6 +42,12 @@ export function SessionDesktopPanel({
   const livePreviewSrc = tasksApiUrl(
     `/${encodeURIComponent(task.id)}/devbox-preview?path=/&warm=1`,
   );
+  const interactiveSrc = tasksApiUrl(
+    `/${encodeURIComponent(task.id)}/desktop-vnc`,
+  );
+  const recordingSrc = tasksApiUrl(
+    `/${encodeURIComponent(task.id)}/session-recording`,
+  );
 
   const [view, setView] = useState<DesktopView>("snapshot");
   const [liveReachable, setLiveReachable] = useState(false);
@@ -58,6 +64,9 @@ export function SessionDesktopPanel({
   const freshRetryCountRef = useRef(0);
   const freshRetryTimerRef = useRef<number | null>(null);
   const captureExhaustedRef = useRef(false);
+  const [recordingUrl, setRecordingUrl] = useState<string | null>(null);
+  const [recordingError, setRecordingError] = useState(false);
+  const [interactiveReady, setInteractiveReady] = useState(false);
   shotUrlRef.current = shotUrl;
 
   const isAgentActive =
@@ -107,6 +116,40 @@ export function SessionDesktopPanel({
       setLiveWarming(false);
     }
   }, [canUse, layout, livePreviewSrc]);
+
+  const loadRecording = useCallback(async () => {
+    if (!canUse) {
+      return;
+    }
+    try {
+      const response = await fetch(`${recordingSrc}?t=${Date.now()}`, {
+        credentials: "include",
+      });
+      if (!response.ok) {
+        setRecordingError(true);
+        return;
+      }
+      const blob = await response.blob();
+      if (blob.size < 1024) {
+        setRecordingError(true);
+        return;
+      }
+      setRecordingUrl((prev) => {
+        if (prev?.startsWith("blob:")) {
+          URL.revokeObjectURL(prev);
+        }
+        return URL.createObjectURL(blob);
+      });
+      setRecordingError(false);
+    } catch {
+      setRecordingError(true);
+    }
+  }, [canUse, recordingSrc]);
+
+  const openInteractive = useCallback(() => {
+    setView("interactive");
+    setInteractiveReady(true);
+  }, []);
 
   const scheduleFreshRetry = useCallback(
     (loadFn: (fresh: boolean) => Promise<void>) => {
@@ -326,10 +369,16 @@ export function SessionDesktopPanel({
   }, [canUse, isAgentActive, loadScreenshot, probeLivePreview]);
 
   useEffect(() => {
-    if (layout === "panel" && liveReachable) {
+    if (view === "recording" && isTerminal) {
+      void loadRecording();
+    }
+  }, [isTerminal, loadRecording, view]);
+
+  useEffect(() => {
+    if (layout === "panel" && liveReachable && view === "snapshot") {
       setView("live");
     }
-  }, [layout, liveReachable]);
+  }, [layout, liveReachable, view]);
 
   const openLivePreview = useCallback(async () => {
     setView("live");
@@ -346,8 +395,11 @@ export function SessionDesktopPanel({
       if (shotUrl?.startsWith("blob:")) {
         URL.revokeObjectURL(shotUrl);
       }
+      if (recordingUrl?.startsWith("blob:")) {
+        URL.revokeObjectURL(recordingUrl);
+      }
     };
-  }, [clearFreshRetryTimer, shotUrl]);
+  }, [clearFreshRetryTimer, recordingUrl, shotUrl]);
 
   if (!canUse) {
     return (
@@ -364,6 +416,8 @@ export function SessionDesktopPanel({
   const captureInProgress =
     shotLoading && !shotUrl && (isAgentActive || isTerminal);
   const showLive = layout === "panel" && view === "live" && liveReachable;
+  const showInteractive = layout === "panel" && view === "interactive";
+  const showRecording = layout === "panel" && view === "recording";
 
   return (
     <div
@@ -378,9 +432,13 @@ export function SessionDesktopPanel({
             {isEmbed ? "App preview" : "Desktop"}
           </p>
           <p className="truncate text-[10px] text-zinc-600">
-            {showLive
-              ? "Live localhost in the devbox (1024×768)"
-              : "Playwright snapshot from localhost"}
+            {showInteractive
+              ? "Full VM desktop — mouse & keyboard (1024×768)"
+              : showRecording
+                ? "Annotated screen recording from agent session"
+                : showLive
+                  ? "Live localhost in the devbox (1024×768)"
+                  : "Playwright snapshot from localhost"}
           </p>
         </div>
         <div className="flex shrink-0 items-center gap-1">
@@ -400,6 +458,18 @@ export function SessionDesktopPanel({
               </button>
               <button
                 type="button"
+                onClick={openInteractive}
+                className={cn(
+                  "rounded-md px-2 py-0.5 text-[10px] font-medium transition-colors",
+                  view === "interactive"
+                    ? "bg-white/[0.08] text-zinc-100"
+                    : "text-zinc-500 hover:text-zinc-300",
+                )}
+              >
+                Interactive
+              </button>
+              <button
+                type="button"
                 onClick={() => setView("snapshot")}
                 className={cn(
                   "rounded-md px-2 py-0.5 text-[10px] font-medium transition-colors",
@@ -410,6 +480,23 @@ export function SessionDesktopPanel({
               >
                 Snapshot
               </button>
+              {isTerminal ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setView("recording");
+                    void loadRecording();
+                  }}
+                  className={cn(
+                    "rounded-md px-2 py-0.5 text-[10px] font-medium transition-colors",
+                    view === "recording"
+                      ? "bg-white/[0.08] text-zinc-100"
+                      : "text-zinc-500 hover:text-zinc-300",
+                  )}
+                >
+                  Recording
+                </button>
+              ) : null}
             </div>
           ) : null}
           <button
@@ -432,7 +519,37 @@ export function SessionDesktopPanel({
           isEmbed ? "min-h-[180px] p-2" : "p-0",
         )}
       >
-        {showLive ? (
+        {showInteractive && interactiveReady ? (
+          <iframe
+            key={interactiveSrc}
+            src={interactiveSrc}
+            title="Interactive devbox desktop"
+            className="h-full w-full border-0 bg-black"
+            sandbox="allow-scripts allow-same-origin"
+          />
+        ) : showRecording ? (
+          recordingUrl ? (
+            <video
+              src={recordingUrl}
+              controls
+              className="max-h-full w-full max-w-5xl rounded-lg border border-white/[0.08] bg-black"
+            />
+          ) : (
+            <div className="flex flex-col items-center gap-2 p-6">
+              <Loader2
+                className={cn(
+                  "size-6 text-zinc-600",
+                  !recordingError && "animate-spin",
+                )}
+              />
+              <p className="max-w-sm text-center text-[12px] text-zinc-500">
+                {recordingError
+                  ? "No session recording yet — recordings are saved when the agent finishes."
+                  : "Loading session recording…"}
+              </p>
+            </div>
+          )
+        ) : showLive ? (
           <iframe
             key={livePreviewSrc}
             src={livePreviewSrc}

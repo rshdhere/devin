@@ -20,6 +20,13 @@ import {
   proxyDevboxPreview as proxyDevboxPreviewImpl,
   fetchDesktopScreenshot as fetchDesktopScreenshotImpl,
 } from "./desktop-capture.js";
+import {
+  ensureDesktopComputer as ensureDesktopComputerImpl,
+  fetchSessionRecording as fetchSessionRecordingImpl,
+  proxyDesktopVNCPageHttp as proxyDesktopVNCPageHttpImpl,
+  startSessionRecording as startSessionRecordingImpl,
+  stopAndPersistSessionRecording as stopAndPersistSessionRecordingImpl,
+} from "./desktop-computer.js";
 import { processJob as processJobImpl } from "./process-job/index.js";
 import {
   restoreFromStore,
@@ -483,6 +490,29 @@ export class TaskService implements TaskServiceHost {
     }
 
     return fetch(`${session.runtimeBaseUrl}${path}`, init);
+  }
+
+  async ensureDesktopComputer(taskId: string): Promise<Response> {
+    return ensureDesktopComputerImpl(this, taskId);
+  }
+
+  async proxyDesktopVNCPageHttp(
+    taskId: string,
+    res: import("node:http").ServerResponse,
+  ): Promise<void> {
+    return proxyDesktopVNCPageHttpImpl(this, taskId, res);
+  }
+
+  async startSessionRecording(taskId: string): Promise<Response> {
+    return startSessionRecordingImpl(this, taskId);
+  }
+
+  async stopAndPersistSessionRecording(taskId: string): Promise<void> {
+    return stopAndPersistSessionRecordingImpl(this, taskId);
+  }
+
+  async fetchSessionRecording(taskId: string): Promise<Response> {
+    return fetchSessionRecordingImpl(this, taskId);
   }
 
   async persistSession(

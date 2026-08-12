@@ -92,10 +92,64 @@ func (s *Server) runChromiumCLIScreenshot(
 	)
 }
 
+func (s *Server) runPlaywrightCDPScreenshot(
+	ctx context.Context,
+	targetURL, outPath string,
+) (*executil.Result, error) {
+	home := workspace.WritableHome(s.workspace)
+	scriptPath := filepath.Join(home, "desktop-cdp-screenshot.mjs")
+	scriptBody := fmt.Sprintf(
+		`import { chromium } from 'playwright-core';
+const url = %s;
+const out = %s;
+const cdp = 'http://127.0.0.1:%d';
+const browser = await chromium.connectOverCDP(cdp);
+const context = browser.contexts()[0] ?? await browser.newContext({ viewport: { width: %d, height: %d } });
+const page = context.pages()[0] ?? await context.newPage();
+await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 15000 });
+await page.waitForTimeout(1200);
+await page.screenshot({ path: out, fullPage: false, type: 'png' });
+`,
+		jsonString(targetURL),
+		jsonString(outPath),
+		cdpDebugPort,
+		desktopWidth,
+		desktopHeight,
+	)
+	if err := os.WriteFile(scriptPath, []byte(scriptBody), 0o644); err != nil {
+		return nil, err
+	}
+	env := displayEnv(s.workspace)
+	env = append(env, "NODE_PATH=/usr/local/lib/node_modules")
+	return executil.RunGuest(
+		ctx,
+		s.workspace,
+		fmt.Sprintf("node %s", shellQuote(scriptPath)),
+		env,
+		nil,
+	)
+}
+
 func (s *Server) captureDesktopScreenshotToFile(
 	ctx context.Context,
 	targetURL, outPath string,
 ) error {
+	// When CDP browser is up (Devin computer-use port 29229), attach Playwright
+	// to the persistent session instead of launching a fresh headless browser.
+	if portOpen(cdpDebugPort) {
+		cdpCtx, cdpCancel := context.WithTimeout(ctx, 30*time.Second)
+		defer cdpCancel()
+		result, err := s.runPlaywrightCDPScreenshot(cdpCtx, targetURL, outPath)
+		if err == nil && result.ExitCode == 0 {
+			if data, readErr := os.ReadFile(outPath); readErr == nil && len(data) > 128 {
+				return nil
+			}
+		}
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+	}
+
 	// Prefer Chromium CLI first — Playwright networkidle used to hang forever on
 	// Next.js HMR websockets. CLI is bounded and good enough for sandbox previews.
 	cliCtx, cliCancel := context.WithTimeout(ctx, 22*time.Second)

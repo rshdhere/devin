@@ -5,6 +5,7 @@ FROM node:22-bookworm-slim
 # canonical binary (never /usr/local/bin/bash → itself).
 RUN apt-get update && apt-get install -y --no-install-recommends \
     bash ca-certificates curl git openssh-client unzip chromium \
+    xvfb x11vnc websockify novnc ffmpeg \
     && rm -rf /var/lib/apt/lists/* \
     && BASH_REAL="$(readlink -f /bin/bash 2>/dev/null || readlink -f /usr/bin/bash)" \
     && test -x "$BASH_REAL" \
