@@ -20,16 +20,21 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 ARG FIRECRACKER_VERSION=1.8.0
-RUN curl -fsSL "https://github.com/firecracker-microvm/firecracker/releases/download/v${FIRECRACKER_VERSION}/firecracker-v${FIRECRACKER_VERSION}-x86_64.tgz" \
-    | tar -xzf - -C /tmp \
+RUN curl -fsSL --retry 5 --retry-all-errors --retry-delay 3 \
+      -o /tmp/firecracker.tgz \
+      "https://github.com/firecracker-microvm/firecracker/releases/download/v${FIRECRACKER_VERSION}/firecracker-v${FIRECRACKER_VERSION}-x86_64.tgz" \
+    && tar -xzf /tmp/firecracker.tgz -C /tmp \
     && mv /tmp/release-v${FIRECRACKER_VERSION}-x86_64/firecracker-v${FIRECRACKER_VERSION}-x86_64 /usr/bin/firecracker \
     && mv /tmp/release-v${FIRECRACKER_VERSION}-x86_64/jailer-v${FIRECRACKER_VERSION}-x86_64 /usr/bin/jailer \
-    && rm -rf /tmp/release-v${FIRECRACKER_VERSION}-x86_64
+    && rm -rf /tmp/release-v${FIRECRACKER_VERSION}-x86_64 /tmp/firecracker.tgz
 
 ARG CNI_PLUGINS_VERSION=1.4.1
 RUN mkdir -p /opt/cni/bin \
-    && curl -fsSL "https://github.com/containernetworking/plugins/releases/download/v${CNI_PLUGINS_VERSION}/cni-plugins-linux-amd64-v${CNI_PLUGINS_VERSION}.tgz" \
-    | tar -xzf - -C /opt/cni/bin
+    && curl -fsSL --retry 5 --retry-all-errors --retry-delay 3 \
+      -o /tmp/cni-plugins.tgz \
+      "https://github.com/containernetworking/plugins/releases/download/v${CNI_PLUGINS_VERSION}/cni-plugins-linux-amd64-v${CNI_PLUGINS_VERSION}.tgz" \
+    && tar -xzf /tmp/cni-plugins.tgz -C /opt/cni/bin \
+    && rm -f /tmp/cni-plugins.tgz
 
 COPY --from=build /out/tc-redirect-tap /opt/cni/bin/tc-redirect-tap
 RUN chmod 755 /opt/cni/bin/tc-redirect-tap
