@@ -56,6 +56,7 @@ import {
 import {
   ensurePendingJob,
   ensureTaskLoaded,
+  materializeTaskFromJob,
   syncTaskFromStore,
 } from "./resolve-task.js";
 import { recoverStuckQueuedTasks } from "./brain-recovery.js";
@@ -279,12 +280,12 @@ export class TaskService implements TaskServiceHost {
   }
 
   async ingestWorkerJob(job: ScheduleJob): Promise<void> {
-    const task =
-      this.tasks.get(job.taskId) ?? (await this.taskStore.getTask(job.taskId));
+    let task = await syncTaskFromStore(this, job.taskId);
     if (!task) {
-      throw new Error("task not found");
+      task = materializeTaskFromJob(job);
+      this.tasks.set(task.id, task);
+      await this.taskStore.upsertTask(task);
     }
-    this.tasks.set(task.id, task);
     this.pendingJobs.set(job.taskId, job);
     await this.queue.enqueue(job);
   }

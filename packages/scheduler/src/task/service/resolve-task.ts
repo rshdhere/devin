@@ -2,6 +2,24 @@ import type { ScheduleJob, Task } from "../types.js";
 import type { TaskService } from "./task-service.js";
 import { hydrateTaskRuntime } from "./config.js";
 
+export function materializeTaskFromJob(job: ScheduleJob): Task {
+  const prompt = job.prompt.trim();
+  const title = prompt.slice(0, 80) + (prompt.length > 80 ? "…" : "");
+  const now = new Date().toISOString();
+  return {
+    id: job.taskId,
+    prompt,
+    agent: job.agent,
+    runtime: job.runtime,
+    status: "queued",
+    userId: job.userId,
+    repository: job.repository,
+    title,
+    createdAt: job.enqueuedAt,
+    updatedAt: now,
+  };
+}
+
 /** Merge Postgres task state into memory (worker updates do not reach brain RAM). */
 export async function syncTaskFromStore(
   svc: TaskService,

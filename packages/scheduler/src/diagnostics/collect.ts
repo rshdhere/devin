@@ -215,6 +215,76 @@ export async function validateFirecrackerHostForRuntime(
   return undefined;
 }
 
+type OrchestratorFirecrackerHost = {
+  name?: string;
+  spec?: { address?: string };
+};
+
+async function listOrchestratorFirecrackerHosts(
+  orchestratorUrl: string,
+): Promise<OrchestratorFirecrackerHost[]> {
+  try {
+    const response = await fetch(
+      `${orchestratorUrl.replace(/\/$/, "")}/internal/v1/firecracker-hosts`,
+      { signal: AbortSignal.timeout(5_000) },
+    );
+    if (!response.ok) {
+      return [];
+    }
+    const payload = (await response.json()) as {
+      items?: OrchestratorFirecrackerHost[];
+    };
+    return Array.isArray(payload.items) ? payload.items : [];
+  } catch {
+    return [];
+  }
+}
+
+async function resolveFirecrackerHostUrl(options: {
+  orchestratorUrl: string;
+  firecrackerHostUrl?: string;
+  executionWorkerUrl?: string;
+  orchestratorReachable: boolean;
+}): Promise<string | undefined> {
+  const local = options.firecrackerHostUrl?.trim();
+  if (local) {
+    return local;
+  }
+
+  if (options.executionWorkerUrl?.trim()) {
+    try {
+      const response = await fetch(
+        `${options.executionWorkerUrl.trim().replace(/\/$/, "")}/api/v1/diagnostics`,
+        { signal: AbortSignal.timeout(8_000) },
+      );
+      if (response.ok) {
+        const worker = (await response.json()) as InfraDiagnostics;
+        const workerUrl = worker.firecrackerHost?.url?.replace(/\/health$/, "");
+        if (workerUrl) {
+          return workerUrl;
+        }
+      }
+    } catch {
+      // fall through to orchestrator registry
+    }
+  }
+
+  if (!options.orchestratorReachable) {
+    return undefined;
+  }
+
+  const hosts = await listOrchestratorFirecrackerHosts(options.orchestratorUrl);
+  if (hosts.length === 0) {
+    return undefined;
+  }
+
+  const preferred = resolvePreferredHost();
+  const selected =
+    (preferred ? hosts.find((host) => host.name === preferred) : undefined) ??
+    hosts[0];
+  return selected?.spec?.address?.trim() || undefined;
+}
+
 export async function collectInfraDiagnostics(options: {
   orchestratorUrl: string;
   firecrackerHostUrl?: string;
@@ -233,10 +303,14 @@ export async function collectInfraDiagnostics(options: {
   }
 
   let firecrackerHost: (ServiceProbe & FirecrackerHostStatus) | undefined;
-  if (options.firecrackerHostUrl?.trim()) {
-    firecrackerHost = await fetchFirecrackerHostStatus(
-      options.firecrackerHostUrl.trim(),
-    );
+  const firecrackerHostUrl = await resolveFirecrackerHostUrl({
+    orchestratorUrl: options.orchestratorUrl,
+    firecrackerHostUrl: options.firecrackerHostUrl,
+    executionWorkerUrl: options.executionWorkerUrl,
+    orchestratorReachable: orchestratorProbe.reachable,
+  });
+  if (firecrackerHostUrl) {
+    firecrackerHost = await fetchFirecrackerHostStatus(firecrackerHostUrl);
   }
 
   const serviceMode = options.mode ?? "standalone";

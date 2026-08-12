@@ -101,6 +101,19 @@ export function DiagnosticsPanel({
               .
             </p>
           ) : null}
+          {/task not found/i.test(task.message) ? (
+            <p className="text-[12px] leading-relaxed text-amber-200/90">
+              The execution worker could not load this task. Confirm{" "}
+              <span className="font-mono text-amber-100">DATABASE_URL</span> is
+              set on the worker scheduler (
+              <span className="font-mono text-amber-100">
+                sudo devin-infra sync-platform-config
+              </span>
+              ) and redeploy{" "}
+              <span className="font-mono text-amber-100">devin-brain</span> and
+              the worker image, then retry.
+            </p>
+          ) : null}
           {/EXECUTION_WORKER_URL|worker rejected job|worker unavailable/i.test(
             task.message,
           ) ? (
