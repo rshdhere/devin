@@ -251,6 +251,7 @@ export async function runSandboxSetupPhase(
       task.id,
       sandboxSpec,
       sandboxCpu,
+      { forceRecreate: job.forceSandboxRecreate },
     );
 
     const provisionedSandboxName = state.sandboxName;
@@ -265,6 +266,7 @@ export async function runSandboxSetupPhase(
           task.id,
           sandboxSpec,
           sandboxCpu,
+          { forceRecreate: job.forceSandboxRecreate },
         ),
     );
     assertSandboxOnLocalHost(svc, sandbox, task.id);

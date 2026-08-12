@@ -1,6 +1,7 @@
 import type { Task } from "../types.js";
 import { delegateJobToWorker } from "./session-lifecycle.js";
 import { ensurePendingJob } from "./resolve-task.js";
+import { syncTaskFromWorker } from "./sync-task-from-worker.js";
 import type { TaskService } from "./task-service.js";
 import { emit, updateTask } from "./task-state.js";
 
@@ -27,6 +28,11 @@ export async function recoverStuckQueuedTasks(svc: TaskService): Promise<void> {
 
     const job = await ensurePendingJob(svc, task.id);
     if (!job) {
+      continue;
+    }
+
+    const synced = await syncTaskFromWorker(svc, task.id);
+    if (synced && !isStuckDelegatableStatus(synced.status)) {
       continue;
     }
 

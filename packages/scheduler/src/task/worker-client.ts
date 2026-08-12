@@ -1,4 +1,23 @@
 import type { TaskEvent } from "@devin/events";
+import type { Task } from "./types.js";
+
+export async function fetchWorkerTask(
+  executionWorkerUrl: string,
+  taskId: string,
+): Promise<Task | undefined> {
+  try {
+    const response = await fetch(
+      `${executionWorkerUrl.replace(/\/$/, "")}/api/v1/tasks/${encodeURIComponent(taskId)}`,
+      { signal: AbortSignal.timeout(5_000) },
+    );
+    if (!response.ok) {
+      return undefined;
+    }
+    return (await response.json()) as Task;
+  } catch {
+    return undefined;
+  }
+}
 
 export async function fetchWorkerEventHistory(
   executionWorkerUrl: string,

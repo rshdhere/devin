@@ -3,7 +3,8 @@ import { formatSSE } from "@devin/events";
 import type { Request, Response } from "express";
 import type { TaskService } from "../task/service.js";
 import { syncTaskFromStore } from "../task/service/resolve-task.js";
-import { fetchWorkerEventHistory } from "./task-events-poll.js";
+import { syncTaskFromWorker } from "../task/service/sync-task-from-worker.js";
+import { fetchWorkerEventHistory } from "../task/worker-client.js";
 
 export async function handleTaskEvents(
   tasks: TaskService,
@@ -60,27 +61,34 @@ export async function handleTaskEvents(
 
   const pollInterval =
     tasks.getMode() === "brain"
-      ? setInterval(async () => {
-          await syncTaskFromStore(tasks, taskId);
+      ? setInterval(() => {
+          void (async () => {
+            try {
+              await syncTaskFromWorker(tasks, taskId);
+              await syncTaskFromStore(tasks, taskId);
 
-          if (tasks.getTaskStore().isEnabled()) {
-            const fresh = await tasks
-              .getTaskStore()
-              .loadEventsSince(taskId, lastSequence);
-            for (const event of fresh) {
-              pushEvent(event);
-            }
-          }
+              if (tasks.getTaskStore().isEnabled()) {
+                const fresh = await tasks
+                  .getTaskStore()
+                  .loadEventsSince(taskId, lastSequence);
+                for (const event of fresh) {
+                  pushEvent(event);
+                }
+              }
 
-          if (tasks.executionWorkerUrl?.trim()) {
-            const workerEvents = await fetchWorkerEventHistory(
-              tasks.executionWorkerUrl,
-              taskId,
-            );
-            for (const event of workerEvents) {
-              pushEvent(event);
+              if (tasks.executionWorkerUrl?.trim()) {
+                const workerEvents = await fetchWorkerEventHistory(
+                  tasks.executionWorkerUrl,
+                  taskId,
+                );
+                for (const event of workerEvents) {
+                  pushEvent(event);
+                }
+              }
+            } catch (error) {
+              console.error("task events poll failed", { taskId, error });
             }
-          }
+          })();
         }, 750)
       : undefined;
 

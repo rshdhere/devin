@@ -94,5 +94,7 @@ export interface ScheduleJob {
   agentModel?: string;
   draftPlan?: DraftPlan;
   greenfieldPushed?: boolean;
+  /** Replace an existing Running sandbox instead of reusing it (retries after guest FS failures). */
+  forceSandboxRecreate?: boolean;
   enqueuedAt: string;
 }

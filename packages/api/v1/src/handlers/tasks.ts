@@ -27,6 +27,7 @@ import {
   listTaskFiles,
   readTaskFile,
 } from "../lib/scheduler.js";
+import { applyCorsHeaders } from "../lib/cors.js";
 import { requireAuth } from "../middleware/require-auth.js";
 
 export const tasksRouter = Router();
@@ -34,9 +35,11 @@ export const tasksRouter = Router();
 tasksRouter.use(requireAuth);
 
 function respondSchedulerFailure(
+  req: import("express").Request,
   res: import("express").Response,
   error: unknown,
 ) {
+  applyCorsHeaders(res, req.headers.origin, req.hostname);
   const message =
     error instanceof Error ? error.message : "Scheduler unavailable";
   res.status(503).json({ error: message });
@@ -58,7 +61,7 @@ tasksRouter.get("/", async (req, res) => {
 
     res.status(response.status).json(tasks);
   } catch (error) {
-    respondSchedulerFailure(res, error);
+    respondSchedulerFailure(req, res, error);
   }
 });
 
@@ -130,16 +133,16 @@ tasksRouter.post("/", async (req, res) => {
 
     res.status(response.status).json(await response.json());
   } catch (error) {
-    respondSchedulerFailure(res, error);
+    respondSchedulerFailure(req, res, error);
   }
 });
 
-tasksRouter.get("/diagnostics/infra", async (_req, res) => {
+tasksRouter.get("/diagnostics/infra", async (req, res) => {
   try {
     const response = await getInfraDiagnostics();
     res.status(response.status).json(await response.json());
   } catch (error) {
-    respondSchedulerFailure(res, error);
+    respondSchedulerFailure(req, res, error);
   }
 });
 
@@ -148,7 +151,7 @@ tasksRouter.get("/:id/diagnostics", async (req, res) => {
     const response = await getTaskDiagnostics(req.params.id);
     res.status(response.status).json(await response.json());
   } catch (error) {
-    respondSchedulerFailure(res, error);
+    respondSchedulerFailure(req, res, error);
   }
 });
 
@@ -157,7 +160,7 @@ tasksRouter.get("/:id", async (req, res) => {
     const response = await getTask(req.params.id);
     res.status(response.status).json(await response.json());
   } catch (error) {
-    respondSchedulerFailure(res, error);
+    respondSchedulerFailure(req, res, error);
   }
 });
 
@@ -166,7 +169,7 @@ tasksRouter.post("/:id/execute", async (req, res) => {
     const response = await startTaskExecution(req.params.id);
     res.status(response.status).json(await response.json());
   } catch (error) {
-    respondSchedulerFailure(res, error);
+    respondSchedulerFailure(req, res, error);
   }
 });
 
@@ -175,7 +178,7 @@ tasksRouter.post("/:id/retry", async (req, res) => {
     const response = await retryTask(req.params.id);
     res.status(response.status).json(await response.json());
   } catch (error) {
-    respondSchedulerFailure(res, error);
+    respondSchedulerFailure(req, res, error);
   }
 });
 
@@ -184,7 +187,7 @@ tasksRouter.post("/:id/commit", async (req, res) => {
     const response = await commitTaskWork(req.params.id);
     res.status(response.status).json(await response.json());
   } catch (error) {
-    respondSchedulerFailure(res, error);
+    respondSchedulerFailure(req, res, error);
   }
 });
 
@@ -193,7 +196,7 @@ tasksRouter.post("/:id/pr", async (req, res) => {
     const response = await raiseTaskPullRequest(req.params.id);
     res.status(response.status).json(await response.json());
   } catch (error) {
-    respondSchedulerFailure(res, error);
+    respondSchedulerFailure(req, res, error);
   }
 });
 
@@ -212,7 +215,7 @@ tasksRouter.post("/:id/continue", async (req, res) => {
     const response = await continueTask(req.params.id, prompt, agentModel);
     res.status(response.status).json(await response.json());
   } catch (error) {
-    respondSchedulerFailure(res, error);
+    respondSchedulerFailure(req, res, error);
   }
 });
 
@@ -221,7 +224,7 @@ tasksRouter.post("/:id/terminate", async (req, res) => {
     const response = await terminateSession(req.params.id);
     res.status(response.status).json(await response.json());
   } catch (error) {
-    respondSchedulerFailure(res, error);
+    respondSchedulerFailure(req, res, error);
   }
 });
 
@@ -230,7 +233,7 @@ tasksRouter.post("/:id/wake", async (req, res) => {
     const response = await wakeSession(req.params.id);
     res.status(response.status).json(await response.json());
   } catch (error) {
-    respondSchedulerFailure(res, error);
+    respondSchedulerFailure(req, res, error);
   }
 });
 
@@ -257,7 +260,7 @@ tasksRouter.post("/:id/terminal", async (req, res) => {
     }
     res.status(response.status).send(await response.text());
   } catch (error) {
-    respondSchedulerFailure(res, error);
+    respondSchedulerFailure(req, res, error);
   }
 });
 
@@ -267,7 +270,7 @@ tasksRouter.get("/:id/files/read", async (req, res) => {
     const response = await readTaskFile(req.params.id, path);
     res.status(response.status).send(await response.text());
   } catch (error) {
-    respondSchedulerFailure(res, error);
+    respondSchedulerFailure(req, res, error);
   }
 });
 
@@ -277,7 +280,7 @@ tasksRouter.get("/:id/files", async (req, res) => {
     const response = await listTaskFiles(req.params.id, path);
     res.status(response.status).send(await response.text());
   } catch (error) {
-    respondSchedulerFailure(res, error);
+    respondSchedulerFailure(req, res, error);
   }
 });
 
@@ -316,7 +319,7 @@ tasksRouter.get("/:id/devbox-preview", async (req, res) => {
     }
     res.end();
   } catch (error) {
-    respondSchedulerFailure(res, error);
+    respondSchedulerFailure(req, res, error);
   }
 });
 
@@ -336,7 +339,7 @@ tasksRouter.get("/:id/desktop-screenshot", async (req, res) => {
     const body = await response.arrayBuffer();
     res.send(Buffer.from(body));
   } catch (error) {
-    respondSchedulerFailure(res, error);
+    respondSchedulerFailure(req, res, error);
   }
 });
 
@@ -349,7 +352,7 @@ tasksRouter.get("/:id/desktop-vnc", async (req, res) => {
     });
     res.send(Buffer.from(await response.arrayBuffer()));
   } catch (error) {
-    respondSchedulerFailure(res, error);
+    respondSchedulerFailure(req, res, error);
   }
 });
 
@@ -364,7 +367,7 @@ tasksRouter.get("/:id/session-recording", async (req, res) => {
     res.setHeader("Cache-Control", "no-store");
     res.send(Buffer.from(await response.arrayBuffer()));
   } catch (error) {
-    respondSchedulerFailure(res, error);
+    respondSchedulerFailure(req, res, error);
   }
 });
 
@@ -373,7 +376,7 @@ tasksRouter.get("/:id/events/history", async (req, res) => {
     const response = await fetchTaskEventHistory(req.params.id);
     res.status(response.status).json(await response.json());
   } catch (error) {
-    respondSchedulerFailure(res, error);
+    respondSchedulerFailure(req, res, error);
   }
 });
 
@@ -407,6 +410,6 @@ tasksRouter.get("/:id/events", async (req, res) => {
 
     res.end();
   } catch (error) {
-    respondSchedulerFailure(res, error);
+    respondSchedulerFailure(req, res, error);
   }
 });

@@ -130,6 +130,7 @@ export async function ensureSandbox(
   sandboxName: string,
   taskId: string,
   spec: Record<string, unknown>,
+  options?: { forceRecreate?: boolean },
 ): Promise<void> {
   const create = async (): Promise<number> => {
     try {
@@ -155,7 +156,7 @@ export async function ensureSandbox(
     const existing = await fetchSandbox(svc, sandboxName);
     const phase = existing?.status?.phase;
 
-    if (phase === "Running") {
+    if (phase === "Running" && !options?.forceRecreate) {
       emit(
         svc,
         "task.scheduled",
@@ -166,10 +167,24 @@ export async function ensureSandbox(
       return;
     }
 
-    emit(svc, "task.scheduled", taskId, "Removing stale sandbox before retry", {
-      sandboxName,
-      phase: phase ?? "unknown",
-    });
+    if (phase === "Running" && options?.forceRecreate) {
+      emit(svc, "task.scheduled", taskId, "Recreating sandbox after retry", {
+        sandboxName,
+        phase,
+        forceRecreate: true,
+      });
+    } else {
+      emit(
+        svc,
+        "task.scheduled",
+        taskId,
+        "Removing stale sandbox before retry",
+        {
+          sandboxName,
+          phase: phase ?? "unknown",
+        },
+      );
+    }
     await deleteSandbox(svc, sandboxName);
     await waitForSandboxDeleted(svc, sandboxName);
 
@@ -209,8 +224,9 @@ export async function provisionSandboxWithCapacityRetry(
   taskId: string,
   spec: Record<string, unknown>,
   _requiredCpu: number,
+  options?: { forceRecreate?: boolean },
 ): Promise<void> {
-  await ensureSandbox(svc, sandboxName, taskId, spec);
+  await ensureSandbox(svc, sandboxName, taskId, spec, options);
 }
 
 export async function reclaimDevboxCapacity(

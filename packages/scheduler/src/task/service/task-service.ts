@@ -60,6 +60,7 @@ import {
   syncTaskFromStore,
 } from "./resolve-task.js";
 import { recoverStuckQueuedTasks } from "./brain-recovery.js";
+import { syncTaskFromWorker as syncTaskFromWorkerImpl } from "./sync-task-from-worker.js";
 import type {
   ReviewSession,
   TaskServiceHost,
@@ -169,6 +170,7 @@ export class TaskService implements TaskServiceHost {
       ...job,
       skipDraft: Boolean(job.draftPlan || job.greenfieldPushed),
       autoStartSandbox: true,
+      forceSandboxRecreate: true,
       enqueuedAt: new Date().toISOString(),
     };
     this.pendingJobs.set(taskId, retryJob);
@@ -177,6 +179,31 @@ export class TaskService implements TaskServiceHost {
       retry: true,
       skipDraft: retryJob.skipDraft,
     });
+
+    if (this.mode === "brain") {
+      try {
+        await delegateJobToWorkerImpl(this, retryJob);
+        this.emit(
+          "task.scheduled",
+          taskId,
+          "Task retry delegated to execution worker",
+          { delegated: true, retry: true },
+        );
+      } catch (error) {
+        const message =
+          error instanceof Error
+            ? error.message
+            : "Failed to delegate retry to execution worker";
+        this.updateTask(taskId, "failed", message);
+        this.emit("task.failed", taskId, message);
+      }
+      const refreshed = this.getTask(taskId);
+      if (!refreshed) {
+        throw new Error("task not found");
+      }
+      return refreshed;
+    }
+
     await this.queue.enqueue(retryJob);
     return task;
   }
@@ -345,6 +372,10 @@ export class TaskService implements TaskServiceHost {
     return syncTaskFromStore(this, taskId);
   }
 
+  async syncTaskFromWorker(taskId: string): Promise<Task | undefined> {
+    return syncTaskFromWorkerImpl(this, taskId);
+  }
+
   listTasks(): Task[] {
     if (this.tasks.size > 0) {
       return [...this.tasks.values()]
@@ -363,6 +394,27 @@ export class TaskService implements TaskServiceHost {
         this.tasks.set(hydrated.id, hydrated);
       }
     }
+
+    if (this.mode === "brain" && this.executionWorkerUrl?.trim()) {
+      const staleCutoff = Date.now() - 30_000;
+      const stale = stored.filter(
+        (task) =>
+          (task.status === "queued" || task.status === "scheduling") &&
+          new Date(task.updatedAt).getTime() < staleCutoff,
+      );
+      await Promise.all(
+        stale
+          .slice(0, 12)
+          .map((task) =>
+            syncTaskFromWorkerImpl(this, task.id).catch(() => undefined),
+          ),
+      );
+      if (stale.length > 0) {
+        const refreshed = await this.taskStore.listTasks(userId);
+        return refreshed.map(hydrateTaskRuntime);
+      }
+    }
+
     return stored.map(hydrateTaskRuntime);
   }
 
