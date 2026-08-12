@@ -137,9 +137,11 @@ export async function fetchTaskEventHistory(id: string): Promise<Response> {
 export async function fetchDevboxPreview(
   id: string,
   path = "/",
+  opts?: { warm?: boolean },
 ): Promise<Response> {
+  const warmQuery = opts?.warm ? "&warm=1" : "";
   return proxyScheduler(
-    `/api/v1/tasks/${encodeURIComponent(id)}/devbox-preview?path=${encodeURIComponent(path)}`,
+    `/api/v1/tasks/${encodeURIComponent(id)}/devbox-preview?path=${encodeURIComponent(path)}${warmQuery}`,
     {
       headers: {
         Accept: "*/*",

@@ -285,7 +285,11 @@ tasksRouter.get("/:id/devbox-preview", async (req, res) => {
       typeof req.query.path === "string" && req.query.path.trim()
         ? req.query.path
         : "/";
-    const response = await fetchDevboxPreview(req.params.id, path);
+    const warm =
+      req.query.warm === "1" ||
+      req.query.warm === "true" ||
+      req.query.bootstrap === "1";
+    const response = await fetchDevboxPreview(req.params.id, path, { warm });
     res.status(response.status);
     response.headers.forEach((value, key) => {
       const lower = key.toLowerCase();

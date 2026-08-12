@@ -124,6 +124,7 @@ export interface TaskServiceHost {
     path: string,
     req: IncomingMessage,
     res: ServerResponse,
+    opts?: { warm?: boolean },
   ): Promise<void>;
   fetchDesktopScreenshot(
     taskId: string,

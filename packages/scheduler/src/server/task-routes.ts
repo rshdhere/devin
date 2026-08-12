@@ -184,8 +184,12 @@ export function createTaskRouter(tasks: TaskService): Router {
       typeof req.query.path === "string" && req.query.path.trim()
         ? req.query.path
         : "/";
+    const warm =
+      req.query.warm === "1" ||
+      req.query.warm === "true" ||
+      req.query.bootstrap === "1";
     try {
-      await tasks.proxyDevboxPreview(req.params.id, path, req, res);
+      await tasks.proxyDevboxPreview(req.params.id, path, req, res, { warm });
     } catch (error) {
       sendError(res, 502, error, "devbox preview failed");
     }

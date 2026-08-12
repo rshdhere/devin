@@ -22,7 +22,11 @@ import {
   loadCachedDesktopSnapshot,
   persistDesktopSnapshot,
 } from "./desktop-capture-fetch.js";
-import { delegateRequestToWorker, wakeSession } from "./session-lifecycle.js";
+import {
+  delegateRequestToWorker,
+  hydrateSessionFromStore,
+  wakeSession,
+} from "./session-lifecycle.js";
 import { emit, patchTask } from "./task-state.js";
 
 const DESKTOP_CAPTURE_TIMEOUT_MS = 120_000;
@@ -95,37 +99,8 @@ export async function runDesktopScreenshotWithDevServer(
 
   let spunUp = false;
   try {
-    emit(svc, "agent.log", taskId, "Starting app for desktop snapshot", {
-      desktop: true,
-    });
-    const startCommand = buildStartDevServerForSnapshotScript();
-    const waitSeconds = snapshotWaitSecondsForStartCommand(startCommand);
-    await session.runtime.terminalAllowFailure({
-      taskId,
-      cwd: session.repoCwd,
-      command: startCommand,
-    });
+    await ensureDevboxAppForPreview(svc, session, taskId);
     spunUp = true;
-    const wait = await session.runtime.terminalAllowFailure({
-      taskId,
-      cwd: session.repoCwd,
-      command: buildWaitForDevServerScript(waitSeconds),
-    });
-    const port = Number.parseInt(wait.stdout.trim(), 10);
-    if (Number.isFinite(port) && port > 0) {
-      session.devboxPreviewPort = port;
-      void svc.taskStore.setPreviewPort(taskId, port);
-      const previewPath = `/api/v1/tasks/${encodeURIComponent(taskId)}/devbox-preview?path=/`;
-      patchTask(svc, taskId, { previewUrl: previewPath });
-    } else {
-      emit(
-        svc,
-        "agent.log",
-        taskId,
-        "Desktop snapshot: app did not become ready on a known port",
-        { desktop: true },
-      );
-    }
     buffer = await captureDesktopScreenshot(svc, session, taskId);
   } catch (error) {
     const message =
@@ -300,11 +275,80 @@ export async function resolveLiveSession(
   svc: TaskService,
   taskId: string,
 ): Promise<ReviewSession | undefined> {
-  return (
-    svc.activeSessions.get(taskId) ??
-    svc.reviewSessions.get(taskId) ??
-    (await wakeSession(svc, taskId))
-  );
+  const inMemory =
+    svc.activeSessions.get(taskId) ?? svc.reviewSessions.get(taskId);
+  if (inMemory) {
+    return inMemory;
+  }
+
+  const woken = await wakeSession(svc, taskId);
+  if (woken) {
+    return woken;
+  }
+
+  const persisted = await svc.taskStore.getSession(taskId);
+  if (
+    persisted &&
+    (persisted.state === "review" ||
+      persisted.state === "active" ||
+      persisted.state === "sleeping")
+  ) {
+    return hydrateSessionFromStore(svc, taskId, persisted);
+  }
+
+  return undefined;
+}
+
+/** Start or rediscover the product dev server before live preview / capture. */
+export async function ensureDevboxAppForPreview(
+  svc: TaskService,
+  session: ReviewSession,
+  taskId: string,
+): Promise<number | undefined> {
+  await refreshDevboxPreviewPort(svc, session, taskId);
+
+  if (session.devboxPreviewPort) {
+    const probe = await session.runtime.terminalAllowFailure({
+      taskId,
+      cwd: session.repoCwd,
+      command: buildWaitForPortScript(session.devboxPreviewPort, 8),
+    });
+    if (probe.exitCode === 0) {
+      return session.devboxPreviewPort;
+    }
+  }
+
+  emit(svc, "agent.log", taskId, "Starting app for desktop preview", {
+    desktop: true,
+    warm: true,
+  });
+
+  const startCommand = buildStartDevServerForSnapshotScript();
+  const waitSeconds = snapshotWaitSecondsForStartCommand(startCommand);
+  await session.runtime.terminalAllowFailure({
+    taskId,
+    cwd: session.repoCwd,
+    command: startCommand,
+  });
+  const wait = await session.runtime.terminalAllowFailure({
+    taskId,
+    cwd: session.repoCwd,
+    command: buildWaitForDevServerScript(waitSeconds),
+  });
+  const port = Number.parseInt(wait.stdout.trim(), 10);
+  if (Number.isFinite(port) && port > 0) {
+    session.devboxPreviewPort = port;
+    void svc.taskStore.setPreviewPort(taskId, port);
+    const previewPath = `/api/v1/tasks/${encodeURIComponent(taskId)}/devbox-preview?path=/`;
+    patchTask(svc, taskId, { previewUrl: previewPath });
+    emit(svc, "agent.log", taskId, "Devbox app ready for preview", {
+      port,
+      desktop: true,
+    });
+    return port;
+  }
+
+  return session.devboxPreviewPort;
 }
 
 export function startDevboxPreviewWatcher(
@@ -349,11 +393,13 @@ export async function proxyDevboxPreview(
   path: string,
   req: IncomingMessage,
   res: ServerResponse,
+  opts?: { warm?: boolean },
 ): Promise<void> {
   if (svc.mode === "brain") {
     const previewPath =
       typeof path === "string" && path.startsWith("/") ? path : `/${path}`;
-    const workerPath = `/api/v1/tasks/${encodeURIComponent(taskId)}/devbox-preview?path=${encodeURIComponent(previewPath)}`;
+    const warmQuery = opts?.warm ? "&warm=1" : "";
+    const workerPath = `/api/v1/tasks/${encodeURIComponent(taskId)}/devbox-preview?path=${encodeURIComponent(previewPath)}${warmQuery}`;
     try {
       const upstream = await delegateRequestToWorker(svc, workerPath, {
         method: req.method === "HEAD" ? "HEAD" : "GET",
@@ -394,6 +440,10 @@ export async function proxyDevboxPreview(
     res.writeHead(404, { "Content-Type": "text/plain" });
     res.end("No live devbox session");
     return;
+  }
+
+  if (opts?.warm) {
+    await ensureDevboxAppForPreview(svc, session, taskId);
   }
 
   await refreshDevboxPreviewPort(svc, session, taskId);

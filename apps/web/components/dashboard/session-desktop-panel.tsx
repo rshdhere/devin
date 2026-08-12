@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Loader2, Monitor, RefreshCw } from "lucide-react";
 import type { Task } from "@devin/types";
 import { tasksApiUrl } from "@/lib/api/http";
-import { canUseDevbox, isDevboxLive } from "@/lib/sessions/devbox";
+import { canUseDevbox } from "@/lib/sessions/devbox";
 import { cn } from "@/lib/utils";
 
 type DesktopView = "live" | "snapshot";
@@ -36,18 +36,16 @@ export function SessionDesktopPanel({
   onOpenDesktop?: () => void;
 }) {
   const canUse = canUseDevbox(task);
-  const liveCapable = isDevboxLive(task) || Boolean(task.previewUrl);
   const screenshotSrc = tasksApiUrl(
     `/${encodeURIComponent(task.id)}/desktop-screenshot`,
   );
   const livePreviewSrc = tasksApiUrl(
-    `/${encodeURIComponent(task.id)}/devbox-preview?path=/`,
+    `/${encodeURIComponent(task.id)}/devbox-preview?path=/&warm=1`,
   );
 
-  const [view, setView] = useState<DesktopView>(
-    layout === "panel" && liveCapable ? "live" : "snapshot",
-  );
+  const [view, setView] = useState<DesktopView>("snapshot");
   const [liveReachable, setLiveReachable] = useState(false);
+  const [liveWarming, setLiveWarming] = useState(false);
   const [shotError, setShotError] = useState(false);
   const [shotErrorDetail, setShotErrorDetail] = useState<string | null>(null);
   const [shotLoading, setShotLoading] = useState(false);
@@ -83,19 +81,32 @@ export function SessionDesktopPanel({
   const probeLivePreview = useCallback(async () => {
     if (!canUse) {
       setLiveReachable(false);
-      return;
+      return false;
     }
+    setLiveWarming(true);
     try {
       const response = await fetch(livePreviewSrc, {
         method: "GET",
         credentials: "include",
-        signal: AbortSignal.timeout(8_000),
+        signal: AbortSignal.timeout(120_000),
       });
-      setLiveReachable(response.ok);
+      const reachable =
+        response.ok &&
+        !/404 page not found/i.test(
+          (await response.clone().text()).slice(0, 80),
+        );
+      setLiveReachable(reachable);
+      if (reachable && layout === "panel") {
+        setView("live");
+      }
+      return reachable;
     } catch {
       setLiveReachable(false);
+      return false;
+    } finally {
+      setLiveWarming(false);
     }
-  }, [canUse, livePreviewSrc]);
+  }, [canUse, layout, livePreviewSrc]);
 
   const scheduleFreshRetry = useCallback(
     (loadFn: (fresh: boolean) => Promise<void>) => {
@@ -320,6 +331,15 @@ export function SessionDesktopPanel({
     }
   }, [layout, liveReachable]);
 
+  const openLivePreview = useCallback(async () => {
+    setView("live");
+    const ok = await probeLivePreview();
+    if (!ok) {
+      setView("snapshot");
+      refreshScreenshot(true);
+    }
+  }, [probeLivePreview, refreshScreenshot]);
+
   useEffect(() => {
     return () => {
       clearFreshRetryTimer();
@@ -343,8 +363,7 @@ export function SessionDesktopPanel({
   const isEmbed = layout === "embed";
   const captureInProgress =
     shotLoading && !shotUrl && (isAgentActive || isTerminal);
-  const showLive =
-    layout === "panel" && view === "live" && (liveReachable || liveCapable);
+  const showLive = layout === "panel" && view === "live" && liveReachable;
 
   return (
     <div
@@ -369,7 +388,7 @@ export function SessionDesktopPanel({
             <div className="mr-1 flex rounded-lg border border-white/[0.08] bg-[#111] p-0.5">
               <button
                 type="button"
-                onClick={() => setView("live")}
+                onClick={() => void openLivePreview()}
                 className={cn(
                   "rounded-md px-2 py-0.5 text-[10px] font-medium transition-colors",
                   view === "live"
@@ -418,12 +437,16 @@ export function SessionDesktopPanel({
             key={livePreviewSrc}
             src={livePreviewSrc}
             title="Live app preview"
-            className={cn(
-              "h-full w-full border-0 bg-white",
-              isEmbed ? "min-h-[180px] rounded-lg" : "",
-            )}
+            className="h-full w-full border-0 bg-white"
             sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals"
           />
+        ) : view === "live" && (liveWarming || liveReachable === false) ? (
+          <div className="flex flex-col items-center gap-2 p-6">
+            <Loader2 className="size-6 animate-spin text-zinc-600" />
+            <p className="max-w-sm text-center text-[12px] text-zinc-500">
+              Starting app in the devbox for live preview…
+            </p>
+          </div>
         ) : (
           <>
             {captureInProgress ? (

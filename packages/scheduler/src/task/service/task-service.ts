@@ -412,8 +412,9 @@ export class TaskService implements TaskServiceHost {
     path: string,
     req: IncomingMessage,
     res: ServerResponse,
+    opts?: { warm?: boolean },
   ): Promise<void> {
-    return proxyDevboxPreviewImpl(this, taskId, path, req, res);
+    return proxyDevboxPreviewImpl(this, taskId, path, req, res, opts);
   }
 
   async fetchDesktopScreenshot(
