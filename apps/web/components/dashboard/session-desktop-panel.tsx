@@ -108,7 +108,7 @@ export function SessionDesktopPanel({
       setShotLoading(true);
 
       const controller = new AbortController();
-      const timeoutMs = fresh ? 120_000 : 25_000;
+      const timeoutMs = fresh ? 180_000 : 25_000;
       const timeout = window.setTimeout(() => controller.abort(), timeoutMs);
       const freshQuery = fresh ? "&fresh=1" : "";
       const url = `${screenshotSrc}?t=${Date.now()}${freshQuery}`;

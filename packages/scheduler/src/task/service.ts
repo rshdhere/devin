@@ -14,9 +14,12 @@ import {
   buildDiscoverDevboxPortScript,
   buildDesktopScreenshotScript,
   buildPruneWorkspaceDiskScript,
+  buildSnapshotSmokeStartScript,
   buildStartDevServerForSnapshotScript,
   buildStopDevServerForSnapshotScript,
   buildWaitForDevServerScript,
+  buildWaitForPortScript,
+  snapshotWaitSecondsForStartCommand,
   RUNTIME_SUPERVISOR_PORTS,
 } from "../devbox/preview.js";
 import {
@@ -365,34 +368,60 @@ export class TaskService {
     }
 
     const task = this.tasks.get(taskId);
-    let session =
-      this.activeSessions.get(taskId) ?? this.reviewSessions.get(taskId);
-
     if (!task) {
       throw new Error("task not found");
     }
 
+    let session =
+      this.activeSessions.get(taskId) ?? this.reviewSessions.get(taskId);
+    let persisted = await this.taskStore.getSession(taskId);
+
     if (!session && task.sessionSleeping) {
-      session = await this.wakeSession(taskId);
+      if (this.mode === "brain") {
+        await this.delegateRequestToWorker(
+          `/api/v1/tasks/${encodeURIComponent(taskId)}/wake`,
+          { method: "POST" },
+        );
+        const refreshed = await this.taskStore.getTask(taskId);
+        if (refreshed) {
+          this.tasks.set(taskId, refreshed);
+        }
+        persisted = await this.taskStore.getSession(taskId);
+      } else {
+        session = await this.wakeSession(taskId);
+        persisted = await this.taskStore.getSession(taskId);
+      }
     }
 
-    if (!session) {
+    if (
+      !session &&
+      persisted &&
+      (persisted.state === "active" || persisted.state === "review") &&
+      this.mode !== "brain"
+    ) {
+      session = await this.hydrateSessionFromStore(taskId, persisted);
+    }
+
+    const jobBase = session?.job ?? persisted?.job;
+    const runtimeBaseUrl = session?.runtimeBaseUrl ?? persisted?.runtimeBaseUrl;
+    const sandboxName = session?.sandboxName ?? persisted?.sandboxName;
+
+    if (!jobBase || !runtimeBaseUrl || !sandboxName) {
       throw new Error("no active devbox session for this task");
     }
 
     const followUpJob: ScheduleJob = {
-      ...session.job,
+      ...jobBase,
       prompt: trimmed,
       taskId,
       skipDraft: true,
       resumeSession: true,
-      runtimeBaseUrl: session.runtimeBaseUrl,
-      sandboxName: session.sandboxName,
-      agentModel: agentModel?.trim() || session.job.agentModel,
+      runtimeBaseUrl,
+      sandboxName,
+      agentModel: agentModel?.trim() || jobBase.agentModel,
       enqueuedAt: new Date().toISOString(),
     };
 
-    task.prompt = trimmed;
     task.sessionSleeping = false;
     task.sessionActive = true;
     this.pendingJobs.set(taskId, followUpJob);
@@ -409,6 +438,33 @@ export class TaskService {
       await this.queue.enqueue(followUpJob);
     }
     return task;
+  }
+
+  private async hydrateSessionFromStore(
+    taskId: string,
+    persisted: PersistedSession,
+  ): Promise<ReviewSession> {
+    const runtime = new RuntimeClient(persisted.runtimeBaseUrl);
+    const session: ReviewSession = {
+      runtime,
+      sandboxName: persisted.sandboxName,
+      runtimeBaseUrl: persisted.runtimeBaseUrl,
+      repoCwd: persisted.repoCwd,
+      job: persisted.job,
+      githubToken: persisted.githubToken,
+      createdNewRepo: persisted.createdNewRepo,
+      guestHost: persisted.guestHost,
+      devboxPreviewPort: persisted.previewPort,
+    };
+    session.lastDesktopScreenshot =
+      await this.loadCachedDesktopSnapshot(taskId);
+
+    if (persisted.state === "review") {
+      this.reviewSessions.set(taskId, session);
+    } else {
+      this.activeSessions.set(taskId, session);
+    }
+    return session;
   }
 
   async wakeSession(taskId: string): Promise<ReviewSession | undefined> {
@@ -617,7 +673,7 @@ export class TaskService {
       return;
     }
 
-    if (this.processingTasks.has(job.taskId)) {
+    if (this.processingTasks.has(job.taskId) && !job.resumeSession) {
       return;
     }
 
@@ -649,12 +705,29 @@ export class TaskService {
     let repoHydratedLocally = false;
 
     try {
-      const resumeSession =
+      let resumeSession =
         job.resumeSession === true
           ? (this.activeSessions.get(task.id) ??
             this.reviewSessions.get(task.id) ??
             (await this.wakeSession(task.id)))
           : undefined;
+
+      if (job.resumeSession === true && !resumeSession) {
+        const persisted = await this.taskStore.getSession(task.id);
+        if (
+          persisted &&
+          (persisted.state === "active" || persisted.state === "review")
+        ) {
+          resumeSession = await this.hydrateSessionFromStore(
+            task.id,
+            persisted,
+          );
+        }
+      }
+
+      if (job.resumeSession === true && !resumeSession) {
+        throw new Error("no devbox session available to resume follow-up");
+      }
 
       if (resumeSession) {
         this.reviewSessions.delete(task.id);
@@ -1464,19 +1537,6 @@ export class TaskService {
       const sessionBeforeComplete =
         this.activeSessions.get(task.id) ?? this.reviewSessions.get(task.id);
 
-      if (
-        runtimeAgentTask &&
-        runtime &&
-        sessionBeforeComplete &&
-        usesRuntimeAgent(task.agent)
-      ) {
-        await this.captureDevboxPreviewAfterAgent(
-          sessionBeforeComplete,
-          task,
-          repoCwd,
-        );
-      }
-
       this.updateTask(task.id, "completed", completionMessage);
       this.emit("task.completed", task.id, completionMessage, {
         output: runResult.output,
@@ -1513,36 +1573,23 @@ export class TaskService {
         );
         void this.taskStore.touchSession(task.id);
         task.sessionActive = true;
+        void this.patchTask(task.id, { sessionActive: true });
         retainSandboxForPreview = true;
 
-        // Devin-style: after Done, keep a localhost desktop snapshot. Bound the
-        // wait so a hung Playwright never blocks the control plane forever.
         const shotSession = this.activeSessions.get(task.id)!;
-        await Promise.race([
-          this.captureDesktopScreenshotWithDevServer(shotSession, task.id, {
-            allowSpin: true,
-            keepServer: true,
-            bypassSpinCooldown: true,
-          }),
-          new Promise<undefined>((resolve) =>
-            setTimeout(() => resolve(undefined), 120_000),
-          ),
-        ]);
+        this.schedulePostCompletionDesktopCapture(
+          shotSession,
+          task,
+          repoCwd,
+          runtimeAgentTask,
+        );
       } else if (sessionBeforeComplete) {
-        await Promise.race([
-          this.captureDesktopScreenshotWithDevServer(
-            sessionBeforeComplete,
-            task.id,
-            {
-              allowSpin: true,
-              keepServer: true,
-              bypassSpinCooldown: true,
-            },
-          ),
-          new Promise<undefined>((resolve) =>
-            setTimeout(() => resolve(undefined), 120_000),
-          ),
-        ]);
+        this.schedulePostCompletionDesktopCapture(
+          sessionBeforeComplete,
+          task,
+          repoCwd,
+          runtimeAgentTask,
+        );
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : "Task failed";
@@ -3990,17 +4037,9 @@ export class TaskService {
 
       // Leave the server running so Desktop can capture after Done.
       await this.smokeAndCaptureDevboxPreview(runtime, task, repoCwd, {
-        startCommand: [
-          "set +e",
-          "mkdir -p /workspace/.home",
-          "if ! grep -q '\"start\"' package.json 2>/dev/null; then exit 0; fi",
-          "export HOST=127.0.0.1 PORT=3000 HOSTNAME=127.0.0.1",
-          "nohup npm start >/workspace/.home/devin-snapshot-server.log 2>&1 &",
-          "echo $! > /workspace/.home/devin-snapshot-server.pid",
-          "exit 0",
-        ].join("\n"),
+        startCommand: buildSnapshotSmokeStartScript(),
         port: 3000,
-        waitSeconds: 90,
+        waitSeconds: 120,
       });
     } else {
       this.emit(
@@ -5169,6 +5208,37 @@ export class TaskService {
    * After a cursor agent run, start the product server and capture Desktop so
    * Done has a PNG even when the agent tore down its smoke server.
    */
+  private schedulePostCompletionDesktopCapture(
+    session: ReviewSession,
+    task: Task,
+    repoCwd: string,
+    runtimeAgentTask: boolean,
+  ): void {
+    void (async () => {
+      try {
+        if (
+          runtimeAgentTask &&
+          session.runtime &&
+          usesRuntimeAgent(task.agent)
+        ) {
+          await this.captureDevboxPreviewAfterAgent(session, task, repoCwd);
+        }
+        await Promise.race([
+          this.captureDesktopScreenshotWithDevServer(session, task.id, {
+            allowSpin: true,
+            keepServer: true,
+            bypassSpinCooldown: true,
+          }),
+          new Promise<undefined>((resolve) =>
+            setTimeout(() => resolve(undefined), 180_000),
+          ),
+        ]);
+      } catch {
+        // Desktop capture is best-effort after Done.
+      }
+    })();
+  }
+
   private async captureDevboxPreviewAfterAgent(
     session: ReviewSession,
     task: Task,
@@ -5186,18 +5256,19 @@ export class TaskService {
       cwd: repoCwd,
       command: [
         "set +e",
-        'has_pkg="no"; has_next="no"; has_go="no"; has_py="no"; has_rust="no"',
-        "test -f package.json && has_pkg=yes",
+        'has_next="no"; has_pkg="no"; has_go="no"; has_py="no"; has_rust="no"',
+        "if [ -f package.json ]; then has_pkg=yes; grep -qE '\"next\"' package.json 2>/dev/null && has_next=yes; fi",
+        "test -f next.config.ts -o -f next.config.js -o -f next.config.mjs && has_next=yes",
         "test -d .next && has_next=yes",
         "test -f go.mod -o -f main.go && has_go=yes",
         "test -f requirements.txt -o -f pyproject.toml -o -f main.py && has_py=yes",
         "test -f Cargo.toml && has_rust=yes",
-        'echo "$has_pkg $has_next $has_go $has_py $has_rust"',
+        'echo "$has_next $has_pkg $has_go $has_py $has_rust"',
       ].join("\n"),
     });
     const parts = probes.stdout.trim().split(/\s+/);
-    const hasPkg = parts[0] === "yes";
-    const hasNext = parts[1] === "yes";
+    const hasNext = parts[0] === "yes";
+    const hasPkg = parts[1] === "yes";
     const hasGo = parts[2] === "yes";
     const hasPy = parts[3] === "yes";
     const hasRust = parts[4] === "yes";
@@ -5219,7 +5290,7 @@ export class TaskService {
       return;
     }
 
-    if (hasGo) {
+    if (hasGo && !hasNext && !hasPkg) {
       await this.smokeAndCaptureDevboxPreview(session.runtime, task, repoCwd, {
         startCommand: [
           "set +e",
@@ -5256,19 +5327,12 @@ export class TaskService {
       return;
     }
 
-    if (hasPkg) {
+    if (hasPkg || hasNext) {
+      const startCommand = buildSnapshotSmokeStartScript();
       await this.smokeAndCaptureDevboxPreview(session.runtime, task, repoCwd, {
-        startCommand: [
-          "set +e",
-          "mkdir -p /workspace/.home",
-          "if ! grep -q '\"start\"' package.json 2>/dev/null; then exit 0; fi",
-          "export HOST=127.0.0.1 PORT=3000 HOSTNAME=127.0.0.1",
-          "nohup npm start >/workspace/.home/devin-snapshot-server.log 2>&1 &",
-          "echo $! > /workspace/.home/devin-snapshot-server.pid",
-          "exit 0",
-        ].join("\n"),
+        startCommand,
         port: 3000,
-        waitSeconds: hasNext ? 90 : 45,
+        waitSeconds: snapshotWaitSecondsForStartCommand(startCommand),
       });
     }
   }
@@ -5292,16 +5356,7 @@ export class TaskService {
     const wait = await runtime.terminalAllowFailure({
       taskId: task.id,
       cwd: repoCwd,
-      command: [
-        "set +e",
-        `port=${opts.port}`,
-        `for i in $(seq 1 ${opts.waitSeconds}); do`,
-        '  if curl -sf --max-time 2 "http://127.0.0.1:$port/" >/dev/null 2>&1; then echo "$port"; exit 0; fi',
-        '  if curl -sf --max-time 2 "http://127.0.0.1:$port/health" >/dev/null 2>&1; then echo "$port"; exit 0; fi',
-        "  sleep 1",
-        "done",
-        "exit 1",
-      ].join("\n"),
+      command: buildWaitForPortScript(opts.port, opts.waitSeconds),
     });
 
     const port = Number.parseInt(wait.stdout.trim(), 10);
@@ -5877,17 +5932,35 @@ function buildAgentPrompt(
     ? `Repository owner: ${owner.login}. You are committing on their behalf.`
     : "Repository owner: connected GitHub user.";
 
+  const scaffoldLine =
+    stackRuntime === "nextjs"
+      ? "The repository has a thin Next.js App Router scaffold (app/page.tsx + /health API route)."
+      : "The repository only has a thin runnable scaffold (health + placeholder UI).";
+
+  const productRequirements =
+    stackRuntime === "nextjs"
+      ? [
+          "- Extend the existing Next.js App Router project — do not replace it with Express or a plain Node server",
+          "- Replace the placeholder page with a real UI for the user's request",
+          "- GET / must be user-facing — never leave the scaffold placeholder text",
+          "- Keep /health or app/health returning JSON { ok: true }",
+          "- Do not finish while the page still shows scaffold placeholder copy",
+        ]
+      : [
+          "- Replace the placeholder with a real UI + API for the user's request",
+          "- GET / must be user-facing — never leave Express 'Cannot GET /' or a scaffold-only page",
+          "- Keep /health returning JSON { ok: true }",
+          "- Do not finish while the page still says 'Scaffold is running'",
+        ];
+
   return [
     `Repository ${repository} is cloned at /workspace/${repoCwd}. Work in that directory.`,
     ownerLine,
     "",
-    "The repository only has a thin runnable scaffold (health + placeholder UI).",
+    scaffoldLine,
     "You are the implementer — build the full product the user asked for. Do not leave the scaffold untouched.",
     "Requirements:",
-    "- Replace the placeholder with a real UI + API for the user's request",
-    "- GET / must be user-facing — never leave Express 'Cannot GET /' or a scaffold-only page",
-    "- Keep /health returning JSON { ok: true }",
-    "- Do not finish while the page still says 'Scaffold is running'",
+    ...productRequirements,
     "- Add dependencies only when needed; if you do, run npm install and verify start still works",
     "- Smoke-check GET / and /health before finishing",
     ...nextjsPromptGuidance(stackRuntime),

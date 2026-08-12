@@ -54,6 +54,7 @@ import { SessionCodeColumn } from "@/components/dashboard/session-code-column";
 import {
   sumLineCounts,
   formatAgentFailureMessage,
+  mergeTaskEvents,
 } from "@/lib/sessions/agent-activity";
 
 interface SessionDetailProps {
@@ -976,15 +977,22 @@ export function SessionDetail({
     }
     setContinuingSession(true);
     setStreamError(null);
+    const optimisticEvent: TaskEvent = {
+      id: `optimistic-${Date.now()}`,
+      taskId: task.id,
+      type: "task.scheduled",
+      message: "Follow-up prompt queued",
+      timestamp: new Date().toISOString(),
+      data: { followUp: true, prompt: trimmed, optimistic: true },
+    };
+    setEvents((current) => mergeTaskEvents(current, [optimisticEvent]));
+    setFollowUpPrompt("");
     try {
       const updated = await continueTask(task.id, trimmed, cursorAgentModel);
       setTask(updated);
-      setFollowUpPrompt("");
       const history = await fetchTaskEventHistory(task.id);
       if (history.length > 0) {
-        setEvents(
-          [...history].sort((a, b) => a.timestamp.localeCompare(b.timestamp)),
-        );
+        setEvents((current) => mergeTaskEvents(current, history));
       }
       await refreshTasks();
     } catch (error) {
@@ -1084,6 +1092,7 @@ export function SessionDetail({
           event.type === "task.completed" ||
           event.type === "task.failed" ||
           event.type === "task.phase_changed" ||
+          (event.type === "task.scheduled" && event.data?.followUp === true) ||
           event.type === "agent.running" ||
           event.type === "sandbox.started" ||
           event.type === "runtime.ready" ||

@@ -15,18 +15,20 @@ describe("greenfieldShellScaffoldFiles", () => {
     });
 
     expect(files.some((file) => file.path === "package.json")).toBe(true);
-    expect(files.some((file) => file.path === "src/index.js")).toBe(true);
+    expect(files.some((file) => file.path === "app/page.tsx")).toBe(true);
+    expect(files.some((file) => file.path === "src/index.js")).toBe(false);
     expect(files.some((file) => file.path === "src/main.ts")).toBe(false);
   });
 
-  test("includes package.json for React prompts", () => {
-    const prompt = "build a react dashboard with charts";
+  test("includes package.json for Node prompts", () => {
+    const prompt = "build an express api";
     const files = greenfieldShellScaffoldFiles({
-      title: "Dashboard",
+      title: "API",
       prompt,
-      stackRuntime: "nextjs",
+      stackRuntime: "node",
     });
 
     expect(files.some((file) => file.path === "package.json")).toBe(true);
+    expect(files.some((file) => file.path === "src/index.js")).toBe(true);
   });
 });

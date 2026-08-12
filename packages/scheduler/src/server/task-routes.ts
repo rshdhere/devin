@@ -95,8 +95,9 @@ export function createTaskRouter(tasks: TaskService): Router {
       return;
     }
     const memoryHistory = tasks.getEventHistory(taskId);
-    const history =
-      memoryHistory.length > 0
+    const history = tasks.getTaskStore().isEnabled()
+      ? await tasks.getTaskStore().loadEvents(taskId)
+      : memoryHistory.length > 0
         ? memoryHistory
         : await tasks.getTaskStore().loadEvents(taskId);
     res.status(200).json(history);

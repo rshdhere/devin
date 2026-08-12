@@ -24,8 +24,9 @@ export async function handleTaskEvents(
   res.flushHeaders();
 
   const memoryHistory = tasks.getEventHistory(taskId);
-  const history =
-    memoryHistory.length > 0
+  const history = tasks.getTaskStore().isEnabled()
+    ? await tasks.getTaskStore().loadEvents(taskId)
+    : memoryHistory.length > 0
       ? memoryHistory
       : await tasks.getTaskStore().loadEvents(taskId);
 

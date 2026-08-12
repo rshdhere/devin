@@ -177,15 +177,15 @@ export function buildConversationMessages(
   events: TaskEvent[],
 ): ConversationMessage[] {
   const messages: ConversationMessage[] = [];
-  const seenUser = new Set<string>();
+  const seenUserIds = new Set<string>();
   const seenAssistant = new Set<string>();
 
   const pushUser = (id: string, content: string, timestamp?: string) => {
     const text = content.trim();
-    if (!text || seenUser.has(text)) {
+    if (!text || seenUserIds.has(id)) {
       return;
     }
-    seenUser.add(text);
+    seenUserIds.add(id);
     messages.push({ id, role: "user", content: text, timestamp });
   };
 
@@ -266,6 +266,35 @@ export function buildConversationMessages(
   }
 
   return messages;
+}
+
+export function mergeTaskEvents(
+  current: TaskEvent[],
+  incoming: TaskEvent[],
+): TaskEvent[] {
+  const byId = new Map<string, TaskEvent>();
+  for (const event of [...current, ...incoming]) {
+    byId.set(event.id, event);
+  }
+  const merged = [...byId.values()];
+  const confirmedPrompts = new Set(
+    merged
+      .filter(
+        (event) =>
+          event.data?.optimistic !== true &&
+          typeof event.data?.prompt === "string",
+      )
+      .map((event) => String(event.data?.prompt)),
+  );
+  return merged
+    .filter((event) => {
+      if (event.data?.optimistic !== true) {
+        return true;
+      }
+      const prompt = event.data?.prompt;
+      return typeof prompt !== "string" || !confirmedPrompts.has(prompt);
+    })
+    .sort((a, b) => a.timestamp.localeCompare(b.timestamp));
 }
 
 export type ChangedFile = {

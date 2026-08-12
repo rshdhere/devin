@@ -1,5 +1,6 @@
 import type { RuntimeClient } from "@devin/agent-sdk";
 import type { StackRuntime } from "@devin/types";
+import { nextjsShellFiles } from "./nextjs-scaffold.js";
 
 export type BootstrapEmitter = (
   type: string,
@@ -73,6 +74,33 @@ app.listen(port, () => {
   });
 
   return ["server.js", "package.json", "package-lock.json"];
+}
+
+async function bootstrapNextjsShell(
+  runtime: RuntimeClient,
+  taskId: string,
+  repoCwd: string,
+  title: string,
+  prompt: string,
+  gitEnv?: Record<string, string>,
+): Promise<string[]> {
+  const paths: string[] = [];
+  for (const file of nextjsShellFiles(title, prompt)) {
+    await runtime.writeFile({
+      path: `${repoCwd}/${file.path}`,
+      content: file.content,
+    });
+    paths.push(file.path);
+  }
+
+  await runtime.terminal({
+    taskId,
+    cwd: repoCwd,
+    env: gitEnv,
+    command: "npm install --no-audit --progress=false",
+  });
+
+  return [...paths, "package-lock.json", "node_modules"];
 }
 
 async function bootstrapGoShell(
@@ -305,6 +333,17 @@ Scaffold created by Devin (${opts.stackRuntime} runtime). The agent will impleme
         opts.runtime,
         opts.taskId,
         opts.repoCwd,
+        gitEnv,
+      )),
+    );
+  } else if (opts.stackRuntime === "nextjs") {
+    commitPaths.push(
+      ...(await bootstrapNextjsShell(
+        opts.runtime,
+        opts.taskId,
+        opts.repoCwd,
+        opts.title,
+        opts.prompt,
         gitEnv,
       )),
     );

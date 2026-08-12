@@ -1,5 +1,6 @@
 import type { StackRuntime } from "@devin/types";
 import { buildHeuristicDraftPlan } from "./draft-planner.js";
+import { nextjsShellFiles } from "./nextjs-scaffold.js";
 import {
   scaffoldFilesFromDraft,
   type ScaffoldFile,
@@ -128,7 +129,9 @@ function readmeForShell(
         ? "cargo run"
         : stack === "python"
           ? "pip install -r requirements.txt && python app.py"
-          : "npm start";
+          : stack === "nextjs"
+            ? "npm install && npm run dev"
+            : "npm start";
 
   return `# ${title}
 
@@ -158,7 +161,11 @@ export function greenfieldShellScaffoldFiles(opts: {
     content: gitignoreForStack(opts.stackRuntime),
   };
 
-  if (opts.stackRuntime === "node" || opts.stackRuntime === "nextjs") {
+  if (opts.stackRuntime === "nextjs") {
+    return [readme, gitignore, ...nextjsShellFiles(opts.title, opts.prompt)];
+  }
+
+  if (opts.stackRuntime === "node") {
     const plan = buildHeuristicDraftPlan({ prompt: opts.prompt });
     const nodeFiles = scaffoldFilesFromDraft(plan, {
       title: opts.title,

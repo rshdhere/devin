@@ -15,6 +15,95 @@ function skipPortsShellList(): string {
   return RUNTIME_SUPERVISOR_PORTS.join(" ");
 }
 
+/** Shell lines that set CMD for Node/Next snapshot servers. */
+export function buildNodeOrNextStartCommandLines(): string[] {
+  return [
+    'CMD=""',
+    "HAS_NEXT=no",
+    "if [ -f package.json ] && grep -qE '\"next\"' package.json 2>/dev/null; then HAS_NEXT=yes; fi",
+    "if [ -f next.config.ts ] || [ -f next.config.js ] || [ -f next.config.mjs ]; then HAS_NEXT=yes; fi",
+    // Prefer Go only when this is not a Next.js project.
+    'if [ "$HAS_NEXT" = "no" ] && { [ -f go.mod ] || [ -f main.go ]; }; then',
+    "  if command -v go >/dev/null 2>&1; then",
+    "    BIN=/workspace/.home/devin-app",
+    '    if [ -x "$BIN" ]; then CMD="$BIN";',
+    '    else CMD="go build -o $BIN . && exec $BIN"; fi',
+    "  fi",
+    "fi",
+    'if [ -z "$CMD" ] && [ -f package.json ]; then',
+    '  if [ -f .next/BUILD_ID ] && grep -q \'"start"\' package.json 2>/dev/null; then CMD="npm start"',
+    '  elif grep -q \'"dev"\' package.json 2>/dev/null; then CMD="npm run dev"',
+    "  elif grep -q '\"start\"' package.json 2>/dev/null; then",
+    '    if grep -q "next start" package.json 2>/dev/null && [ ! -f .next/BUILD_ID ]; then',
+    '      CMD="npm run build && npm start"',
+    '    else CMD="npm start"; fi',
+    "  fi",
+    "fi",
+    'if [ -z "$CMD" ] && [ -f package.json ]; then',
+    '  if [ -f dist/index.js ]; then CMD="node dist/index.js"',
+    '  elif [ -f dist/server.js ]; then CMD="node dist/server.js"',
+    '  elif [ -f server.js ]; then CMD="node server.js"',
+    '  elif [ -f index.js ]; then CMD="node index.js"',
+    '  elif command -v npx >/dev/null 2>&1 && [ -f src/index.ts ]; then CMD="npx --yes tsx src/index.ts"',
+    '  elif command -v npx >/dev/null 2>&1 && [ -f src/server.ts ]; then CMD="npx --yes tsx src/server.ts"',
+    '  elif command -v npx >/dev/null 2>&1 && [ -f server.ts ]; then CMD="npx --yes tsx server.ts"',
+    '  elif command -v npx >/dev/null 2>&1 && [ -f index.ts ]; then CMD="npx --yes tsx index.ts"; fi',
+    "fi",
+    'if [ -z "$CMD" ]; then',
+    "  if [ -f main.py ] && grep -qE 'FastAPI|fastapi' main.py 2>/dev/null; then",
+    '    CMD="python3 -m uvicorn main:app --host 127.0.0.1 --port 8000"',
+    "  elif [ -f app.py ] && grep -qE 'FastAPI|fastapi|Flask|flask' app.py 2>/dev/null; then",
+    '    if grep -qE "FastAPI|fastapi" app.py 2>/dev/null; then CMD="python3 -m uvicorn app:app --host 127.0.0.1 --port 8000";',
+    '    else CMD="python3 -m flask --app app run --host 127.0.0.1 --port 5000"; fi',
+    "  elif [ -f manage.py ]; then",
+    '    CMD="python3 manage.py runserver 127.0.0.1:8000"',
+    "  elif [ -f pyproject.toml ] || [ -f requirements.txt ]; then",
+    '    if [ -f main.py ]; then CMD="python3 -m uvicorn main:app --host 127.0.0.1 --port 8000";',
+    '    elif [ -f app.py ]; then CMD="python3 -m uvicorn app:app --host 127.0.0.1 --port 8000"; fi',
+    "  fi",
+    "fi",
+    'if [ -z "$CMD" ] && [ -f Cargo.toml ]; then',
+    '  if command -v cargo >/dev/null 2>&1; then CMD="cargo run --release"; fi',
+    "fi",
+  ];
+}
+
+/** Start a dev server in background for smoke/capture paths. */
+export function buildSnapshotSmokeStartScript(): string {
+  return [
+    "set +e",
+    "mkdir -p /workspace/.home",
+    "PIDFILE=/workspace/.home/devin-snapshot-server.pid",
+    "LOG=/workspace/.home/devin-snapshot-server.log",
+    'if [ -f "$PIDFILE" ]; then',
+    '  old=$(cat "$PIDFILE" 2>/dev/null || true)',
+    '  if [ -n "$old" ]; then kill -- -$old 2>/dev/null || kill "$old" 2>/dev/null || true; fi',
+    '  rm -f "$PIDFILE"',
+    "fi",
+    ...buildNodeOrNextStartCommandLines(),
+    'if [ -z "$CMD" ]; then echo "no snapshot start command" >>"$LOG"; exit 0; fi',
+    "export HOST=127.0.0.1 PORT=3000 HOSTNAME=127.0.0.1",
+    'export PATH="/usr/local/go/bin:/usr/local/cargo/bin:/usr/local/bin:/root/.local/bin:$PATH"',
+    'nohup bash -lc "set -m; $CMD" >>"$LOG" 2>&1 &',
+    'echo $! > "$PIDFILE"',
+    'echo "started: $CMD" >>"$LOG"',
+    "exit 0",
+  ].join("\n");
+}
+
+/** Guess wait budget from the start command logged in the snapshot server. */
+export function snapshotWaitSecondsForStartCommand(
+  startCommand: string,
+): number {
+  if (/npm run dev|next dev|cargo run|go build/.test(startCommand)) {
+    return 180;
+  }
+  if (/npm run build|next build|npm start/.test(startCommand)) {
+    return 120;
+  }
+  return 90;
+}
+
 /**
  * Shared shell helpers for discover/wait: skip supervisor ports, prefer COMMON
  * app ports, and require a real HTTP response (prefer `/` over `/health` alone
@@ -84,49 +173,10 @@ export function buildStartDevServerForSnapshotScript(): string {
     '  if [ -n "$old" ]; then kill -- -$old 2>/dev/null || kill "$old" 2>/dev/null || true; fi',
     '  rm -f "$PIDFILE"',
     "fi",
-    'CMD=""',
-    // Prefer Go when go.mod/main.go exist — greenfield agents often leave a Node
-    // package.json scaffold whose npm start would otherwise win and blank Desktop.
-    "if [ -f go.mod ] || [ -f main.go ]; then",
-    "  if command -v go >/dev/null 2>&1; then",
-    '    if [ -x "$BIN" ]; then CMD="$BIN";',
-    '    else CMD="go build -o $BIN . && exec $BIN"; fi',
-    "  fi",
-    "fi",
-    'if [ -z "$CMD" ] && [ -f package.json ]; then',
-    '  if [ -d .next ] && grep -q \'"start"\' package.json 2>/dev/null; then CMD="npm start"',
-    '  elif grep -q \'"dev"\' package.json 2>/dev/null; then CMD="npm run dev"',
-    '  elif grep -q \'"start"\' package.json 2>/dev/null; then CMD="npm start"; fi',
-    "fi",
-    'if [ -z "$CMD" ] && [ -f package.json ]; then',
-    '  if [ -f dist/index.js ]; then CMD="node dist/index.js"',
-    '  elif [ -f dist/server.js ]; then CMD="node dist/server.js"',
-    '  elif [ -f server.js ]; then CMD="node server.js"',
-    '  elif [ -f index.js ]; then CMD="node index.js"',
-    '  elif command -v npx >/dev/null 2>&1 && [ -f src/index.ts ]; then CMD="npx --yes tsx src/index.ts"',
-    '  elif command -v npx >/dev/null 2>&1 && [ -f src/server.ts ]; then CMD="npx --yes tsx src/server.ts"',
-    '  elif command -v npx >/dev/null 2>&1 && [ -f server.ts ]; then CMD="npx --yes tsx server.ts"',
-    '  elif command -v npx >/dev/null 2>&1 && [ -f index.ts ]; then CMD="npx --yes tsx index.ts"; fi',
-    "fi",
-    'if [ -z "$CMD" ]; then',
-    "  if [ -f main.py ] && grep -qE 'FastAPI|fastapi' main.py 2>/dev/null; then",
-    '    CMD="python3 -m uvicorn main:app --host 127.0.0.1 --port 8000"',
-    "  elif [ -f app.py ] && grep -qE 'FastAPI|fastapi|Flask|flask' app.py 2>/dev/null; then",
-    '    if grep -qE "FastAPI|fastapi" app.py 2>/dev/null; then CMD="python3 -m uvicorn app:app --host 127.0.0.1 --port 8000";',
-    '    else CMD="python3 -m flask --app app run --host 127.0.0.1 --port 5000"; fi',
-    "  elif [ -f manage.py ]; then",
-    '    CMD="python3 manage.py runserver 127.0.0.1:8000"',
-    "  elif [ -f pyproject.toml ] || [ -f requirements.txt ]; then",
-    '    if [ -f main.py ]; then CMD="python3 -m uvicorn main:app --host 127.0.0.1 --port 8000";',
-    '    elif [ -f app.py ]; then CMD="python3 -m uvicorn app:app --host 127.0.0.1 --port 8000"; fi',
-    "  fi",
-    "fi",
-    'if [ -z "$CMD" ] && [ -f Cargo.toml ]; then',
-    '  if command -v cargo >/dev/null 2>&1; then CMD="cargo run --release"; fi',
-    "fi",
+    ...buildNodeOrNextStartCommandLines(),
     'if [ -z "$CMD" ]; then echo "no snapshot start command" >>"$LOG"; exit 0; fi',
     "export HOST=127.0.0.1 PORT=3000 HOSTNAME=127.0.0.1",
-    'export PATH="/usr/local/go/bin:/usr/local/bin:/root/.local/bin:$PATH"',
+    'export PATH="/usr/local/go/bin:/usr/local/cargo/bin:/usr/local/bin:/root/.local/bin:$PATH"',
     // New process group so stop can kill the whole tree (go build + server).
     'nohup bash -lc "set -m; $CMD" >>"$LOG" 2>&1 &',
     'echo $! > "$PIDFILE"',
@@ -146,12 +196,12 @@ export function buildStopDevServerForSnapshotScript(): string {
   ].join("\n");
 }
 
-export function buildWaitForDevServerScript(): string {
+export function buildWaitForDevServerScript(maxSeconds = 90): string {
   return [
     "set +e",
     ...portProbeHelpers(),
-    // Cold go build + listen often exceeds 30s.
-    "for i in $(seq 1 90); do",
+    // Cold go/next compile + listen often exceeds 30s.
+    `for i in $(seq 1 ${maxSeconds}); do`,
     "  LISTEN=''",
     "  if command -v ss >/dev/null 2>&1; then",
     "    LISTEN=$(ss -ltnH 2>/dev/null | awk '{print $4}' | sed -n 's/.*:\\([0-9][0-9]*\\)$/\\1/p' | sort -un | tr '\\n' ' ')",
@@ -159,6 +209,19 @@ export function buildWaitForDevServerScript(): string {
     "  for p in $COMMON $LISTEN; do",
     '    if try_port "$p"; then echo "$p"; exit 0; fi',
     "  done",
+    "  sleep 1",
+    "done",
+    "exit 1",
+  ].join("\n");
+}
+
+/** Wait for a specific port using the same probe logic as discover/wait. */
+export function buildWaitForPortScript(port: number, maxSeconds = 90): string {
+  return [
+    "set +e",
+    ...portProbeHelpers(),
+    `for i in $(seq 1 ${maxSeconds}); do`,
+    `  if try_port "${port}"; then echo "${port}"; exit 0; fi`,
     "  sleep 1",
     "done",
     "exit 1",

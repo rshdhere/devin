@@ -60,12 +60,10 @@ describe("buildStartDevServerForSnapshotScript", () => {
     expect(script).toContain("uvicorn app:app");
   });
 
-  it("builds a reusable Go binary instead of cold go run", () => {
+  it("prefers Next.js over stray go.mod scaffolds", () => {
     const script = buildStartDevServerForSnapshotScript();
-    expect(script).toContain("go.mod");
-    expect(script).toContain("main.go");
-    expect(script).toContain("go build -o");
-    expect(script).toContain("/workspace/.home/devin-app");
+    expect(script).toContain("HAS_NEXT");
+    expect(script).toContain('"next"');
   });
 });
 

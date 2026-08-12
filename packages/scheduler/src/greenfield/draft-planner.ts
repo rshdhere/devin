@@ -1,4 +1,5 @@
 import type { AgentProvider } from "../task/types.js";
+import { inferStackFromPrompt } from "@devin/types";
 
 export type DraftFilePlan = {
   path: string;
@@ -231,17 +232,13 @@ function normalizeDraftPlan(raw: Partial<DraftPlan>): DraftPlan {
 
 export function buildHeuristicDraftPlan(ctx: DraftPlannerContext): DraftPlan {
   const lower = ctx.prompt.toLowerCase();
-  const isNode = [
-    "node",
-    "express",
-    "typescript",
-    "javascript",
-    "api",
-    "next.js",
-    "nextjs",
-    "next js",
-    "react",
-  ].some((term) => lower.includes(term));
+  const stackRuntime = inferStackFromPrompt(ctx.prompt);
+  const isNextjs = stackRuntime === "nextjs";
+  const isNode =
+    !isNextjs &&
+    ["node", "express", "typescript", "javascript", "api"].some((term) =>
+      lower.includes(term),
+    );
 
   const files: DraftFilePlan[] = [
     {
@@ -251,7 +248,25 @@ export function buildHeuristicDraftPlan(ctx: DraftPlannerContext): DraftPlan {
     },
   ];
 
-  if (isNode) {
+  if (isNextjs) {
+    files.push(
+      {
+        path: "package.json",
+        changeType: "update",
+        summary: "Define Next.js scripts and dependencies",
+      },
+      {
+        path: "app/layout.tsx",
+        changeType: "create",
+        summary: "Create the root App Router layout",
+      },
+      {
+        path: "app/page.tsx",
+        changeType: "create",
+        summary: "Create the main page for the requested app",
+      },
+    );
+  } else if (isNode) {
     files.push(
       {
         path: "package.json",
