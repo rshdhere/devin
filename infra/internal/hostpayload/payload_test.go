@@ -14,6 +14,7 @@ func TestPayloadsAreValidBashAndSelfInstalling(t *testing.T) {
 	cases := map[string]string{
 		"deploy":              Deploy("docker.io/example", "abc123", "ap-south-1", "/devin/production"),
 		"bootstrap-snapshots": BootstrapSnapshots("agent", "true", "main", "abc123", "docker.io/example"),
+		"fix-guest-fs":        FixGuestFilesystem("agent nextjs", "main", "abc123", "docker.io/example"),
 		"rebootstrap":         Rebootstrap("fc-01", "docker.io/example", "abc123", "ap-south-1", "/devin/production"),
 		"sync":                SyncPlatformConfig("ap-south-1", "/devin/production"),
 	}

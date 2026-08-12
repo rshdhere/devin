@@ -17,6 +17,7 @@ devin-infra enable-nested-virt i-0123456789abcdef0
 devin-infra rebootstrap i-0123456789abcdef0
 devin-infra diagnose-host --discover
 devin-infra free-host-disk --discover
+devin-infra fix-guest-fs --discover
 SCHEDULER_URL=http://scheduler:9091 devin-infra patch-scheduler-url
 devin-infra set-platform-secret cursor_api_key
 devin-infra configure-profile
