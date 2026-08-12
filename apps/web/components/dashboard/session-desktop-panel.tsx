@@ -44,14 +44,47 @@ export function SessionDesktopPanel({
   const inFlightRef = useRef(false);
   const freshInFlightRef = useRef(false);
   const autoFreshDoneRef = useRef(false);
+  const freshRetryCountRef = useRef(0);
+  const freshRetryTimerRef = useRef<number | null>(null);
   shotUrlRef.current = shotUrl;
+
+  const isAgentActive =
+    task.status === "running" ||
+    task.status === "runtime_ready" ||
+    task.status === "sandbox_starting" ||
+    task.status === "drafting" ||
+    task.status === "scheduling" ||
+    task.status === "awaiting_review";
+
+  const isTerminal =
+    task.status === "completed" || task.status === "awaiting_review";
+
+  const clearFreshRetryTimer = useCallback(() => {
+    if (freshRetryTimerRef.current !== null) {
+      window.clearTimeout(freshRetryTimerRef.current);
+      freshRetryTimerRef.current = null;
+    }
+  }, []);
+
+  const scheduleFreshRetry = useCallback(
+    (loadFn: (fresh: boolean) => Promise<void>) => {
+      if (shotUrlRef.current || freshRetryCountRef.current >= 3) {
+        return;
+      }
+      clearFreshRetryTimer();
+      freshRetryTimerRef.current = window.setTimeout(() => {
+        freshRetryCountRef.current += 1;
+        void loadFn(true);
+      }, 30_000);
+    },
+    [clearFreshRetryTimer],
+  );
 
   const loadScreenshot = useCallback(
     async (fresh: boolean) => {
       if (!canUse) {
         return;
       }
-      // Soft polls must not abort / stack on top of a fresh spin+capture.
       if (inFlightRef.current) {
         if (!fresh || freshInFlightRef.current) {
           return;
@@ -67,7 +100,6 @@ export function SessionDesktopPanel({
       setShotLoading(true);
 
       const controller = new AbortController();
-      // Go cold build + Chromium can exceed 70s.
       const timeoutMs = fresh ? 120_000 : 25_000;
       const timeout = window.setTimeout(() => controller.abort(), timeoutMs);
       const freshQuery = fresh ? "&fresh=1" : "";
@@ -79,6 +111,17 @@ export function SessionDesktopPanel({
           signal: controller.signal,
         });
         if (!response.ok) {
+          if (
+            response.status === 503 &&
+            (isAgentActive || (isTerminal && !shotUrlRef.current))
+          ) {
+            setShotLoading(true);
+            setShotError(false);
+            if (isTerminal && fresh) {
+              scheduleFreshRetry(loadScreenshot);
+            }
+            return;
+          }
           throw new Error(`snapshot HTTP ${response.status}`);
         }
         const blob = await response.blob();
@@ -93,24 +136,36 @@ export function SessionDesktopPanel({
         });
         setShotError(false);
         setShotErrorDetail(null);
+        freshRetryCountRef.current = 0;
+        clearFreshRetryTimer();
       } catch (error) {
         if (!shotUrlRef.current) {
-          setShotError(true);
-          if (error instanceof DOMException && error.name === "AbortError") {
-            setShotErrorDetail(
-              fresh
-                ? "Capture timed out — Go/Rust builds can take a minute. Try Refresh again."
-                : "Snapshot request timed out — try Refresh.",
-            );
-          } else if (
-            error instanceof Error &&
-            error.message.startsWith("snapshot HTTP 503")
-          ) {
-            setShotErrorDetail(
-              "App not ready yet — the sandbox is starting localhost. Click Refresh or wait a moment.",
-            );
-          } else if (error instanceof Error && error.message.length > 0) {
-            setShotErrorDetail(error.message);
+          const captureExpected =
+            isAgentActive || (isTerminal && freshRetryCountRef.current < 3);
+          if (captureExpected) {
+            setShotError(false);
+            setShotLoading(true);
+            if (isTerminal && fresh) {
+              scheduleFreshRetry(loadScreenshot);
+            }
+          } else {
+            setShotError(true);
+            if (error instanceof DOMException && error.name === "AbortError") {
+              setShotErrorDetail(
+                fresh
+                  ? "Capture timed out — the app may still be building. Try Refresh again."
+                  : "Snapshot request timed out — try Refresh.",
+              );
+            } else if (
+              error instanceof Error &&
+              error.message.startsWith("snapshot HTTP 503")
+            ) {
+              setShotErrorDetail(
+                "App not ready yet — the sandbox is starting localhost. Click Refresh or wait a moment.",
+              );
+            } else if (error instanceof Error && error.message.length > 0) {
+              setShotErrorDetail(error.message);
+            }
           }
         }
       } finally {
@@ -119,30 +174,54 @@ export function SessionDesktopPanel({
         if (fresh) {
           freshInFlightRef.current = false;
         }
-        setShotLoading(false);
+        if (!shotUrlRef.current) {
+          setShotLoading(
+            isAgentActive ||
+              (isTerminal && freshRetryCountRef.current < 3) ||
+              freshInFlightRef.current,
+          );
+        } else {
+          setShotLoading(false);
+        }
       }
     },
-    [canUse, screenshotSrc],
+    [
+      canUse,
+      clearFreshRetryTimer,
+      isAgentActive,
+      isTerminal,
+      scheduleFreshRetry,
+      screenshotSrc,
+    ],
   );
 
   const refreshScreenshot = useCallback(
     (fresh = true) => {
+      freshRetryCountRef.current = 0;
+      clearFreshRetryTimer();
       void loadScreenshot(fresh);
     },
-    [loadScreenshot],
+    [clearFreshRetryTimer, loadScreenshot],
   );
 
   useEffect(() => {
     if (externalRefreshKey > 0) {
-      void loadScreenshot(true);
+      freshRetryCountRef.current = 0;
+      clearFreshRetryTimer();
+      void loadScreenshot(false).then(() => {
+        if (!shotUrlRef.current) {
+          void loadScreenshot(true);
+        }
+      });
     }
-  }, [externalRefreshKey, loadScreenshot]);
+  }, [externalRefreshKey, clearFreshRetryTimer, loadScreenshot]);
 
-  // Initial load + one auto-fresh when completed/empty so Desktop fills without a click.
   useEffect(() => {
     if (!canUse) {
       return;
     }
+    autoFreshDoneRef.current = false;
+    freshRetryCountRef.current = 0;
     void loadScreenshot(false).then(() => {
       if (
         !autoFreshDoneRef.current &&
@@ -155,21 +234,12 @@ export function SessionDesktopPanel({
     });
   }, [canUse, loadScreenshot, task.id, task.status]);
 
-  const isAgentActive =
-    task.status === "running" ||
-    task.status === "runtime_ready" ||
-    task.status === "sandbox_starting" ||
-    task.status === "drafting" ||
-    task.status === "scheduling" ||
-    task.status === "awaiting_review";
-
   useEffect(() => {
     if (!canUse) {
       return;
     }
     const interval = setInterval(
       () => {
-        // Soft poll only when idle — never cancel a fresh capture mid-flight.
         if (inFlightRef.current || freshInFlightRef.current) {
           return;
         }
@@ -182,11 +252,12 @@ export function SessionDesktopPanel({
 
   useEffect(() => {
     return () => {
+      clearFreshRetryTimer();
       if (shotUrl?.startsWith("blob:")) {
         URL.revokeObjectURL(shotUrl);
       }
     };
-  }, [shotUrl]);
+  }, [clearFreshRetryTimer, shotUrl]);
 
   if (!canUse) {
     return (
@@ -200,6 +271,8 @@ export function SessionDesktopPanel({
   }
 
   const isEmbed = layout === "embed";
+  const captureInProgress =
+    shotLoading && !shotUrl && (isAgentActive || isTerminal);
 
   return (
     <div
@@ -231,17 +304,22 @@ export function SessionDesktopPanel({
           isEmbed ? "min-h-[180px] p-2" : "p-4",
         )}
       >
-        {shotLoading && !shotUrl ? (
-          <Loader2 className="size-6 animate-spin text-zinc-600" />
+        {captureInProgress ? (
+          <div className="flex flex-col items-center gap-2">
+            <Loader2 className="size-6 animate-spin text-zinc-600" />
+            <p className="max-w-sm text-center text-[12px] text-zinc-500">
+              {isTerminal
+                ? "Starting app and capturing preview…"
+                : "Capturing desktop preview…"}
+            </p>
+          </div>
         ) : null}
         {shotError && !shotUrl ? (
           <p className="max-w-sm text-center text-[12px] text-zinc-500">
             {shotErrorDetail ??
-              (isAgentActive
-                ? "Capturing desktop preview… starting the app in the sandbox when needed."
-                : task.sessionSleeping
-                  ? "Waking devbox to load saved snapshot — try Refresh."
-                  : "No desktop snapshot yet — click Refresh to start the app and capture localhost (1024×768).")}
+              (task.sessionSleeping
+                ? "Waking devbox to load saved snapshot — try Refresh."
+                : "No desktop snapshot yet — click Refresh to start the app and capture localhost (1024×768).")}
           </p>
         ) : null}
         {shotUrl ? (

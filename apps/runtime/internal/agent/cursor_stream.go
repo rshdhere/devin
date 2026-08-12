@@ -3,6 +3,7 @@ package agent
 import (
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 )
 
@@ -83,6 +84,15 @@ func iterCursorJSONObjects(line string) []string {
 	return objects
 }
 
+func isToolCallMetadataKey(key string) bool {
+	switch strings.ToLower(strings.TrimSpace(key)) {
+	case "toolcallid", "id", "callid", "requestid", "tooluseid", "tool_use_id":
+		return true
+	default:
+		return false
+	}
+}
+
 func nestedToolFromToolCall(raw json.RawMessage) (name string, detail string) {
 	if len(raw) == 0 {
 		return "", ""
@@ -91,19 +101,37 @@ func nestedToolFromToolCall(raw json.RawMessage) (name string, detail string) {
 	if json.Unmarshal(raw, &outer) != nil {
 		return "", ""
 	}
-	for key, innerRaw := range outer {
+	keys := make([]string, 0, len(outer))
+	for key := range outer {
+		if isToolCallMetadataKey(key) {
+			continue
+		}
+		keys = append(keys, key)
+	}
+	sort.Slice(keys, func(i, j int) bool {
+		iTool := strings.HasSuffix(keys[i], "ToolCall")
+		jTool := strings.HasSuffix(keys[j], "ToolCall")
+		if iTool != jTool {
+			return iTool
+		}
+		return len(keys[i]) > len(keys[j])
+	})
+	for _, key := range keys {
+		innerRaw := outer[key]
 		label := strings.TrimSuffix(key, "ToolCall")
 		if label == "" {
 			label = key
 		}
 		var inner map[string]json.RawMessage
 		if json.Unmarshal(innerRaw, &inner) != nil {
-			return label, ""
+			continue
 		}
 		if args, ok := inner["args"]; ok {
 			return label, toolDetail(args)
 		}
-		return label, ""
+		if len(inner) > 0 {
+			return label, ""
+		}
 	}
 	return "", ""
 }

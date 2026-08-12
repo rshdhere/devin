@@ -5,7 +5,6 @@ import {
   ArrowLeft,
   ArrowUp,
   ChevronDown,
-  ChevronRight,
   GitCommit,
   Lightbulb,
   Loader2,
@@ -22,9 +21,8 @@ import {
 import { MotionButton } from "@/components/dashboard/motion-button";
 import { SessionDesktopPanel } from "@/components/dashboard/session-desktop-panel";
 import {
-  pickAssistantSummary,
+  buildConversationMessages,
   pickStatusLine,
-  progressActivityLines,
   formatAgentFailureMessage,
 } from "@/lib/sessions/agent-activity";
 import { canUseDevbox } from "@/lib/sessions/devbox";
@@ -43,24 +41,6 @@ export function buildChatMessages(
 ): ChatMessage[] {
   const messages: ChatMessage[] = [];
 
-  const terminal =
-    task.status === "completed" ||
-    task.status === "failed" ||
-    task.status === "cancelled" ||
-    task.status === "awaiting_review";
-
-  const summary = pickAssistantSummary(task, events);
-  if (summary && terminal) {
-    messages.push({
-      id: "assistant-summary",
-      role: "assistant",
-      content: summary,
-      timestamp:
-        events.find((e) => e.type === "task.completed")?.timestamp ??
-        events.at(-1)?.timestamp,
-    });
-  }
-
   for (const event of events) {
     if (
       event.type === "task.failed" ||
@@ -73,14 +53,6 @@ export function buildChatMessages(
         event.type === "task.failed" || event.type === "sandbox.failed"
           ? formatAgentFailureMessage(text)
           : text;
-      if (
-        summary &&
-        terminal &&
-        event.type === "task.completed" &&
-        text === summary
-      ) {
-        continue;
-      }
       messages.push({
         id: event.id,
         role: "system",
@@ -132,12 +104,10 @@ export function SessionChatColumn({
 }: SessionChatColumnProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const modelMenuRef = useRef<HTMLDivElement>(null);
-  const messages = buildChatMessages(task, events);
+  const conversation = buildConversationMessages(task, events);
+  const systemMessages = buildChatMessages(task, events);
   const statusLine = pickStatusLine(task, events, isActive);
-  const activityLines = progressActivityLines(events);
-  const [workExpanded, setWorkExpanded] = useState(false);
   const [showModelMenu, setShowModelMenu] = useState(false);
-  const summaryMessage = messages.find((m) => m.role === "assistant");
   const showModelPicker =
     task.agent === "cursor" && cursorAgentModel && onCursorAgentModelChange;
 
@@ -164,7 +134,7 @@ export function SessionChatColumn({
       top: scrollRef.current.scrollHeight,
       behavior: "smooth",
     });
-  }, [messages.length, isActive, statusLine, workExpanded]);
+  }, [conversation.length, isActive, statusLine]);
 
   const workLabel = isActive
     ? `Working… ${elapsedTime}`
@@ -207,13 +177,6 @@ export function SessionChatColumn({
       ) : null}
 
       <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
-        <div className="mb-4 flex justify-end gap-2">
-          <div className="max-w-[88%] rounded-2xl rounded-tr-md bg-[#1a1a1a] px-3.5 py-2.5 text-[13px] leading-relaxed text-zinc-100">
-            {task.prompt}
-          </div>
-          <UserAvatar />
-        </div>
-
         <TipCard />
 
         {isActive && statusLine ? (
@@ -222,47 +185,26 @@ export function SessionChatColumn({
           </p>
         ) : null}
 
-        {(activityLines.length > 0 || isActive || !isActive) && (
-          <div className="mb-4">
-            <button
-              type="button"
-              onClick={() => setWorkExpanded((v) => !v)}
-              className="flex cursor-pointer items-center gap-1.5 text-[12px] text-zinc-500 transition-colors hover:text-zinc-300"
-            >
-              {workExpanded ? (
-                <ChevronDown className="size-3.5" />
-              ) : (
-                <ChevronRight className="size-3.5" />
-              )}
-              <span>{workLabel}</span>
-              {isActive ? (
-                <Loader2 className="size-3 animate-spin text-zinc-500" />
-              ) : null}
-            </button>
-            {workExpanded ? (
-              <div className="mt-2 space-y-1.5 rounded-lg border border-white/[0.06] bg-[#111] px-3 py-2">
-                {activityLines.length === 0 ? (
-                  <p className="text-[11px] text-zinc-600">No steps yet.</p>
-                ) : (
-                  activityLines.map((line, index) => (
-                    <p
-                      key={`${index}-${line.slice(0, 16)}`}
-                      className="font-mono text-[11px] leading-relaxed text-zinc-500"
-                    >
-                      {line}
-                    </p>
-                  ))
-                )}
-              </div>
-            ) : null}
-          </div>
-        )}
-
-        {summaryMessage ? (
-          <div className="mb-4 space-y-3">
-            <AssistantMarkdown content={summaryMessage.content} />
-          </div>
+        {!isActive ? (
+          <p className="mb-3 text-[12px] text-zinc-500">{workLabel}</p>
         ) : null}
+
+        <div className="mb-4 space-y-4">
+          {conversation.map((message) =>
+            message.role === "user" ? (
+              <div key={message.id} className="flex justify-end gap-2">
+                <div className="max-w-[88%] rounded-2xl rounded-tr-md bg-[#1a1a1a] px-3.5 py-2.5 text-[13px] leading-relaxed text-zinc-100">
+                  {message.content}
+                </div>
+                <UserAvatar />
+              </div>
+            ) : (
+              <div key={message.id} className="pr-2">
+                <AssistantMarkdown content={message.content} />
+              </div>
+            ),
+          )}
+        </div>
 
         {canUseDevbox(task) ? (
           <div className="mb-4 overflow-hidden rounded-xl border border-white/[0.08] bg-[#111]">
@@ -285,16 +227,14 @@ export function SessionChatColumn({
           </MotionButton>
         ) : null}
 
-        {messages
-          .filter((m) => m.role === "system")
-          .map((message) => (
-            <p
-              key={message.id}
-              className="mt-3 text-center text-[11px] text-zinc-600"
-            >
-              {message.content}
-            </p>
-          ))}
+        {systemMessages.map((message) => (
+          <p
+            key={message.id}
+            className="mt-3 text-center text-[11px] text-zinc-600"
+          >
+            {message.content}
+          </p>
+        ))}
       </div>
 
       <div className="shrink-0 border-t border-white/[0.06] bg-[#0a0a0a] p-3">
@@ -483,12 +423,20 @@ export function SessionPhaseStrip({
     task.status === "completed" ||
     task.status === "awaiting_review" ||
     events.some((e) => e.type === "task.completed");
-  const done = task.status === "completed";
+  const hasDesktopSnapshot = events.some(
+    (e) => e.data?.desktopSnapshot === true,
+  );
+  const capturingPreview =
+    task.status === "completed" && canUseDevbox(task) && !hasDesktopSnapshot;
+  const done = task.status === "completed" && !capturingPreview;
 
   const steps = [
     { label: "Sandbox", done: sandboxDone },
-    { label: "Build", done: executeDone },
-    { label: "Done", done },
+    { label: "Build", done: executeDone && !capturingPreview },
+    {
+      label: capturingPreview ? "Capturing preview…" : "Done",
+      done,
+    },
   ];
 
   return (

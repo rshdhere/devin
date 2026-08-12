@@ -180,6 +180,24 @@ func TestIterCursorJSONObjectsSplitsConcatenated(t *testing.T) {
 	}
 }
 
+func TestSummarizeNestedToolCallSkipsToolCallIdMetadata(t *testing.T) {
+	line := `{"type":"tool_call","tool_call":{"toolCallId":"abc","writeToolCall":{"args":{"path":"src/app/page.tsx"}}}}`
+	evt, ok := parseCursorEvent(line)
+	if !ok {
+		t.Fatal("expected stream event")
+	}
+	events := summarizeCursorEvent(evt)
+	if len(events) != 1 {
+		t.Fatalf("expected 1 event, got %d", len(events))
+	}
+	if events[0].Data["tool"] == "toolCallId" {
+		t.Fatalf("must not use toolCallId as tool name: %+v", events[0])
+	}
+	if events[0].Message != "write src/app/page.tsx" {
+		t.Errorf("unexpected message %q", events[0].Message)
+	}
+}
+
 func TestSummarizeNestedToolCallStarted(t *testing.T) {
 	line := `{"type":"tool_call","subtype":"started","tool_call":{"readToolCall":{"args":{"path":"/workspace/repo/app.py"}}}}`
 	evt, ok := parseCursorEvent(line)

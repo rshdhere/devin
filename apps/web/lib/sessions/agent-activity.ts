@@ -92,14 +92,14 @@ export function latestProgressLine(events: TaskEvent[]): string | null {
     if (!event) continue;
     if (event.type === "agent.tool" && event.data?.tool) {
       const tool = String(event.data.tool);
-      if (/^hook/i.test(tool)) {
+      if (isToolMetadataName(tool) || /^hook/i.test(tool)) {
         continue;
       }
       const detail =
         typeof event.data.detail === "string" ? event.data.detail : "";
-      const shortDetail = detail.split("\n")[0]?.trim() ?? "";
-      if (shortDetail) {
-        return `${tool} · ${shortDetail}`;
+      const humanized = humanizeToolProgressLine(tool, detail);
+      if (humanized) {
+        return humanized;
       }
       return event.message?.trim() || tool;
     }
@@ -119,6 +119,134 @@ export function latestProgressLine(events: TaskEvent[]): string | null {
     }
   }
   return null;
+}
+
+export type ConversationMessage = {
+  id: string;
+  role: "user" | "assistant";
+  content: string;
+  timestamp?: string;
+};
+
+const TOOL_METADATA_NAMES = new Set([
+  "toolcallid",
+  "tool",
+  "id",
+  "callid",
+  "requestid",
+]);
+
+export function isToolMetadataName(tool: string): boolean {
+  return TOOL_METADATA_NAMES.has(tool.trim().toLowerCase());
+}
+
+export function humanizeToolProgressLine(
+  tool: string,
+  detail: string,
+): string | null {
+  if (isToolMetadataName(tool) || /^hook/i.test(tool)) {
+    return null;
+  }
+  const shortDetail = detail.split("\n")[0]?.trim() ?? "";
+  const fileName = shortDetail
+    ? fileDisplayName(normalizeSandboxFilePath(shortDetail))
+    : "";
+  switch (tool) {
+    case "Write":
+    case "ApplyPatch":
+      return fileName ? `Edited \`${fileName}\`` : "Edited a file";
+    case "Read":
+      return fileName ? `Read \`${fileName}\`` : "Read a file";
+    case "Bash":
+    case "Shell":
+      return shortDetail
+        ? `Ran \`${shortDetail.length > 48 ? `${shortDetail.slice(0, 45)}…` : shortDetail}\``
+        : "Ran a shell command";
+    case "Edit":
+      return fileName ? `Updated \`${fileName}\`` : "Updated a file";
+    default:
+      if (shortDetail) {
+        return `${tool} · ${shortDetail.length > 64 ? `${shortDetail.slice(0, 61)}…` : shortDetail}`;
+      }
+      return tool;
+  }
+}
+
+export function buildConversationMessages(
+  task: Task,
+  events: TaskEvent[],
+): ConversationMessage[] {
+  const messages: ConversationMessage[] = [];
+  const seenUser = new Set<string>();
+  const seenAssistant = new Set<string>();
+
+  const pushUser = (id: string, content: string, timestamp?: string) => {
+    const text = content.trim();
+    if (!text || seenUser.has(text)) {
+      return;
+    }
+    seenUser.add(text);
+    messages.push({ id, role: "user", content: text, timestamp });
+  };
+
+  const pushAssistant = (id: string, content: string, timestamp?: string) => {
+    const text = content.trim();
+    if (
+      !text ||
+      text.length < 20 ||
+      isAgentStreamNoise(text) ||
+      looksLikeCursorStreamJson(text) ||
+      seenAssistant.has(text)
+    ) {
+      return;
+    }
+    seenAssistant.add(text);
+    messages.push({ id, role: "assistant", content: text, timestamp });
+  };
+
+  let hasUserFromEvents = false;
+  for (const event of events) {
+    if (event.type === "task.created") {
+      const initialPrompt =
+        typeof event.data?.prompt === "string" ? event.data.prompt : "";
+      if (initialPrompt.trim()) {
+        pushUser(event.id, initialPrompt, event.timestamp);
+        hasUserFromEvents = true;
+      }
+      continue;
+    }
+    if (event.type === "task.scheduled" && event.data?.followUp === true) {
+      const followUpPrompt =
+        typeof event.data.prompt === "string" ? event.data.prompt : "";
+      if (followUpPrompt.trim()) {
+        pushUser(event.id, followUpPrompt, event.timestamp);
+        hasUserFromEvents = true;
+      }
+      continue;
+    }
+    if (event.type === "agent.output" && !isAgentStreamNoise(event.message)) {
+      pushAssistant(event.id, event.message, event.timestamp);
+    }
+  }
+
+  if (!hasUserFromEvents && task.prompt.trim()) {
+    pushUser("user-initial", task.prompt);
+  }
+
+  const terminal =
+    task.status === "completed" ||
+    task.status === "failed" ||
+    task.status === "cancelled" ||
+    task.status === "awaiting_review";
+
+  if (terminal) {
+    const summary = pickAssistantSummary(task, events);
+    if (summary && !seenAssistant.has(summary)) {
+      pushAssistant("assistant-summary", summary);
+    }
+  }
+
+  return messages;
 }
 
 export type ChangedFile = {
@@ -230,10 +358,12 @@ export function progressActivityLines(events: TaskEvent[]): string[] {
   for (const event of events) {
     if (event.type === "agent.tool" && event.data?.tool) {
       const tool = String(event.data.tool);
-      if (/^hook/i.test(tool)) {
+      if (isToolMetadataName(tool) || /^hook/i.test(tool)) {
         continue;
       }
-      const line = latestProgressLine([event]);
+      const detail =
+        typeof event.data.detail === "string" ? event.data.detail : "";
+      const line = humanizeToolProgressLine(tool, detail);
       if (line && !seen.has(line)) {
         seen.add(line);
         lines.push(line);

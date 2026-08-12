@@ -268,6 +268,7 @@ export class TaskService {
       agent: task.agent,
       runtime: task.runtime,
       repository: task.repository,
+      prompt: task.prompt,
     });
 
     const job: ScheduleJob = {
@@ -398,6 +399,7 @@ export class TaskService {
     this.updateTask(taskId, "queued", "Follow-up queued for devbox session");
     this.emit("task.scheduled", taskId, "Follow-up prompt queued", {
       followUp: true,
+      prompt: trimmed,
       sessionActive: true,
     });
 
@@ -1453,6 +1455,19 @@ export class TaskService {
 
       const sessionBeforeComplete =
         this.activeSessions.get(task.id) ?? this.reviewSessions.get(task.id);
+
+      if (
+        runtimeAgentTask &&
+        runtime &&
+        sessionBeforeComplete &&
+        usesRuntimeAgent(task.agent)
+      ) {
+        await this.captureDevboxPreviewAfterAgent(
+          sessionBeforeComplete,
+          task,
+          repoCwd,
+        );
+      }
 
       this.updateTask(task.id, "completed", completionMessage);
       this.emit("task.completed", task.id, completionMessage, {
@@ -3977,7 +3992,7 @@ export class TaskService {
           "exit 0",
         ].join("\n"),
         port: 3000,
-        waitSeconds: 45,
+        waitSeconds: 90,
       });
     } else {
       this.emit(
@@ -5143,6 +5158,95 @@ export class TaskService {
   }
 
   /**
+   * After a cursor agent run, start the product server and capture Desktop so
+   * Done has a PNG even when the agent tore down its smoke server.
+   */
+  private async captureDevboxPreviewAfterAgent(
+    session: ReviewSession,
+    task: Task,
+    repoCwd: string,
+  ): Promise<void> {
+    if (session.devboxPreviewPort) {
+      const existing = await this.captureDesktopScreenshot(session, task.id);
+      if (existing) {
+        return;
+      }
+    }
+
+    const probes = await session.runtime.terminalAllowFailure({
+      taskId: task.id,
+      cwd: repoCwd,
+      command: [
+        "set +e",
+        'has_pkg="no"; has_next="no"; has_go="no"; has_py="no"',
+        "test -f package.json && has_pkg=yes",
+        "test -d .next && has_next=yes",
+        "test -f go.mod -o -f main.go && has_go=yes",
+        "test -f requirements.txt -o -f pyproject.toml -o -f main.py && has_py=yes",
+        'echo "$has_pkg $has_next $has_go $has_py"',
+      ].join("\n"),
+    });
+    const parts = probes.stdout.trim().split(/\s+/);
+    const hasPkg = parts[0] === "yes";
+    const hasNext = parts[1] === "yes";
+    const hasGo = parts[2] === "yes";
+    const hasPy = parts[3] === "yes";
+
+    if (hasGo) {
+      await this.smokeAndCaptureDevboxPreview(session.runtime, task, repoCwd, {
+        startCommand: [
+          "set +e",
+          "mkdir -p /workspace/.home",
+          'export PATH="/usr/local/go/bin:/usr/local/bin:$PATH"',
+          "export HOST=127.0.0.1 PORT=3000 HOSTNAME=127.0.0.1",
+          "BIN=/workspace/.home/devin-app",
+          'if [ ! -x "$BIN" ]; then go build -o "$BIN" . || exit 1; fi',
+          'nohup "$BIN" >/workspace/.home/devin-snapshot-server.log 2>&1 &',
+          "echo $! > /workspace/.home/devin-snapshot-server.pid",
+          "exit 0",
+        ].join("\n"),
+        port: 3000,
+        waitSeconds: 90,
+      });
+      return;
+    }
+
+    if (hasPy) {
+      await this.smokeAndCaptureDevboxPreview(session.runtime, task, repoCwd, {
+        startCommand: [
+          "set +e",
+          "mkdir -p /workspace/.home",
+          "export HOST=127.0.0.1",
+          "if [ -f main.py ]; then nohup python3 -m uvicorn main:app --host 127.0.0.1 --port 8000 >/workspace/.home/devin-snapshot-server.log 2>&1 &",
+          "elif [ -f app.py ]; then nohup python3 -m uvicorn app:app --host 127.0.0.1 --port 8000 >/workspace/.home/devin-snapshot-server.log 2>&1 &",
+          "else exit 0; fi",
+          "echo $! > /workspace/.home/devin-snapshot-server.pid",
+          "exit 0",
+        ].join("\n"),
+        port: 8000,
+        waitSeconds: 45,
+      });
+      return;
+    }
+
+    if (hasPkg) {
+      await this.smokeAndCaptureDevboxPreview(session.runtime, task, repoCwd, {
+        startCommand: [
+          "set +e",
+          "mkdir -p /workspace/.home",
+          "if ! grep -q '\"start\"' package.json 2>/dev/null; then exit 0; fi",
+          "export HOST=127.0.0.1 PORT=3000 HOSTNAME=127.0.0.1",
+          "nohup npm start >/workspace/.home/devin-snapshot-server.log 2>&1 &",
+          "echo $! > /workspace/.home/devin-snapshot-server.pid",
+          "exit 0",
+        ].join("\n"),
+        port: 3000,
+        waitSeconds: hasNext ? 90 : 45,
+      });
+    }
+  }
+
+  /**
    * Start the product server, wait for HTTP on a known app port, keep it running,
    * and kick off a Desktop snapshot. Used after greenfield verify so Done has a PNG.
    */
@@ -5165,8 +5269,8 @@ export class TaskService {
         "set +e",
         `port=${opts.port}`,
         `for i in $(seq 1 ${opts.waitSeconds}); do`,
-        '  if curl -sf --max-time 2 "http://127.0.0.1:$port/health" >/dev/null 2>&1; then echo "$port"; exit 0; fi',
         '  if curl -sf --max-time 2 "http://127.0.0.1:$port/" >/dev/null 2>&1; then echo "$port"; exit 0; fi',
+        '  if curl -sf --max-time 2 "http://127.0.0.1:$port/health" >/dev/null 2>&1; then echo "$port"; exit 0; fi',
         "  sleep 1",
         "done",
         "exit 1",
