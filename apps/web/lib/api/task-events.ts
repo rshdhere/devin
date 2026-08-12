@@ -73,10 +73,7 @@ export function subscribeToTaskEvents(
                 if (!seenEventIds.has(event.id)) {
                   seenEventIds.add(event.id);
                   onEvent(event);
-                  if (
-                    event.type === "task.completed" ||
-                    event.type === "task.failed"
-                  ) {
+                  if (event.type === "task.failed") {
                     shouldReconnect = false;
                   }
                 }

@@ -46,6 +46,7 @@ export function SessionDesktopPanel({
   const autoFreshDoneRef = useRef(false);
   const freshRetryCountRef = useRef(0);
   const freshRetryTimerRef = useRef<number | null>(null);
+  const captureExhaustedRef = useRef(false);
   shotUrlRef.current = shotUrl;
 
   const isAgentActive =
@@ -68,12 +69,19 @@ export function SessionDesktopPanel({
 
   const scheduleFreshRetry = useCallback(
     (loadFn: (fresh: boolean) => Promise<void>) => {
-      if (shotUrlRef.current || freshRetryCountRef.current >= 3) {
+      if (
+        shotUrlRef.current ||
+        freshRetryCountRef.current >= 3 ||
+        captureExhaustedRef.current
+      ) {
         return;
       }
       clearFreshRetryTimer();
       freshRetryTimerRef.current = window.setTimeout(() => {
         freshRetryCountRef.current += 1;
+        if (freshRetryCountRef.current >= 3) {
+          captureExhaustedRef.current = true;
+        }
         void loadFn(true);
       }, 30_000);
     },
@@ -113,9 +121,9 @@ export function SessionDesktopPanel({
         if (!response.ok) {
           if (
             response.status === 503 &&
-            (isAgentActive || (isTerminal && !shotUrlRef.current))
+            !captureExhaustedRef.current &&
+            (isAgentActive || (isTerminal && fresh && !shotUrlRef.current))
           ) {
-            setShotLoading(true);
             setShotError(false);
             if (isTerminal && fresh) {
               scheduleFreshRetry(loadScreenshot);
@@ -137,19 +145,22 @@ export function SessionDesktopPanel({
         setShotError(false);
         setShotErrorDetail(null);
         freshRetryCountRef.current = 0;
+        captureExhaustedRef.current = false;
         clearFreshRetryTimer();
       } catch (error) {
         if (!shotUrlRef.current) {
           const captureExpected =
-            isAgentActive || (isTerminal && freshRetryCountRef.current < 3);
+            !captureExhaustedRef.current &&
+            (isAgentActive ||
+              (isTerminal && fresh && freshRetryCountRef.current < 3));
           if (captureExpected) {
             setShotError(false);
-            setShotLoading(true);
             if (isTerminal && fresh) {
               scheduleFreshRetry(loadScreenshot);
             }
           } else {
             setShotError(true);
+            captureExhaustedRef.current = true;
             if (error instanceof DOMException && error.name === "AbortError") {
               setShotErrorDetail(
                 fresh
@@ -161,7 +172,7 @@ export function SessionDesktopPanel({
               error.message.startsWith("snapshot HTTP 503")
             ) {
               setShotErrorDetail(
-                "App not ready yet — the sandbox is starting localhost. Click Refresh or wait a moment.",
+                "Could not capture localhost yet — click Refresh to start the app and retry.",
               );
             } else if (error instanceof Error && error.message.length > 0) {
               setShotErrorDetail(error.message);
@@ -175,11 +186,12 @@ export function SessionDesktopPanel({
           freshInFlightRef.current = false;
         }
         if (!shotUrlRef.current) {
-          setShotLoading(
-            isAgentActive ||
-              (isTerminal && freshRetryCountRef.current < 3) ||
-              freshInFlightRef.current,
-          );
+          const stillCapturing =
+            !captureExhaustedRef.current &&
+            (freshInFlightRef.current ||
+              isAgentActive ||
+              (isTerminal && freshRetryCountRef.current < 3));
+          setShotLoading(stillCapturing);
         } else {
           setShotLoading(false);
         }
@@ -198,6 +210,7 @@ export function SessionDesktopPanel({
   const refreshScreenshot = useCallback(
     (fresh = true) => {
       freshRetryCountRef.current = 0;
+      captureExhaustedRef.current = false;
       clearFreshRetryTimer();
       void loadScreenshot(fresh);
     },
@@ -207,6 +220,7 @@ export function SessionDesktopPanel({
   useEffect(() => {
     if (externalRefreshKey > 0) {
       freshRetryCountRef.current = 0;
+      captureExhaustedRef.current = false;
       clearFreshRetryTimer();
       void loadScreenshot(false).then(() => {
         if (!shotUrlRef.current) {
@@ -222,6 +236,7 @@ export function SessionDesktopPanel({
     }
     autoFreshDoneRef.current = false;
     freshRetryCountRef.current = 0;
+    captureExhaustedRef.current = false;
     void loadScreenshot(false).then(() => {
       if (
         !autoFreshDoneRef.current &&

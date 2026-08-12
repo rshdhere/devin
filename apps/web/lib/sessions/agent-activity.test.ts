@@ -93,29 +93,70 @@ describe("buildConversationMessages", () => {
     expect(messages[1]?.content).toContain("Next.js");
   });
 
-  it("includes follow-up prompts from scheduled events", () => {
+  it("includes follow-up prompts from phase and execution events", () => {
     const messages = buildConversationMessages(
-      task({ prompt: "use python for the backend" }),
+      task({ prompt: "use fan-in fan-out pattern" }),
       [
         event({
           id: "created",
           type: "task.created",
           message: "Task accepted",
-          data: { prompt: "make me a chat app" },
+          data: { prompt: "make me a chat app using rust" },
         }),
         event({
-          id: "follow-up",
+          id: "follow-scheduled",
           type: "task.scheduled",
           message: "Follow-up prompt queued",
-          data: { followUp: true, prompt: "use python for the backend" },
+          data: { followUp: true, prompt: "use fan-in fan-out pattern" },
+        }),
+        event({
+          id: "follow-phase",
+          type: "task.phase_changed",
+          message: "Resuming devbox session",
+          data: {
+            followUp: true,
+            prompt: "use fan-in fan-out pattern",
+          },
+        }),
+        event({
+          id: "follow-exec",
+          type: "execution.started",
+          message: "Follow-up execution started",
+          data: {
+            followUp: true,
+            prompt: "use fan-in fan-out pattern",
+          },
         }),
       ],
     );
     const users = messages.filter((m) => m.role === "user");
     expect(users.map((m) => m.content)).toEqual([
-      "make me a chat app",
-      "use python for the backend",
+      "make me a chat app using rust",
+      "use fan-in fan-out pattern",
     ]);
+  });
+
+  it("recovers the initial prompt from execution.started when task.created lacks it", () => {
+    const messages = buildConversationMessages(
+      task({ prompt: "use fan-in fan-out pattern" }),
+      [
+        event({
+          id: "exec-initial",
+          type: "execution.started",
+          message: "Execution starting in devbox",
+          data: { prompt: "make me a chat app using rust" },
+        }),
+        event({
+          id: "follow-up",
+          type: "task.scheduled",
+          message: "Follow-up prompt queued",
+          data: { followUp: true, prompt: "use fan-in fan-out pattern" },
+        }),
+      ],
+    );
+    expect(
+      messages.filter((m) => m.role === "user").map((m) => m.content),
+    ).toEqual(["make me a chat app using rust", "use fan-in fan-out pattern"]);
   });
 });
 

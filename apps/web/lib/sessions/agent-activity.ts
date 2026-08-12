@@ -206,20 +206,33 @@ export function buildConversationMessages(
 
   let hasUserFromEvents = false;
   for (const event of events) {
-    if (event.type === "task.created") {
-      const initialPrompt =
-        typeof event.data?.prompt === "string" ? event.data.prompt : "";
-      if (initialPrompt.trim()) {
-        pushUser(event.id, initialPrompt, event.timestamp);
+    const eventPrompt =
+      typeof event.data?.prompt === "string" ? event.data.prompt.trim() : "";
+
+    if (event.type === "task.created" && eventPrompt) {
+      pushUser(event.id, eventPrompt, event.timestamp);
+      hasUserFromEvents = true;
+      continue;
+    }
+    if (event.type === "task.scheduled" && event.data?.followUp === true) {
+      if (eventPrompt) {
+        pushUser(event.id, eventPrompt, event.timestamp);
         hasUserFromEvents = true;
       }
       continue;
     }
-    if (event.type === "task.scheduled" && event.data?.followUp === true) {
-      const followUpPrompt =
-        typeof event.data.prompt === "string" ? event.data.prompt : "";
-      if (followUpPrompt.trim()) {
-        pushUser(event.id, followUpPrompt, event.timestamp);
+    if (
+      event.type === "task.phase_changed" &&
+      event.data?.followUp === true &&
+      eventPrompt
+    ) {
+      pushUser(event.id, eventPrompt, event.timestamp);
+      hasUserFromEvents = true;
+      continue;
+    }
+    if (event.type === "execution.started" && eventPrompt) {
+      if (event.data?.followUp === true || !hasUserFromEvents) {
+        pushUser(`exec-${event.id}`, eventPrompt, event.timestamp);
         hasUserFromEvents = true;
       }
       continue;
@@ -232,6 +245,12 @@ export function buildConversationMessages(
   if (!hasUserFromEvents && task.prompt.trim()) {
     pushUser("user-initial", task.prompt);
   }
+
+  messages.sort((a, b) => {
+    const at = a.timestamp ? Date.parse(a.timestamp) : 0;
+    const bt = b.timestamp ? Date.parse(b.timestamp) : 0;
+    return at - bt;
+  });
 
   const terminal =
     task.status === "completed" ||

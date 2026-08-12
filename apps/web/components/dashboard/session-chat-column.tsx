@@ -426,8 +426,29 @@ export function SessionPhaseStrip({
   const hasDesktopSnapshot = events.some(
     (e) => e.data?.desktopSnapshot === true,
   );
+  const completedAt = events.find(
+    (e) => e.type === "task.completed",
+  )?.timestamp;
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (
+      task.status !== "completed" ||
+      hasDesktopSnapshot ||
+      !completedAt ||
+      !canUseDevbox(task)
+    ) {
+      return;
+    }
+    const timer = window.setInterval(() => setNow(Date.now()), 10_000);
+    return () => window.clearInterval(timer);
+  }, [completedAt, hasDesktopSnapshot, task]);
+  const captureTimedOut =
+    completedAt !== undefined && now - Date.parse(completedAt) > 130_000;
   const capturingPreview =
-    task.status === "completed" && canUseDevbox(task) && !hasDesktopSnapshot;
+    task.status === "completed" &&
+    canUseDevbox(task) &&
+    !hasDesktopSnapshot &&
+    !captureTimedOut;
   const done = task.status === "completed" && !capturingPreview;
 
   const steps = [

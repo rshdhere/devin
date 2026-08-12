@@ -980,7 +980,12 @@ export function SessionDetail({
       const updated = await continueTask(task.id, trimmed, cursorAgentModel);
       setTask(updated);
       setFollowUpPrompt("");
-      setEvents([]);
+      const history = await fetchTaskEventHistory(task.id);
+      if (history.length > 0) {
+        setEvents(
+          [...history].sort((a, b) => a.timestamp.localeCompare(b.timestamp)),
+        );
+      }
       await refreshTasks();
     } catch (error) {
       setStreamError(
@@ -1106,8 +1111,11 @@ export function SessionDetail({
       {
         reconnect:
           task.status !== "failed" &&
-          task.status !== "completed" &&
-          task.status !== "cancelled",
+          task.status !== "cancelled" &&
+          (task.status !== "completed" ||
+            task.sessionActive === true ||
+            task.sessionSleeping === true ||
+            usesRuntimeAgent(task.agent)),
       },
     );
 
@@ -1123,7 +1131,15 @@ export function SessionDetail({
       cancelled = true;
       unsubscribe();
     };
-  }, [task.id, task.status, refreshTasks, loadDiagnostics]);
+  }, [
+    task.id,
+    task.status,
+    task.sessionActive,
+    task.sessionSleeping,
+    task.agent,
+    refreshTasks,
+    loadDiagnostics,
+  ]);
 
   useEffect(() => {
     if (!streamError) {

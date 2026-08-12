@@ -682,11 +682,18 @@ export class TaskService {
           phase: "running",
           sessionActive: true,
           followUp: true,
+          prompt: job.prompt,
+        });
+        this.emit("execution.started", task.id, "Follow-up execution started", {
+          phase: "running",
+          followUp: true,
+          prompt: job.prompt,
         });
       } else if (!job.skipDraft) {
         this.updateTask(task.id, "scheduling", "Scheduler picked up task");
         this.emit("task.scheduled", task.id, "Task scheduled", {
           agent: task.agent,
+          prompt: job.prompt,
         });
         this.emit("task.phase_changed", task.id, "Entered scheduling phase", {
           phase: "scheduling",
@@ -772,6 +779,7 @@ export class TaskService {
           "Execution starting in devbox",
           {
             phase: "sandbox_starting",
+            prompt: job.prompt,
           },
         );
 
@@ -5178,12 +5186,13 @@ export class TaskService {
       cwd: repoCwd,
       command: [
         "set +e",
-        'has_pkg="no"; has_next="no"; has_go="no"; has_py="no"',
+        'has_pkg="no"; has_next="no"; has_go="no"; has_py="no"; has_rust="no"',
         "test -f package.json && has_pkg=yes",
         "test -d .next && has_next=yes",
         "test -f go.mod -o -f main.go && has_go=yes",
         "test -f requirements.txt -o -f pyproject.toml -o -f main.py && has_py=yes",
-        'echo "$has_pkg $has_next $has_go $has_py"',
+        "test -f Cargo.toml && has_rust=yes",
+        'echo "$has_pkg $has_next $has_go $has_py $has_rust"',
       ].join("\n"),
     });
     const parts = probes.stdout.trim().split(/\s+/);
@@ -5191,6 +5200,24 @@ export class TaskService {
     const hasNext = parts[1] === "yes";
     const hasGo = parts[2] === "yes";
     const hasPy = parts[3] === "yes";
+    const hasRust = parts[4] === "yes";
+
+    if (hasRust) {
+      await this.smokeAndCaptureDevboxPreview(session.runtime, task, repoCwd, {
+        startCommand: [
+          "set +e",
+          "mkdir -p /workspace/.home",
+          'export PATH="/usr/local/cargo/bin:/usr/local/bin:$PATH"',
+          "export HOST=127.0.0.1 PORT=3000 HOSTNAME=127.0.0.1",
+          'nohup bash -lc "set -m; cargo run --release" >/workspace/.home/devin-snapshot-server.log 2>&1 &',
+          "echo $! > /workspace/.home/devin-snapshot-server.pid",
+          "exit 0",
+        ].join("\n"),
+        port: 3000,
+        waitSeconds: 120,
+      });
+      return;
+    }
 
     if (hasGo) {
       await this.smokeAndCaptureDevboxPreview(session.runtime, task, repoCwd, {
