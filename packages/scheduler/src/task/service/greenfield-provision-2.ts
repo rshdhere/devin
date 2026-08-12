@@ -14,7 +14,11 @@ import {
 } from "../../devbox/preview.js";
 import type { ScheduleJob, Task } from "../types.js";
 import type { TaskService } from "./task-service.js";
-import { buildCommitMessage, escapeShell } from "./config.js";
+import { buildCommitMessage, escapeShell, sleep } from "./config.js";
+import {
+  probeSandboxDns,
+  probeSandboxHttps,
+} from "./greenfield-connectivity-probes.js";
 import { smokeAndCaptureDevboxPreview } from "./desktop-capture.js";
 import {
   configureSandboxGit,

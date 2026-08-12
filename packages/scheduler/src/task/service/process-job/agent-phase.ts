@@ -25,6 +25,7 @@ import {
 import {
   ensureBashInSandbox,
   ensureCursorAgentInSandbox,
+  ensureSandboxConnectivity,
   recoverGreenfieldAfterAgentInterruption,
   runTemplateGreenfieldVerify,
   startWorkspaceDiskPruneWatcher,

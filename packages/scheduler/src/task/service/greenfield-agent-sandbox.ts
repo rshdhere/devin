@@ -6,6 +6,7 @@ import {
 } from "../../greenfield/git-sync.js";
 import { scaffoldFilesFromDraft } from "../../greenfield/scaffold-from-draft.js";
 import type { GitHubUserIdentity } from "../../github/client.js";
+import { shellPrepareWritableHome } from "../../sandbox/env.js";
 import {
   buildPruneWorkspaceDiskScript,
   buildSnapshotSmokeStartScript,
@@ -22,6 +23,7 @@ import {
   gitRuntimeEnv,
   readGitHead,
 } from "./git-operations.js";
+import { probeSandboxHttps } from "./greenfield-connectivity-probes.js";
 import { alignHydratedRepoWithOriginMain } from "./greenfield-provision.js";
 import { ensureSandboxDns } from "./sandbox-lifecycle.js";
 import { emit } from "./task-state.js";

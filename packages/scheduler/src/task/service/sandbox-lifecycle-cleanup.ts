@@ -7,6 +7,7 @@ import type { ScheduleJob, Task } from "../types.js";
 import type { TaskService } from "./task-service.js";
 import type { SandboxRecord } from "./types.js";
 import { sleep } from "./config.js";
+import { fetchSandbox, reclaimDevboxCapacity } from "./sandbox-lifecycle.js";
 import { emit } from "./task-state.js";
 
 export async function deleteSandbox(

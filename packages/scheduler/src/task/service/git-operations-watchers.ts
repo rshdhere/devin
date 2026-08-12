@@ -20,6 +20,7 @@ import {
 import { buildAgentAttributionOptOutScript } from "../attribution.js";
 import type { AgentProvider, ScheduleJob, Task } from "../types.js";
 import type { TaskService } from "./task-service.js";
+import { gitRuntimeEnv } from "./git-operations.js";
 import {
   buildCommitMessage,
   escapeShell,

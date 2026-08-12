@@ -18,6 +18,11 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import type { Task } from "../types.js";
 import type { TaskService } from "./task-service.js";
 import type { ReviewSession } from "./types.js";
+import {
+  captureDesktopScreenshot,
+  captureDesktopScreenshotWithDevServer,
+  resolveLiveSession,
+} from "./desktop-capture-render.js";
 import { delegateRequestToWorker, wakeSession } from "./session-lifecycle.js";
 import { emit, patchTask } from "./task-state.js";
 

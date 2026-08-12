@@ -13,6 +13,7 @@ import {
   type DraftPlan,
 } from "../../greenfield/draft-planner.js";
 import { generateProjectMetadata } from "../../greenfield/project-metadata.js";
+import { buildAlignHydratedRepoScript } from "../../greenfield/git-sync.js";
 import { scaffoldFilesFromDraft } from "../../greenfield/scaffold-from-draft.js";
 import { greenfieldShellScaffoldFiles } from "../../greenfield/shell-scaffold.js";
 import type { ScheduleJob, Task } from "../types.js";
@@ -24,7 +25,7 @@ import {
   resolveStackRuntime,
   sleep,
 } from "./config.js";
-import { configureSandboxGit } from "./git-operations.js";
+import { configureSandboxGit, gitRuntimeEnv } from "./git-operations.js";
 import { ensureSandboxDns } from "./sandbox-lifecycle.js";
 import { emit } from "./task-state.js";
 
