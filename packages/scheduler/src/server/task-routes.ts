@@ -64,7 +64,9 @@ export function createTaskRouter(tasks: TaskService): Router {
   router.get("/:id", async (req, res) => {
     const taskId = req.params.id;
     const task =
-      tasks.getTask(taskId) ?? (await tasks.getTaskStore().getTask(taskId));
+      (await tasks.syncTaskFromStore(taskId)) ??
+      tasks.getTask(taskId) ??
+      (await tasks.getTaskStore().getTask(taskId));
     if (!task) {
       res.status(404).json({ error: "task not found" });
       return;

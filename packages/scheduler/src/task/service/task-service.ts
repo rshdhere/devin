@@ -53,7 +53,12 @@ import {
   resolveServiceMode,
   resolveTimeoutMs,
 } from "./config.js";
-import { ensurePendingJob, ensureTaskLoaded } from "./resolve-task.js";
+import {
+  ensurePendingJob,
+  ensureTaskLoaded,
+  syncTaskFromStore,
+} from "./resolve-task.js";
+import { recoverStuckQueuedTasks } from "./brain-recovery.js";
 import type {
   ReviewSession,
   TaskServiceHost,
@@ -127,6 +132,9 @@ export class TaskService implements TaskServiceHost {
     this.restored = true;
     await restoreFromStore(this);
     startIdleWatchdogImpl(this);
+    if (this.mode === "brain") {
+      await recoverStuckQueuedTasks(this);
+    }
   }
 
   getMode(): ServiceMode {
@@ -205,13 +213,6 @@ export class TaskService implements TaskServiceHost {
     }
 
     this.tasks.set(task.id, task);
-    void this.taskStore.upsertTask(task);
-    this.emit("task.created", task.id, "Task accepted", {
-      agent: task.agent,
-      runtime: task.runtime,
-      repository: task.repository,
-      prompt: task.prompt,
-    });
 
     const job: ScheduleJob = {
       taskId: task.id,
@@ -235,22 +236,44 @@ export class TaskService implements TaskServiceHost {
     };
     this.pendingJobs.set(task.id, job);
 
-    if (this.mode === "brain") {
-      void delegateJobToWorkerImpl(this, job).catch((error) => {
+    void (async () => {
+      await this.taskStore.upsertTask(task);
+      this.emit("task.created", task.id, "Task accepted", {
+        agent: task.agent,
+        runtime: task.runtime,
+        repository: task.repository,
+        prompt: task.prompt,
+      });
+
+      if (this.mode === "brain") {
+        try {
+          await delegateJobToWorkerImpl(this, job);
+          this.emit(
+            "task.scheduled",
+            task.id,
+            "Task delegated to execution worker",
+            {
+              delegated: true,
+            },
+          );
+        } catch (error) {
+          const message =
+            error instanceof Error ? error.message : "Failed to delegate job";
+          this.updateTask(task.id, "failed", message);
+          this.emit("task.failed", task.id, message);
+        }
+        return;
+      }
+
+      try {
+        await this.queue.enqueue(job);
+      } catch (error) {
         const message =
-          error instanceof Error ? error.message : "Failed to delegate job";
+          error instanceof Error ? error.message : "Failed to enqueue task";
         this.updateTask(task.id, "failed", message);
         this.emit("task.failed", task.id, message);
-      });
-      return task;
-    }
-
-    void this.queue.enqueue(job).catch((error) => {
-      const message =
-        error instanceof Error ? error.message : "Failed to enqueue task";
-      this.updateTask(task.id, "failed", message);
-      this.emit("task.failed", task.id, message);
-    });
+      }
+    })();
 
     return task;
   }
@@ -317,6 +340,10 @@ export class TaskService implements TaskServiceHost {
     return task ? hydrateTaskRuntime(task) : undefined;
   }
 
+  async syncTaskFromStore(taskId: string): Promise<Task | undefined> {
+    return syncTaskFromStore(this, taskId);
+  }
+
   listTasks(): Task[] {
     if (this.tasks.size > 0) {
       return [...this.tasks.values()]
@@ -330,7 +357,8 @@ export class TaskService implements TaskServiceHost {
     const stored = await this.taskStore.listTasks(userId);
     for (const task of stored) {
       const hydrated = hydrateTaskRuntime(task);
-      if (!this.tasks.has(hydrated.id)) {
+      const memory = this.tasks.get(hydrated.id);
+      if (!memory || hydrated.updatedAt >= memory.updatedAt) {
         this.tasks.set(hydrated.id, hydrated);
       }
     }

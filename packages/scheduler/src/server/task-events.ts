@@ -1,6 +1,7 @@
 import { formatSSE } from "@devin/events";
 import type { Request, Response } from "express";
 import type { TaskService } from "../task/service.js";
+import { syncTaskFromStore } from "../task/service/resolve-task.js";
 
 export async function handleTaskEvents(
   tasks: TaskService,
@@ -9,7 +10,9 @@ export async function handleTaskEvents(
   res: Response,
 ): Promise<void> {
   const task =
-    tasks.getTask(taskId) ?? (await tasks.getTaskStore().getTask(taskId));
+    (await syncTaskFromStore(tasks, taskId)) ??
+    tasks.getTask(taskId) ??
+    (await tasks.getTaskStore().getTask(taskId));
   if (!task) {
     res.status(404).json({ error: "task not found" });
     return;
@@ -50,6 +53,7 @@ export async function handleTaskEvents(
   const pollInterval =
     tasks.getMode() === "brain" && tasks.getTaskStore().isEnabled()
       ? setInterval(async () => {
+          await syncTaskFromStore(tasks, taskId);
           const fresh = await tasks
             .getTaskStore()
             .loadEventsSince(taskId, lastSequence);

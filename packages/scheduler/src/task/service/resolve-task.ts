@@ -2,24 +2,32 @@ import type { ScheduleJob, Task } from "../types.js";
 import type { TaskService } from "./task-service.js";
 import { hydrateTaskRuntime } from "./config.js";
 
+/** Merge Postgres task state into memory (worker updates do not reach brain RAM). */
+export async function syncTaskFromStore(
+  svc: TaskService,
+  taskId: string,
+): Promise<Task | undefined> {
+  const stored = await svc.taskStore.getTask(taskId);
+  if (!stored) {
+    const memory = svc.tasks.get(taskId);
+    return memory ? hydrateTaskRuntime(memory) : undefined;
+  }
+
+  const hydrated = hydrateTaskRuntime(stored);
+  const memory = svc.tasks.get(taskId);
+  if (!memory || hydrated.updatedAt >= memory.updatedAt) {
+    svc.tasks.set(taskId, hydrated);
+  }
+  const current = svc.tasks.get(taskId);
+  return current ? hydrateTaskRuntime(current) : hydrated;
+}
+
 /** Load a task from memory or Postgres and hydrate the in-memory map. */
 export async function ensureTaskLoaded(
   svc: TaskService,
   taskId: string,
 ): Promise<Task | undefined> {
-  const existing = svc.tasks.get(taskId);
-  if (existing) {
-    return hydrateTaskRuntime(existing);
-  }
-
-  const stored = await svc.taskStore.getTask(taskId);
-  if (!stored) {
-    return undefined;
-  }
-
-  const hydrated = hydrateTaskRuntime(stored);
-  svc.tasks.set(taskId, hydrated);
-  return hydrated;
+  return syncTaskFromStore(svc, taskId);
 }
 
 /** Restore pending job metadata from session store when brain/worker restarts. */

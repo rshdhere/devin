@@ -373,6 +373,8 @@ export async function sleepIdleSession(
   });
 }
 
+const WORKER_DELEGATE_TIMEOUT_MS = 30_000;
+
 export async function delegateJobToWorker(
   svc: TaskService,
   job: ScheduleJob,
@@ -387,8 +389,16 @@ export async function delegateJobToWorker(
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(job),
+      signal: AbortSignal.timeout(WORKER_DELEGATE_TIMEOUT_MS),
     },
-  );
+  ).catch((error: unknown) => {
+    if (error instanceof Error && error.name === "TimeoutError") {
+      throw new Error(
+        `Execution worker timed out after ${WORKER_DELEGATE_TIMEOUT_MS}ms at ${svc.executionWorkerUrl} — check EXECUTION_WORKER_URL and worker NLB health`,
+      );
+    }
+    throw error;
+  });
 
   if (!response.ok) {
     const body = (await response.json().catch(() => ({}))) as {
@@ -408,5 +418,13 @@ export async function delegateRequestToWorker(
   if (!svc.executionWorkerUrl) {
     throw new Error("EXECUTION_WORKER_URL is required when SERVICE_MODE=brain");
   }
-  return fetch(`${svc.executionWorkerUrl.replace(/\/$/, "")}${path}`, init);
+  const signal =
+    init?.signal ??
+    (typeof AbortSignal.timeout === "function"
+      ? AbortSignal.timeout(WORKER_DELEGATE_TIMEOUT_MS)
+      : undefined);
+  return fetch(`${svc.executionWorkerUrl.replace(/\/$/, "")}${path}`, {
+    ...init,
+    signal,
+  });
 }
