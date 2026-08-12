@@ -20,7 +20,7 @@ import {
   proxyDevboxPreview as proxyDevboxPreviewImpl,
   fetchDesktopScreenshot as fetchDesktopScreenshotImpl,
 } from "./desktop-capture.js";
-import { processJob as processJobImpl } from "./process-job.js";
+import { processJob as processJobImpl } from "./process-job/index.js";
 import {
   restoreFromStore,
   persistSession as persistSessionImpl,
