@@ -1,4 +1,13 @@
 import type { CreatedIssue } from "./types.js";
+import {
+  createCommitViaGitDatabase,
+  createFileViaContentsApi,
+  githubApiRequest,
+  initializeEmptyRepositoryWithContentsApi,
+  isGitRepositoryEmptyError,
+  tryGetBranchHeadSha,
+  waitForGitHubRepository,
+} from "./repos.js";
 
 export async function createGitHubIssue(
   token: string,

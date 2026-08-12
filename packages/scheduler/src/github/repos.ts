@@ -41,7 +41,7 @@ export async function fetchGitHubUserIdentity(
   };
 }
 
-async function githubApiRequest<T>(
+export async function githubApiRequest<T>(
   token: string,
   path: string,
   init?: RequestInit,
@@ -75,7 +75,7 @@ class GitHubApiError extends Error {
   }
 }
 
-function isGitRepositoryEmptyError(error: unknown): boolean {
+export function isGitRepositoryEmptyError(error: unknown): boolean {
   if (!(error instanceof GitHubApiError)) {
     return false;
   }
@@ -132,7 +132,7 @@ export async function waitForGitHubRepository(
   );
 }
 
-async function createFileViaContentsApi(
+export async function createFileViaContentsApi(
   token: string,
   owner: string,
   repo: string,
@@ -190,7 +190,7 @@ async function getBranchHeadSha(
   return ref.object.sha;
 }
 
-async function tryGetBranchHeadSha(
+export async function tryGetBranchHeadSha(
   token: string,
   owner: string,
   repo: string,
@@ -209,7 +209,7 @@ async function tryGetBranchHeadSha(
   }
 }
 
-async function createCommitViaGitDatabase(
+export async function createCommitViaGitDatabase(
   token: string,
   owner: string,
   repo: string,
@@ -308,7 +308,7 @@ async function createCommitViaGitDatabase(
   return { sha: commit.sha };
 }
 
-async function initializeEmptyRepositoryWithContentsApi(
+export async function initializeEmptyRepositoryWithContentsApi(
   token: string,
   owner: string,
   repo: string,
