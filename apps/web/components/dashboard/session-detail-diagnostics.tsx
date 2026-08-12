@@ -101,6 +101,22 @@ export function DiagnosticsPanel({
               .
             </p>
           ) : null}
+          {/Structure needs cleaning|guest filesystem corrupt|cursor agent CLI is not runnable/i.test(
+            task.message,
+          ) ? (
+            <p className="text-[12px] leading-relaxed text-amber-200/90">
+              The sandbox root filesystem is corrupt (ext4{" "}
+              <span className="font-mono text-amber-100">
+                Structure needs cleaning
+              </span>
+              ). On the execution host rebuild Firecracker snapshots:{" "}
+              <span className="font-mono text-amber-100">
+                DEVIN_FORCE_SNAPSHOT_REBUILD=true DEVIN_RUNTIMES=&apos;agent
+                nextjs&apos; devin-infra bootstrap-snapshots &lt;instance-id&gt;
+              </span>
+              , then retry the task.
+            </p>
+          ) : null}
           {/task not found/i.test(task.message) ? (
             <p className="text-[12px] leading-relaxed text-amber-200/90">
               The execution worker could not load this task. Confirm{" "}

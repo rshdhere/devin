@@ -21,23 +21,88 @@ func ensureCursorBin(
 	bin := resolveCursorBin(cfg, req)
 	resolved, err := whichCursorBin(ctx, workDir, bin, env)
 	if err == nil {
-		if verifyErr := verifyCursorBin(ctx, workDir, resolved, env); verifyErr != nil {
+		verifyErr := verifyCursorBin(ctx, workDir, resolved, env)
+		if verifyErr == nil {
+			return resolved, nil
+		}
+		if !isGuestFsCorrupt(verifyErr) {
 			return "", verifyErr
 		}
-		return resolved, nil
+		publish("agent.log", "cursor agent CLI broken in guest snapshot — attempting repair", map[string]any{
+			"detail": verifyErr.Error(),
+			"bin":    resolved,
+		})
+	} else {
+		publish("agent.log", "cursor agent CLI missing — attempting install in guest", map[string]any{
+			"detail": err.Error(),
+			"bin":    bin,
+		})
 	}
 
-	publish("agent.log", "cursor agent CLI missing — attempting install in guest", map[string]any{
-		"detail": err.Error(),
-		"bin":    bin,
-	})
+	return installCursorBin(ctx, workDir, env, publish)
+}
 
-	install := `set +e
+func installCursorBin(
+	ctx context.Context,
+	workDir string,
+	env []string,
+	publish func(eventType, message string, data map[string]any),
+) (string, error) {
+	installResult, installErr := executil.RunExact(ctx, workDir, cursorAgentInstallScript(), env)
+	if installErr != nil {
+		return "", fmt.Errorf(
+			"cursor agent CLI not found and install failed: %w (rebuild the agent Firecracker snapshot)",
+			installErr,
+		)
+	}
+	if installResult.ExitCode != 0 {
+		detail := executil.CombinedOutput(installResult)
+		if detail == "" {
+			detail = fmt.Sprintf("exit %d", installResult.ExitCode)
+		}
+		if isGuestFsCorruptString(detail) {
+			return "", guestFsCorruptError(detail)
+		}
+		return "", fmt.Errorf(
+			"cursor agent CLI not found and install failed: %s (rebuild the agent Firecracker snapshot)",
+			detail,
+		)
+	}
+
+	resolved, err := whichCursorBin(ctx, workDir, "agent", env)
+	if err != nil {
+		return "", fmt.Errorf(
+			"cursor agent CLI still missing after install: %w (rebuild the agent Firecracker snapshot)",
+			err,
+		)
+	}
+	if verifyErr := verifyCursorBin(ctx, workDir, resolved, env); verifyErr != nil {
+		return "", verifyErr
+	}
+	publish("agent.log", "cursor agent CLI installed in guest", map[string]any{"bin": resolved})
+	return resolved, nil
+}
+
+func cursorAgentInstallScript() string {
+	return `set +e
 export HOME="/workspace/.home"
 mkdir -p "$HOME/.local/bin" 2>/dev/null || true
 export PATH="/usr/local/bin:/root/.local/bin:$HOME/.local/bin:/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin:$PATH"
+rm -f /usr/local/bin/agent /root/.local/bin/agent /root/.local/bin/agent.real 2>/dev/null || true
+for candidate in \
+  $(ls -1 /root/.local/share/cursor-agent/versions/*/cursor-agent 2>/dev/null | sort -r) \
+  $(ls -1 "$HOME/.local/share/cursor-agent/versions/"*/cursor-agent 2>/dev/null | sort -r)
+do
+  [ -n "$candidate" ] || continue
+  [ -e "$candidate" ] || continue
+  if timeout ` + strconv.Itoa(cursorVersionTimeoutSec) + ` "$candidate" --version >/dev/null 2>&1; then
+    ln -sfn "$candidate" /usr/local/bin/agent
+    ln -sfn "$candidate" /root/.local/bin/agent
+    printf '%s\n' "$candidate"
+    exit 0
+  fi
+done
 curl https://cursor.com/install -fsS | bash
-# Re-resolve after install — do not trust a single hard-coded path.
 for candidate in \
   /usr/local/bin/agent \
   /root/.local/bin/agent \
@@ -57,36 +122,29 @@ do
 done
 exit 1
 `
-	installResult, installErr := executil.RunExact(ctx, workDir, install, env)
-	if installErr != nil {
-		return "", fmt.Errorf(
-			"cursor agent CLI not found and install failed: %w (rebuild the agent Firecracker snapshot)",
-			installErr,
-		)
-	}
-	if installResult.ExitCode != 0 {
-		detail := executil.CombinedOutput(installResult)
-		if detail == "" {
-			detail = fmt.Sprintf("exit %d", installResult.ExitCode)
-		}
-		return "", fmt.Errorf(
-			"cursor agent CLI not found and install failed: %s (rebuild the agent Firecracker snapshot)",
-			detail,
-		)
-	}
+}
 
-	resolved, err = whichCursorBin(ctx, workDir, "agent", env)
-	if err != nil {
-		return "", fmt.Errorf(
-			"cursor agent CLI still missing after install: %w (rebuild the agent Firecracker snapshot)",
-			err,
-		)
+func isGuestFsCorrupt(err error) bool {
+	if err == nil {
+		return false
 	}
-	if verifyErr := verifyCursorBin(ctx, workDir, resolved, env); verifyErr != nil {
-		return "", verifyErr
-	}
-	publish("agent.log", "cursor agent CLI installed in guest", map[string]any{"bin": resolved})
-	return resolved, nil
+	return isGuestFsCorruptString(err.Error())
+}
+
+func isGuestFsCorruptString(value string) bool {
+	lower := strings.ToLower(value)
+	return strings.Contains(lower, "structure needs cleaning") ||
+		strings.Contains(lower, "guest-fs-corrupt") ||
+		strings.Contains(lower, "guest filesystem corrupt")
+}
+
+func guestFsCorruptError(detail string) error {
+	return fmt.Errorf(
+		"sandbox guest filesystem is corrupt (Structure needs cleaning on the cursor agent binary). "+
+			"On the execution host rebuild snapshots: "+
+			"DEVIN_FORCE_SNAPSHOT_REBUILD=true DEVIN_RUNTIMES='agent nextjs' devin-infra bootstrap-snapshots <instance-id>. detail=%s",
+		detail,
+	)
 }
 
 // verifyCursorBin proves the CLI can actually execute. Checking only that the file
@@ -126,6 +184,9 @@ printf 'probe:rc=%s\n' "$?"
 			cursorVersionTimeoutSec,
 			detail,
 		)
+	}
+	if isGuestFsCorruptString(detail) {
+		return guestFsCorruptError(detail)
 	}
 	return fmt.Errorf("cursor agent CLI is not runnable (exit %s). detail=%s", rc, detail)
 }
