@@ -5,11 +5,8 @@ import {
   saveTaskSessionRecordingS3,
 } from "../../devbox/recording-s3.js";
 import type { TaskService } from "./task-service.js";
-import {
-  delegateRequestToWorker,
-  resolveLiveSession,
-  wakeSession,
-} from "./session-lifecycle.js";
+import { resolveLiveSession } from "./desktop-capture-render.js";
+import { delegateRequestToWorker, wakeSession } from "./session-lifecycle.js";
 
 export async function ensureDesktopComputer(
   svc: TaskService,
