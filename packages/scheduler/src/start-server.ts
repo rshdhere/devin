@@ -6,7 +6,7 @@ import {
 } from "./preview/proxy.js";
 import { TaskService } from "./task/service.js";
 import { attachDesktopVNCWebSocketUpgrade } from "./task/service/desktop-computer.js";
-import { resolveOrchestratorUrl } from "../config/orchestrator-url.js";
+import { resolveOrchestratorUrl } from "./config/orchestrator-url.js";
 import {
   registerExecutionHostOnce,
   resolvePinnedHost,
