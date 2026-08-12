@@ -42,6 +42,12 @@ export async function startSchedulerServer(
 
   await tasks.initialize();
 
+  if (options.mode === "worker" && !tasks.getTaskStore().isEnabled()) {
+    console.warn(
+      "DATABASE_URL is unset on worker — task events will not persist and brain cannot mirror progress. Run: sudo devin-infra sync-platform-config",
+    );
+  }
+
   await registerExecutionHostOnce({
     orchestratorUrl,
     hostName: preferredHost,

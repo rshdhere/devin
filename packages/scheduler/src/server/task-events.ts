@@ -1,7 +1,9 @@
+import type { TaskEvent } from "@devin/events";
 import { formatSSE } from "@devin/events";
 import type { Request, Response } from "express";
 import type { TaskService } from "../task/service.js";
 import { syncTaskFromStore } from "../task/service/resolve-task.js";
+import { fetchWorkerEventHistory } from "./task-events-poll.js";
 
 export async function handleTaskEvents(
   tasks: TaskService,
@@ -33,35 +35,50 @@ export async function handleTaskEvents(
       ? memoryHistory
       : await tasks.getTaskStore().loadEvents(taskId);
 
-  for (const event of history) {
-    res.write(formatSSE(event));
-  }
+  const sentEventIds = new Set<string>();
+  let lastSequence = 0;
 
-  let lastSequence = history.reduce((max, event) => {
-    const sequence = Number(event.data?.sequence ?? 0);
-    return sequence > max ? sequence : max;
-  }, 0);
-
-  const unsubscribe = tasks.getEventBus().subscribe(taskId, (event) => {
+  const pushEvent = (event: TaskEvent): void => {
+    if (sentEventIds.has(event.id)) {
+      return;
+    }
+    sentEventIds.add(event.id);
     res.write(formatSSE(event));
     const sequence = Number(event.data?.sequence ?? 0);
     if (sequence > lastSequence) {
       lastSequence = sequence;
     }
+  };
+
+  for (const event of history) {
+    pushEvent(event);
+  }
+
+  const unsubscribe = tasks.getEventBus().subscribe(taskId, (event) => {
+    pushEvent(event);
   });
 
   const pollInterval =
-    tasks.getMode() === "brain" && tasks.getTaskStore().isEnabled()
+    tasks.getMode() === "brain"
       ? setInterval(async () => {
           await syncTaskFromStore(tasks, taskId);
-          const fresh = await tasks
-            .getTaskStore()
-            .loadEventsSince(taskId, lastSequence);
-          for (const event of fresh) {
-            res.write(formatSSE(event));
-            const sequence = Number(event.data?.sequence ?? 0);
-            if (sequence > lastSequence) {
-              lastSequence = sequence;
+
+          if (tasks.getTaskStore().isEnabled()) {
+            const fresh = await tasks
+              .getTaskStore()
+              .loadEventsSince(taskId, lastSequence);
+            for (const event of fresh) {
+              pushEvent(event);
+            }
+          }
+
+          if (tasks.executionWorkerUrl?.trim()) {
+            const workerEvents = await fetchWorkerEventHistory(
+              tasks.executionWorkerUrl,
+              taskId,
+            );
+            for (const event of workerEvents) {
+              pushEvent(event);
             }
           }
         }, 750)
