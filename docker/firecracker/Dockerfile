@@ -16,8 +16,10 @@ RUN git clone https://github.com/awslabs/tc-redirect-tap.git /tmp/tc-redirect-ta
 FROM debian:bookworm-slim
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates curl iproute2 iptables \
-    && rm -rf /var/lib/apt/lists/*
+    ca-certificates curl iproute2 iptables containernetworking-plugins \
+    && rm -rf /var/lib/apt/lists/* \
+    && mkdir -p /opt/cni/bin \
+    && cp -a /usr/lib/cni/. /opt/cni/bin/
 
 ARG FIRECRACKER_VERSION=1.8.0
 RUN curl -fsSL --retry 5 --retry-all-errors --retry-delay 3 \
@@ -27,14 +29,6 @@ RUN curl -fsSL --retry 5 --retry-all-errors --retry-delay 3 \
     && mv /tmp/release-v${FIRECRACKER_VERSION}-x86_64/firecracker-v${FIRECRACKER_VERSION}-x86_64 /usr/bin/firecracker \
     && mv /tmp/release-v${FIRECRACKER_VERSION}-x86_64/jailer-v${FIRECRACKER_VERSION}-x86_64 /usr/bin/jailer \
     && rm -rf /tmp/release-v${FIRECRACKER_VERSION}-x86_64 /tmp/firecracker.tgz
-
-ARG CNI_PLUGINS_VERSION=1.4.1
-RUN mkdir -p /opt/cni/bin \
-    && curl -fsSL --retry 5 --retry-all-errors --retry-delay 3 \
-      -o /tmp/cni-plugins.tgz \
-      "https://github.com/containernetworking/plugins/releases/download/v${CNI_PLUGINS_VERSION}/cni-plugins-linux-amd64-v${CNI_PLUGINS_VERSION}.tgz" \
-    && tar -xzf /tmp/cni-plugins.tgz -C /opt/cni/bin \
-    && rm -f /tmp/cni-plugins.tgz
 
 COPY --from=build /out/tc-redirect-tap /opt/cni/bin/tc-redirect-tap
 RUN chmod 755 /opt/cni/bin/tc-redirect-tap
