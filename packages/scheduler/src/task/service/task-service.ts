@@ -53,6 +53,7 @@ import {
   resolveServiceMode,
   resolveTimeoutMs,
 } from "./config.js";
+import { ensurePendingJob, ensureTaskLoaded } from "./resolve-task.js";
 import type {
   ReviewSession,
   TaskServiceHost,
@@ -145,8 +146,9 @@ export class TaskService implements TaskServiceHost {
   }
 
   async retryTask(taskId: string): Promise<Task> {
-    const task = this.tasks.get(taskId);
-    const job = this.pendingJobs.get(taskId);
+    const task = await ensureTaskLoaded(this, taskId);
+    const job =
+      (await ensurePendingJob(this, taskId)) ?? this.pendingJobs.get(taskId);
     if (!task || !job) {
       throw new Error("task not found");
     }
@@ -265,8 +267,9 @@ export class TaskService implements TaskServiceHost {
   }
 
   async startExecution(taskId: string): Promise<Task> {
-    const task = this.tasks.get(taskId);
-    const job = this.pendingJobs.get(taskId);
+    const task = await ensureTaskLoaded(this, taskId);
+    const job =
+      (await ensurePendingJob(this, taskId)) ?? this.pendingJobs.get(taskId);
     if (!task || !job) {
       throw new Error("task not found");
     }
@@ -347,7 +350,7 @@ export class TaskService implements TaskServiceHost {
   async getTaskDiagnostics(
     taskId: string,
   ): Promise<TaskDiagnostics | undefined> {
-    const task = this.tasks.get(taskId);
+    const task = await ensureTaskLoaded(this, taskId);
     if (!task) {
       return undefined;
     }

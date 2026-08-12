@@ -17,6 +17,7 @@ import {
   waitForRuntime,
   wakeSandbox,
 } from "./sandbox-lifecycle.js";
+import { ensureTaskLoaded } from "./resolve-task.js";
 import { emit, patchTask, updateTask } from "./task-state.js";
 
 export async function continueTask(
@@ -30,7 +31,7 @@ export async function continueTask(
     throw new Error("prompt is required");
   }
 
-  const task = svc.tasks.get(taskId);
+  const task = await ensureTaskLoaded(svc, taskId);
   if (!task) {
     throw new Error("task not found");
   }
@@ -201,7 +202,7 @@ export async function terminateSession(
   svc: TaskService,
   taskId: string,
 ): Promise<Task> {
-  const task = svc.tasks.get(taskId);
+  const task = await ensureTaskLoaded(svc, taskId);
   if (!task) {
     throw new Error("task not found");
   }

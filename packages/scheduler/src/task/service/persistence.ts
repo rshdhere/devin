@@ -4,6 +4,7 @@ import {
   loadCachedDesktopSnapshot,
   startDevboxPreviewWatcher,
 } from "./desktop-capture.js";
+import { ensurePendingJob } from "./resolve-task.js";
 
 export async function restoreFromStore(svc: TaskService): Promise<void> {
   const sequences = await svc.taskStore.restoreEventSequences();
@@ -17,6 +18,9 @@ export async function restoreFromStore(svc: TaskService): Promise<void> {
     const events = await svc.taskStore.loadEvents(task.id);
     for (const event of events) {
       svc.eventBus.publish(event);
+    }
+    if (!svc.pendingJobs.has(task.id)) {
+      await ensurePendingJob(svc, task.id);
     }
   }
 

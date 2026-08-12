@@ -13,6 +13,7 @@ const schedulerFetchTimeoutMs = () => {
 async function proxyScheduler(
   path: string,
   init?: RequestInit,
+  options?: { timeoutMs?: number | null },
 ): Promise<Response> {
   const url = `${schedulerBaseUrl()}${path}`;
 
@@ -24,10 +25,13 @@ async function proxyScheduler(
     headers["Content-Type"] = "application/json";
   }
 
-  const timeoutMs = schedulerFetchTimeoutMs();
+  const timeoutMs =
+    options?.timeoutMs === null
+      ? undefined
+      : (options?.timeoutMs ?? schedulerFetchTimeoutMs());
   const signal =
     init?.signal ??
-    (typeof AbortSignal.timeout === "function"
+    (timeoutMs !== undefined && typeof AbortSignal.timeout === "function"
       ? AbortSignal.timeout(timeoutMs)
       : undefined);
 
@@ -72,7 +76,11 @@ export async function getTask(id: string): Promise<Response> {
 }
 
 export async function streamTaskEvents(id: string): Promise<Response> {
-  return proxyScheduler(`/api/v1/tasks/${encodeURIComponent(id)}/events`);
+  return proxyScheduler(
+    `/api/v1/tasks/${encodeURIComponent(id)}/events`,
+    undefined,
+    { timeoutMs: null },
+  );
 }
 
 export async function getInfraDiagnostics(): Promise<Response> {
@@ -134,10 +142,14 @@ export async function runTaskTerminal(
   id: string,
   body: { command: string; cwd?: string; stream?: boolean },
 ): Promise<Response> {
-  return proxyScheduler(`/api/v1/tasks/${encodeURIComponent(id)}/terminal`, {
-    method: "POST",
-    body: JSON.stringify(body),
-  });
+  return proxyScheduler(
+    `/api/v1/tasks/${encodeURIComponent(id)}/terminal`,
+    {
+      method: "POST",
+      body: JSON.stringify(body),
+    },
+    body.stream ? { timeoutMs: null } : undefined,
+  );
 }
 
 export async function listTaskFiles(id: string, path = "."): Promise<Response> {
@@ -175,6 +187,7 @@ export async function fetchDevboxPreview(
         "Accept-Encoding": "identity",
       },
     },
+    { timeoutMs: null },
   );
 }
 
