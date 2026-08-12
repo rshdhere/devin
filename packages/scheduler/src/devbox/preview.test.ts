@@ -60,6 +60,12 @@ describe("buildStartDevServerForSnapshotScript", () => {
     expect(script).toContain("uvicorn app:app");
   });
 
+  it("prefers bun for Node package.json projects when available", () => {
+    const script = buildStartDevServerForSnapshotScript();
+    expect(script).toContain("bun run dev");
+    expect(script).toContain("bun run start");
+  });
+
   it("prefers Next.js over stray go.mod scaffolds", () => {
     const script = buildStartDevServerForSnapshotScript();
     expect(script).toContain("HAS_NEXT");

@@ -94,7 +94,6 @@ export function SessionChatColumn({
   onFollowUpChange,
   onSendFollowUp,
   continuingSession,
-  sessionActive,
   banner,
   composerDisabled,
   addedLineCount = 0,

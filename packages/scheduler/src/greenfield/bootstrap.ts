@@ -58,22 +58,34 @@ app.listen(port, () => {
     content: serverJs,
   });
 
-  await runtime.terminal({
-    taskId,
-    cwd: repoCwd,
-    env: gitEnv,
-    command: "npm init -y && npm install express",
+  await runtime.writeFile({
+    path: `${repoCwd}/package.json`,
+    content: `${JSON.stringify(
+      {
+        name: "devin-app",
+        version: "1.0.0",
+        private: true,
+        main: "server.js",
+        scripts: {
+          start: "bun server.js",
+        },
+        dependencies: {
+          express: "^4.21.0",
+        },
+      },
+      null,
+      2,
+    )}\n`,
   });
 
   await runtime.terminal({
     taskId,
     cwd: repoCwd,
     env: gitEnv,
-    command:
-      "node -e \"const pkg=require('./package.json'); pkg.main='server.js'; pkg.scripts={start:'node server.js'}; require('fs').writeFileSync('package.json', JSON.stringify(pkg, null, 2));\"",
+    command: "bun install --no-progress",
   });
 
-  return ["server.js", "package.json", "package-lock.json"];
+  return ["server.js", "package.json", "bun.lock"];
 }
 
 async function bootstrapNextjsShell(
@@ -97,10 +109,10 @@ async function bootstrapNextjsShell(
     taskId,
     cwd: repoCwd,
     env: gitEnv,
-    command: "npm install --no-audit --progress=false",
+    command: "bun install --no-progress",
   });
 
-  return [...paths, "package-lock.json", "node_modules"];
+  return [...paths, "bun.lock", "node_modules"];
 }
 
 async function bootstrapGoShell(

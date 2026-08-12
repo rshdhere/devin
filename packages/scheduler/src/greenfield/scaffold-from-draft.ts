@@ -7,7 +7,8 @@ export type ScaffoldFile = {
 
 /**
  * Thin runnable shell only. The runtime agent (brain) implements the product.
- * Prefer zero npm dependencies so greenfield preview can skip registry installs.
+ * Prefer zero package dependencies so greenfield preview can skip registry installs.
+ * Node scaffolds use Bun as the package manager (bun install / bun run).
  */
 export function scaffoldFilesFromDraft(
   plan: DraftPlan,
@@ -28,7 +29,8 @@ ${opts.prompt}
 ## Getting started
 
 \`\`\`bash
-npm start
+bun install
+bun run start
 \`\`\`
 
 _Scaffold only — the sandbox agent implements the product and commits as it goes._
@@ -73,8 +75,8 @@ _Scaffold only — the sandbox agent implements the product and commits as it go
           private: true,
           main: entry,
           scripts: {
-            start: `node ${entry}`,
-            dev: `node --watch ${entry}`,
+            start: `bun ${entry}`,
+            dev: `bun --watch ${entry}`,
           },
         },
         null,
@@ -126,7 +128,8 @@ ${opts.prompt}
 ## Getting started
 
 \`\`\`bash
-npm start
+bun install
+bun run start
 \`\`\`
 `,
     });

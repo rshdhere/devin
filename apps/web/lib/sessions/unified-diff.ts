@@ -97,7 +97,7 @@ export function syntheticAddedDiff(content: string): DiffLine[] {
 }
 
 export function shellQuote(path: string): string {
-  return `'${path.replace(/'/g, `'\"'\"'`)}'`;
+  return `'${path.replace(/'/g, `'"'"'`)}'`;
 }
 
 export function buildFileDiffCommand(path: string, repoDir = "repo"): string {

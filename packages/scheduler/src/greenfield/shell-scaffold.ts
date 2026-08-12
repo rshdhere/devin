@@ -130,8 +130,8 @@ function readmeForShell(
         : stack === "python"
           ? "pip install -r requirements.txt && python app.py"
           : stack === "nextjs"
-            ? "npm install && npm run dev"
-            : "npm start";
+            ? "bun install && bun run dev"
+            : "bun install && bun run start";
 
   return `# ${title}
 

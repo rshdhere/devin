@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Image from "next/image";
 import {
   Check,
   CircleDot,
@@ -195,9 +196,12 @@ export function GitHubPermissionsPanel({
         <div className="mt-4 rounded-lg border border-[#252525] bg-[#111] px-3 py-2.5">
           <div className="flex items-center justify-between gap-3">
             <div className="flex min-w-0 items-start gap-2.5">
-              <img
+              <Image
                 src={DEVIN_BOT.avatarUrl}
                 alt=""
+                width={32}
+                height={32}
+                unoptimized
                 className="mt-0.5 size-8 rounded-full border border-[#333]"
               />
               <div className="min-w-0">

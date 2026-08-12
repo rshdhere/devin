@@ -30,6 +30,15 @@ export function buildNodeOrNextStartCommandLines(): string[] {
     '    else CMD="go build -o $BIN . && exec $BIN"; fi',
     "  fi",
     "fi",
+    'if [ -z "$CMD" ] && command -v bun >/dev/null 2>&1 && [ -f package.json ]; then',
+    '  if [ -f .next/BUILD_ID ] && grep -q \'"start"\' package.json 2>/dev/null; then CMD="bun run start"',
+    '  elif grep -q \'"dev"\' package.json 2>/dev/null; then CMD="bun run dev"',
+    "  elif grep -q '\"start\"' package.json 2>/dev/null; then",
+    '    if grep -q "next start" package.json 2>/dev/null && [ ! -f .next/BUILD_ID ]; then',
+    '      CMD="bun run build && bun run start"',
+    '    else CMD="bun run start"; fi',
+    "  fi",
+    "fi",
     'if [ -z "$CMD" ] && [ -f package.json ]; then',
     '  if [ -f .next/BUILD_ID ] && grep -q \'"start"\' package.json 2>/dev/null; then CMD="npm start"',
     '  elif grep -q \'"dev"\' package.json 2>/dev/null; then CMD="npm run dev"',
@@ -95,10 +104,16 @@ export function buildSnapshotSmokeStartScript(): string {
 export function snapshotWaitSecondsForStartCommand(
   startCommand: string,
 ): number {
-  if (/npm run dev|next dev|cargo run|go build/.test(startCommand)) {
+  if (
+    /bun run dev|npm run dev|next dev|cargo run|go build/.test(startCommand)
+  ) {
     return 180;
   }
-  if (/npm run build|next build|npm start/.test(startCommand)) {
+  if (
+    /bun run build|npm run build|next build|npm start|bun run start/.test(
+      startCommand,
+    )
+  ) {
     return 120;
   }
   return 90;

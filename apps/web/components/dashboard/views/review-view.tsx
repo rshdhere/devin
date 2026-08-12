@@ -10,8 +10,6 @@ import {
   X,
 } from "lucide-react";
 import { MotionButton } from "@/components/dashboard/motion-button";
-import { cn } from "@/lib/utils";
-
 const waitingReviews = [
   {
     id: "1",

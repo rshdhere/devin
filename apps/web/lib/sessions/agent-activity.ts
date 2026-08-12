@@ -179,6 +179,7 @@ export function buildConversationMessages(
   const messages: ConversationMessage[] = [];
   const seenUserIds = new Set<string>();
   const seenAssistant = new Set<string>();
+  const seenFollowUpPrompts = new Set<string>();
 
   const pushUser = (id: string, content: string, timestamp?: string) => {
     const text = content.trim();
@@ -215,7 +216,8 @@ export function buildConversationMessages(
       continue;
     }
     if (event.type === "task.scheduled" && event.data?.followUp === true) {
-      if (eventPrompt) {
+      if (eventPrompt && !seenFollowUpPrompts.has(eventPrompt)) {
+        seenFollowUpPrompts.add(eventPrompt);
         pushUser(event.id, eventPrompt, event.timestamp);
         hasUserFromEvents = true;
       }
@@ -224,14 +226,22 @@ export function buildConversationMessages(
     if (
       event.type === "task.phase_changed" &&
       event.data?.followUp === true &&
-      eventPrompt
+      eventPrompt &&
+      !seenFollowUpPrompts.has(eventPrompt)
     ) {
+      seenFollowUpPrompts.add(eventPrompt);
       pushUser(event.id, eventPrompt, event.timestamp);
       hasUserFromEvents = true;
       continue;
     }
     if (event.type === "execution.started" && eventPrompt) {
-      if (event.data?.followUp === true || !hasUserFromEvents) {
+      if (event.data?.followUp === true) {
+        if (!seenFollowUpPrompts.has(eventPrompt)) {
+          seenFollowUpPrompts.add(eventPrompt);
+          pushUser(`exec-${event.id}`, eventPrompt, event.timestamp);
+          hasUserFromEvents = true;
+        }
+      } else if (!hasUserFromEvents) {
         pushUser(`exec-${event.id}`, eventPrompt, event.timestamp);
         hasUserFromEvents = true;
       }
