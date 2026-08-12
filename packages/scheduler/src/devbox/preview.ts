@@ -250,7 +250,7 @@ export function buildDesktopScreenshotScript(
 ): string {
   const safeUrl = url.replace(/'/g, `'\"'\"'`);
   const safeOut = outputPath.replace(/'/g, `'\"'\"'`);
-  return [
+  const inner = [
     "set +e",
     "mkdir -p /workspace/.home 2>/dev/null || true",
     "SCRIPT=/workspace/.home/desktop-screenshot.mjs",
@@ -278,8 +278,11 @@ export function buildDesktopScreenshotScript(
     'if [ -n "$B" ]; then',
     `"$B" --headless --disable-gpu --no-sandbox --disable-dev-shm-usage --window-size=1024,768 --hide-scrollbars --run-all-compositor-stages-before-draw --virtual-time-budget=10000 --screenshot='${safeOut}' '${safeUrl}' && exit 0`,
     "fi",
-    'node "$SCRIPT"',
+    'timeout 35 node "$SCRIPT"',
   ].join("\n");
+  return ["timeout 45 bash <<'CAPTURE_SCRIPT'", inner, "CAPTURE_SCRIPT"].join(
+    "\n",
+  );
 }
 
 /** Prune build/package caches when workspace tmpfs is tight. */

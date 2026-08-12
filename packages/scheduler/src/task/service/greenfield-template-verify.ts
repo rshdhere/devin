@@ -147,25 +147,26 @@ export async function runTemplateGreenfieldVerify(
       waitSeconds: 45,
     });
   } else if (hasPackageJson.stdout.trim() === "yes") {
-    emit(svc, "agent.log", task.id, "Installing dependencies (npm install)", {
+    emit(svc, "agent.log", task.id, "Installing dependencies (bun install)", {
       cwd: repoCwd,
     });
 
     const install = await runtime.terminal({
       taskId: task.id,
       cwd: repoCwd,
-      command: "timeout 180 npm install --no-audit --progress=false 2>&1",
+      command:
+        "timeout 180 bash -lc 'if command -v bun >/dev/null 2>&1; then bun install; else npm install --no-audit --progress=false; fi' 2>&1",
     });
 
     if (install.exitCode === 124) {
       throw new Error(
-        "npm install timed out after 180s — check sandbox outbound network, DNS, and npm registry access",
+        "bun install timed out after 180s — check sandbox outbound network, DNS, and registry access",
       );
     }
 
     if (install.exitCode !== 0) {
       throw new Error(
-        `npm install failed with exit code ${install.exitCode}: ${install.stderr || install.stdout}`,
+        `dependency install failed with exit code ${install.exitCode}: ${install.stderr || install.stdout}`,
       );
     }
 
@@ -184,7 +185,7 @@ export async function runTemplateGreenfieldVerify(
       svc,
       "agent.log",
       task.id,
-      "No package.json — skipping npm install and smoke check",
+      "No package.json — skipping dependency install and smoke check",
       { cwd: repoCwd },
     );
   }

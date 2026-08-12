@@ -25,6 +25,8 @@ import {
 import { delegateRequestToWorker, wakeSession } from "./session-lifecycle.js";
 import { emit, patchTask } from "./task-state.js";
 
+const DESKTOP_CAPTURE_TIMEOUT_MS = 120_000;
+
 export async function captureDesktopScreenshotWithDevServer(
   svc: TaskService,
   session: ReviewSession,
@@ -40,14 +42,19 @@ export async function captureDesktopScreenshotWithDevServer(
     return existing;
   }
 
-  const promise = runDesktopScreenshotWithDevServer(
-    svc,
-    session,
-    taskId,
-    opts?.allowSpin !== false,
-    opts?.keepServer === true,
-    opts?.bypassSpinCooldown === true,
-  ).finally(() => {
+  const promise = Promise.race([
+    runDesktopScreenshotWithDevServer(
+      svc,
+      session,
+      taskId,
+      opts?.allowSpin !== false,
+      opts?.keepServer === true,
+      opts?.bypassSpinCooldown === true,
+    ),
+    new Promise<undefined>((resolve) =>
+      setTimeout(() => resolve(undefined), DESKTOP_CAPTURE_TIMEOUT_MS),
+    ),
+  ]).finally(() => {
     if (svc.desktopCaptureInFlight.get(taskId) === promise) {
       svc.desktopCaptureInFlight.delete(taskId);
     }
@@ -91,16 +98,18 @@ export async function runDesktopScreenshotWithDevServer(
     emit(svc, "agent.log", taskId, "Starting app for desktop snapshot", {
       desktop: true,
     });
+    const startCommand = buildStartDevServerForSnapshotScript();
+    const waitSeconds = snapshotWaitSecondsForStartCommand(startCommand);
     await session.runtime.terminalAllowFailure({
       taskId,
       cwd: session.repoCwd,
-      command: buildStartDevServerForSnapshotScript(),
+      command: startCommand,
     });
     spunUp = true;
     const wait = await session.runtime.terminalAllowFailure({
       taskId,
       cwd: session.repoCwd,
-      command: buildWaitForDevServerScript(),
+      command: buildWaitForDevServerScript(waitSeconds),
     });
     const port = Number.parseInt(wait.stdout.trim(), 10);
     if (Number.isFinite(port) && port > 0) {

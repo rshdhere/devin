@@ -140,6 +140,15 @@ export function isToolMetadataName(tool: string): boolean {
   return TOOL_METADATA_NAMES.has(tool.trim().toLowerCase());
 }
 
+/** Prefer bun in UI when the agent emits npm commands in the sandbox. */
+export function normalizePackageManagerCommand(command: string): string {
+  return command
+    .replace(/\bnpm run\b/g, "bun run")
+    .replace(/\bnpm install\b/g, "bun install")
+    .replace(/\bnpm ci\b/g, "bun install")
+    .replace(/\bnpm start\b/g, "bun run start");
+}
+
 export function humanizeToolProgressLine(
   tool: string,
   detail: string,
@@ -147,7 +156,9 @@ export function humanizeToolProgressLine(
   if (isToolMetadataName(tool) || /^hook/i.test(tool)) {
     return null;
   }
-  const shortDetail = detail.split("\n")[0]?.trim() ?? "";
+  const shortDetail = normalizePackageManagerCommand(
+    detail.split("\n")[0]?.trim() ?? "",
+  );
   const fileName = shortDetail
     ? fileDisplayName(normalizeSandboxFilePath(shortDetail))
     : "";

@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import {
   ArrowLeft,
   ArrowUp,
@@ -377,35 +379,9 @@ function UserAvatar() {
 }
 
 function AssistantMarkdown({ content }: { content: string }) {
-  const lines = content.split("\n");
   return (
-    <div className="space-y-1.5 text-[13px] leading-relaxed text-zinc-300">
-      {lines.map((line, index) => {
-        const trimmed = line.trim();
-        if (!trimmed) {
-          return <div key={index} className="h-1.5" />;
-        }
-        if (/^#{1,3}\s/.test(trimmed)) {
-          return (
-            <p key={index} className="font-medium text-zinc-100">
-              {trimmed.replace(/^#{1,3}\s/, "")}
-            </p>
-          );
-        }
-        if (/^[-*]\s/.test(trimmed)) {
-          return (
-            <p key={index}>
-              <span className="text-zinc-500">· </span>
-              {trimmed.replace(/^[-*]\s/, "")}
-            </p>
-          );
-        }
-        return (
-          <p key={index} className="whitespace-pre-wrap">
-            {line}
-          </p>
-        );
-      })}
+    <div className="text-[13px] leading-relaxed text-zinc-300 [&_a]:text-emerald-400 [&_a]:underline-offset-2 hover:[&_a]:underline [&_code]:rounded [&_code]:bg-white/[0.06] [&_code]:px-1 [&_code]:py-0.5 [&_code]:font-mono [&_code]:text-[12px] [&_h1]:mb-2 [&_h1]:text-[15px] [&_h1]:font-semibold [&_h1]:text-zinc-100 [&_h2]:mb-1.5 [&_h2]:text-[14px] [&_h2]:font-medium [&_h2]:text-zinc-100 [&_h3]:mb-1 [&_h3]:text-[13px] [&_h3]:font-medium [&_h3]:text-zinc-100 [&_li]:my-0.5 [&_ol]:my-2 [&_ol]:list-decimal [&_ol]:pl-5 [&_p]:my-1.5 [&_strong]:font-semibold [&_strong]:text-zinc-100 [&_ul]:my-2 [&_ul]:list-disc [&_ul]:pl-5">
+      <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
     </div>
   );
 }

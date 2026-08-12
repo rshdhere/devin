@@ -39,6 +39,7 @@ export function SessionDesktopPanel({
   const [shotError, setShotError] = useState(false);
   const [shotErrorDetail, setShotErrorDetail] = useState<string | null>(null);
   const [shotLoading, setShotLoading] = useState(false);
+  const [retryPending, setRetryPending] = useState(false);
   const [shotUrl, setShotUrl] = useState<string | null>(null);
   const shotUrlRef = useRef<string | null>(null);
   const inFlightRef = useRef(false);
@@ -77,7 +78,9 @@ export function SessionDesktopPanel({
         return;
       }
       clearFreshRetryTimer();
+      setRetryPending(true);
       freshRetryTimerRef.current = window.setTimeout(() => {
+        setRetryPending(false);
         freshRetryCountRef.current += 1;
         if (freshRetryCountRef.current >= 3) {
           captureExhaustedRef.current = true;
@@ -105,6 +108,7 @@ export function SessionDesktopPanel({
       }
       setShotError(false);
       setShotErrorDetail(null);
+      setRetryPending(false);
       setShotLoading(true);
 
       const controller = new AbortController();
@@ -147,6 +151,7 @@ export function SessionDesktopPanel({
         freshRetryCountRef.current = 0;
         captureExhaustedRef.current = false;
         clearFreshRetryTimer();
+        setRetryPending(false);
       } catch (error) {
         if (!shotUrlRef.current) {
           const captureExpected =
@@ -186,8 +191,10 @@ export function SessionDesktopPanel({
           freshInFlightRef.current = false;
         }
         if (!shotUrlRef.current) {
+          const waitingForRetry = freshRetryTimerRef.current !== null;
           const stillCapturing =
             !captureExhaustedRef.current &&
+            !waitingForRetry &&
             (freshInFlightRef.current ||
               isAgentActive ||
               (isTerminal && freshRetryCountRef.current < 3));
@@ -328,6 +335,11 @@ export function SessionDesktopPanel({
                 : "Capturing desktop preview…"}
             </p>
           </div>
+        ) : null}
+        {retryPending && !shotUrl && !shotLoading ? (
+          <p className="max-w-sm text-center text-[12px] text-zinc-500">
+            App still starting — retrying capture shortly…
+          </p>
         ) : null}
         {shotError && !shotUrl ? (
           <p className="max-w-sm text-center text-[12px] text-zinc-500">

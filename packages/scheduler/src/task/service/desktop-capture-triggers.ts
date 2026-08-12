@@ -1,4 +1,6 @@
 import type { TaskService } from "./task-service.js";
+import type { ReviewSession } from "./types.js";
+import { captureDesktopScreenshotWithDevServer } from "./desktop-capture-render.js";
 import { patchTask } from "./task-state.js";
 
 export function maybeTriggerDesktopSnapshotFromRuntime(
@@ -19,7 +21,7 @@ export function maybeTriggerDesktopSnapshotFromRuntime(
       text,
     );
   const looksLikeBuildOk =
-    /npm run build|next build/i.test(text) &&
+    /npm run build|bun run build|next build/i.test(text) &&
     /exit code 0|exited with 0|successfully compiled|compiled successfully|✓|creating an optimized production build/i.test(
       lower,
     );
@@ -75,7 +77,7 @@ export async function triggerDesktopSnapshot(
     return;
   }
   try {
-    await svc.captureDesktopScreenshotWithDevServer(session, taskId, {
+    await captureDesktopScreenshotWithDevServer(svc, session, taskId, {
       allowSpin: true,
     });
   } catch {
