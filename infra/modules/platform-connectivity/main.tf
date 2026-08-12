@@ -5,10 +5,15 @@ locals {
 
   scheduler_nlb_dns = local.scheduler_nlb_enabled ? aws_lb.scheduler[0].dns_name : null
 
-  effective_scheduler_url = coalesce(
+  worker_scheduler_url = coalesce(
     var.scheduler_url_override,
     local.scheduler_nlb_dns != null ? "http://${local.scheduler_nlb_dns}:${var.scheduler_port}" : null,
     var.scheduler_url,
+  )
+
+  api_scheduler_url = coalesce(
+    var.api_scheduler_url_override,
+    "http://devin-brain:9092",
   )
 
   orchestrator_nlb_hostname = var.manage_orchestrator_nlb ? try(
@@ -81,7 +86,7 @@ resource "aws_ssm_parameter" "scheduler_url" {
 
   name  = "${local.ssm_prefix}/scheduler_url"
   type  = "String"
-  value = local.effective_scheduler_url
+  value = local.worker_scheduler_url
 
   tags = merge(var.tags, {
     Name = "${var.name_prefix}-scheduler-url"
@@ -120,7 +125,7 @@ resource "null_resource" "sync_scheduler_url" {
   count = var.sync_scheduler_url_to_kubernetes ? 1 : 0
 
   triggers = {
-    scheduler_url = local.effective_scheduler_url
+    scheduler_url = local.api_scheduler_url
     namespaces    = join(",", var.server_secret_namespaces)
   }
 
@@ -128,7 +133,7 @@ resource "null_resource" "sync_scheduler_url" {
     command     = "go run -C '${path.module}/../..' ./cmd/devin-infra patch-scheduler-url"
     interpreter = ["bash", "-c"]
     environment = {
-      SCHEDULER_URL = local.effective_scheduler_url
+      SCHEDULER_URL = local.api_scheduler_url
       NAMESPACES    = join(" ", var.server_secret_namespaces)
     }
   }

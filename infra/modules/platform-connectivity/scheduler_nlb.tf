@@ -69,7 +69,7 @@ resource "time_sleep" "wait_for_scheduler_nlb" {
 # without referencing counted resources directly.
 resource "null_resource" "scheduler_connectivity_ready" {
   triggers = {
-    scheduler_url = local.effective_scheduler_url
+    scheduler_url = local.worker_scheduler_url
     nlb_enabled   = tostring(local.scheduler_nlb_enabled)
     nlb_dns       = coalesce(local.scheduler_nlb_dns, "direct")
   }

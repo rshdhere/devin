@@ -1,5 +1,6 @@
-const schedulerBaseUrl = () =>
-  (process.env.SCHEDULER_URL ?? "http://localhost:9091").replace(/\/$/, "");
+import { resolveSchedulerBaseUrl } from "./scheduler-url.js";
+
+const schedulerBaseUrl = () => resolveSchedulerBaseUrl();
 
 const schedulerFetchTimeoutMs = () => {
   const raw = Number.parseInt(

@@ -1,12 +1,11 @@
-import { app } from "@devin/api-v1";
+import { app, resolveSchedulerBaseUrl } from "@devin/api-v1";
 import { ensureDBConnection } from "@devin/drizzle/health";
 import { runMigrations } from "@devin/drizzle/migrate";
 import { createServer } from "node:http";
 import WebSocket, { WebSocketServer } from "ws";
 
 const PORT = process.env.PORT || 8080;
-const schedulerBaseUrl = () =>
-  (process.env.SCHEDULER_URL ?? "http://localhost:9091").replace(/\/$/, "");
+const schedulerBaseUrl = () => resolveSchedulerBaseUrl();
 
 function bridgeWebSockets(client: WebSocket, upstream: WebSocket): void {
   client.on("message", (data, isBinary) => {
@@ -52,5 +51,6 @@ export const main = async () => {
 
   server.listen(PORT, () => {
     console.log(`server is live @ http://localhost:${PORT}`);
+    console.log(`scheduler proxy: ${resolveSchedulerBaseUrl()}`);
   });
 };

@@ -80,8 +80,13 @@ output "execution_hosts" {
 }
 
 output "scheduler_url" {
-  description = "Primary scheduler URL — set on devin-server as SCHEDULER_URL."
+  description = "Worker scheduler URL (execution host NLB) — EXECUTION_WORKER_URL on devin-brain."
   value       = try(module.platform_connectivity[0].scheduler_url, local.primary_scheduler_url)
+}
+
+output "api_scheduler_url" {
+  description = "In-cluster brain URL — SCHEDULER_URL on devin-server."
+  value       = try(module.platform_connectivity[0].api_scheduler_url, "http://devin-brain:9092")
 }
 
 output "orchestrator_url" {

@@ -1,6 +1,11 @@
 output "scheduler_url" {
-  description = "Primary scheduler URL wired into devin-server."
-  value       = local.effective_scheduler_url
+  description = "Worker scheduler URL (execution host NLB) — EXECUTION_WORKER_URL on devin-brain."
+  value       = local.worker_scheduler_url
+}
+
+output "api_scheduler_url" {
+  description = "In-cluster brain URL — SCHEDULER_URL on devin-server."
+  value       = local.api_scheduler_url
 }
 
 output "scheduler_nlb_hostname" {

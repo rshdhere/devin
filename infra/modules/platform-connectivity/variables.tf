@@ -41,7 +41,14 @@ variable "scheduler_url" {
 }
 
 variable "scheduler_url_override" {
-  description = "Optional fixed scheduler URL for devin-server. When null, use the internal NLB hostname when available."
+  description = "Optional fixed worker scheduler URL (execution host NLB). When null, use the internal NLB hostname when available."
+  type        = string
+  nullable    = true
+  default     = null
+}
+
+variable "api_scheduler_url_override" {
+  description = "Scheduler URL patched into devin-server (in-cluster brain). Defaults to http://devin-brain:9092."
   type        = string
   nullable    = true
   default     = null
