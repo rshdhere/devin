@@ -8,6 +8,10 @@ import type { TaskService } from "./task-service.js";
 import type { SandboxRecord } from "./types.js";
 import { sleep } from "./config.js";
 import { emit } from "./task-state.js";
+import {
+  deleteSandbox,
+  waitForSandboxDeleted,
+} from "./sandbox-lifecycle-cleanup.js";
 
 export function assertSandboxOnLocalHost(
   svc: TaskService,
