@@ -52,7 +52,41 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@f7ce87c1d6bead3e36075b2ce75da1f6cc28aaca # v3.9.0
+        env:
+          BUILDKIT_IMAGE: moby/buildkit:buildx-stable-1
+        run: |
+          set -euo pipefail
+          builder=gha-builder
+
+          bootstrap_container() {
+            if ! docker image inspect "${BUILDKIT_IMAGE}" >/dev/null 2>&1; then
+              docker pull "${BUILDKIT_IMAGE}"
+            fi
+            docker buildx rm "${builder}" >/dev/null 2>&1 || true
+            docker buildx create --name "${builder}" --driver docker-container --use \
+              --driver-opt "image=${BUILDKIT_IMAGE}"
+            docker buildx inspect --bootstrap
+          }
+
+          bootstrap_docker_driver() {
+            docker buildx rm "${builder}" >/dev/null 2>&1 || true
+            docker buildx create --name "${builder}" --driver docker --use
+            docker buildx inspect --bootstrap
+          }
+
+          for attempt in $(seq 1 6); do
+            echo "Bootstrapping docker-container buildx (attempt ${attempt}/6)..."
+            if bootstrap_container; then
+              echo "Buildx ready with docker-container driver."
+              exit 0
+            fi
+            echo "BuildKit bootstrap failed; retrying in $((attempt * 20))s..."
+            sleep $((attempt * 20))
+          done
+
+          echo "::warning::Docker Hub BuildKit image unavailable; falling back to docker driver."
+          bootstrap_docker_driver
+          echo "Buildx ready with docker driver fallback."
 
       - name: Log in to Docker Hub
         if: github.event_name != 'pull_request'
