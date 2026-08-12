@@ -11,7 +11,6 @@ import {
   Lightbulb,
   Loader2,
   Mic,
-  Monitor,
   Plus,
 } from "lucide-react";
 import type { Task, TaskEvent } from "@devin/types";
@@ -178,7 +177,7 @@ export function SessionChatColumn({
       ) : null}
 
       <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
-        <TipCard />
+        {!canUseDevbox(task) ? <TipCard /> : null}
 
         {isActive && statusLine ? (
           <p className="mb-3 text-[13px] leading-relaxed text-zinc-400">
@@ -190,7 +189,7 @@ export function SessionChatColumn({
           <p className="mb-3 text-[12px] text-zinc-500">{workLabel}</p>
         ) : null}
 
-        <div className="mb-4 space-y-4">
+        <div className="space-y-4">
           {conversation.map((message) =>
             message.role === "user" ? (
               <div key={message.id} className="flex justify-end gap-2">
@@ -207,27 +206,6 @@ export function SessionChatColumn({
           )}
         </div>
 
-        {canUseDevbox(task) ? (
-          <div className="mb-4 overflow-hidden rounded-xl border border-white/[0.08] bg-[#111]">
-            <SessionDesktopPanel
-              task={task}
-              layout="embed"
-              externalRefreshKey={snapshotRefreshKey}
-            />
-          </div>
-        ) : null}
-
-        {onOpenDesktop ? (
-          <MotionButton
-            type="button"
-            onClick={onOpenDesktop}
-            className="mb-2 flex w-full cursor-pointer items-center justify-center gap-2 rounded-xl border border-white/[0.08] bg-[#141414] py-2.5 text-[13px] font-medium text-zinc-200 transition-colors hover:bg-[#1a1a1a]"
-          >
-            <Monitor className="size-4 text-zinc-400" />
-            Open Desktop
-          </MotionButton>
-        ) : null}
-
         {systemMessages.map((message) => (
           <p
             key={message.id}
@@ -237,6 +215,19 @@ export function SessionChatColumn({
           </p>
         ))}
       </div>
+
+      {canUseDevbox(task) ? (
+        <div className="shrink-0 border-t border-white/[0.06] bg-[#0a0a0a] px-3 pt-3">
+          <div className="overflow-hidden rounded-xl border border-white/[0.08] bg-[#111]">
+            <SessionDesktopPanel
+              task={task}
+              layout="embed"
+              externalRefreshKey={snapshotRefreshKey}
+              onOpenDesktop={onOpenDesktop}
+            />
+          </div>
+        </div>
+      ) : null}
 
       <div className="shrink-0 border-t border-white/[0.06] bg-[#0a0a0a] p-3">
         <form

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Loader2 } from "lucide-react";
 import { MotionButton } from "@/components/dashboard/motion-button";
 import { useSessions } from "@/components/dashboard/sessions-context";
@@ -32,6 +32,7 @@ import {
 } from "@/components/dashboard/session-chat-column";
 import { SessionCodeColumn } from "@/components/dashboard/session-code-column";
 import { sumLineCounts, mergeTaskEvents } from "@/lib/sessions/agent-activity";
+import { canUseDevbox } from "@/lib/sessions/devbox";
 import { useSessionDetailEffects } from "./session-detail-effects";
 import { useElapsedTime } from "./session-detail-utils";
 import { DiagnosticsPanel } from "./session-detail-diagnostics";
@@ -67,7 +68,7 @@ export function SessionDetail({
   const [terminatingSession, setTerminatingSession] = useState(false);
   const [workspaceTab, setWorkspaceTab] = useState<
     "progress" | "changes" | "desktop"
-  >("changes");
+  >(() => (canUseDevbox(initialTask) ? "desktop" : "changes"));
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
   const [fileLineCounts, setFileLineCounts] = useState<Record<string, number>>(
     {},
@@ -318,6 +319,16 @@ export function SessionDetail({
     refreshTasks,
     loadDiagnostics,
   });
+
+  useEffect(() => {
+    const latestSnapshot = events.reduce(
+      (count, event) => count + (event.data?.desktopSnapshot === true ? 1 : 0),
+      0,
+    );
+    if (latestSnapshot > 0 && canUseDevbox(task)) {
+      setWorkspaceTab("desktop");
+    }
+  }, [events, task]);
 
   return (
     <div className="flex min-h-0 w-full flex-1 flex-col overflow-hidden bg-[#0a0a0a]">

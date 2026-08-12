@@ -4,8 +4,10 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Loader2, Monitor, RefreshCw } from "lucide-react";
 import type { Task } from "@devin/types";
 import { tasksApiUrl } from "@/lib/api/http";
-import { canUseDevbox } from "@/lib/sessions/devbox";
+import { canUseDevbox, isDevboxLive } from "@/lib/sessions/devbox";
 import { cn } from "@/lib/utils";
+
+type DesktopView = "live" | "snapshot";
 
 async function blobLooksLikePng(blob: Blob): Promise<boolean> {
   if (blob.type.includes("image")) {
@@ -26,16 +28,26 @@ export function SessionDesktopPanel({
   task,
   layout = "panel",
   externalRefreshKey = 0,
+  onOpenDesktop,
 }: {
   task: Task;
   layout?: "panel" | "embed";
   externalRefreshKey?: number;
+  onOpenDesktop?: () => void;
 }) {
   const canUse = canUseDevbox(task);
+  const liveCapable = isDevboxLive(task) || Boolean(task.previewUrl);
   const screenshotSrc = tasksApiUrl(
     `/${encodeURIComponent(task.id)}/desktop-screenshot`,
   );
+  const livePreviewSrc = tasksApiUrl(
+    `/${encodeURIComponent(task.id)}/devbox-preview?path=/`,
+  );
 
+  const [view, setView] = useState<DesktopView>(
+    layout === "panel" && liveCapable ? "live" : "snapshot",
+  );
+  const [liveReachable, setLiveReachable] = useState(false);
   const [shotError, setShotError] = useState(false);
   const [shotErrorDetail, setShotErrorDetail] = useState<string | null>(null);
   const [shotLoading, setShotLoading] = useState(false);
@@ -67,6 +79,23 @@ export function SessionDesktopPanel({
       freshRetryTimerRef.current = null;
     }
   }, []);
+
+  const probeLivePreview = useCallback(async () => {
+    if (!canUse) {
+      setLiveReachable(false);
+      return;
+    }
+    try {
+      const response = await fetch(livePreviewSrc, {
+        method: "GET",
+        credentials: "include",
+        signal: AbortSignal.timeout(8_000),
+      });
+      setLiveReachable(response.ok);
+    } catch {
+      setLiveReachable(false);
+    }
+  }, [canUse, livePreviewSrc]);
 
   const scheduleFreshRetry = useCallback(
     (loadFn: (fresh: boolean) => Promise<void>) => {
@@ -109,7 +138,9 @@ export function SessionDesktopPanel({
       setShotError(false);
       setShotErrorDetail(null);
       setRetryPending(false);
-      setShotLoading(true);
+      if (!shotUrlRef.current) {
+        setShotLoading(true);
+      }
 
       const controller = new AbortController();
       const timeoutMs = fresh ? 180_000 : 25_000;
@@ -152,6 +183,7 @@ export function SessionDesktopPanel({
         captureExhaustedRef.current = false;
         clearFreshRetryTimer();
         setRetryPending(false);
+        void probeLivePreview();
       } catch (error) {
         if (!shotUrlRef.current) {
           const captureExpected =
@@ -209,6 +241,7 @@ export function SessionDesktopPanel({
       clearFreshRetryTimer,
       isAgentActive,
       isTerminal,
+      probeLivePreview,
       scheduleFreshRetry,
       screenshotSrc,
     ],
@@ -220,8 +253,9 @@ export function SessionDesktopPanel({
       captureExhaustedRef.current = false;
       clearFreshRetryTimer();
       void loadScreenshot(fresh);
+      void probeLivePreview();
     },
-    [clearFreshRetryTimer, loadScreenshot],
+    [clearFreshRetryTimer, loadScreenshot, probeLivePreview],
   );
 
   useEffect(() => {
@@ -234,8 +268,14 @@ export function SessionDesktopPanel({
           void loadScreenshot(true);
         }
       });
+      void probeLivePreview();
     }
-  }, [externalRefreshKey, clearFreshRetryTimer, loadScreenshot]);
+  }, [
+    externalRefreshKey,
+    clearFreshRetryTimer,
+    loadScreenshot,
+    probeLivePreview,
+  ]);
 
   useEffect(() => {
     if (!canUse) {
@@ -244,6 +284,7 @@ export function SessionDesktopPanel({
     autoFreshDoneRef.current = false;
     freshRetryCountRef.current = 0;
     captureExhaustedRef.current = false;
+    void probeLivePreview();
     void loadScreenshot(false).then(() => {
       if (
         !autoFreshDoneRef.current &&
@@ -254,7 +295,7 @@ export function SessionDesktopPanel({
         void loadScreenshot(true);
       }
     });
-  }, [canUse, loadScreenshot, task.id, task.status]);
+  }, [canUse, loadScreenshot, probeLivePreview, task.id, task.status]);
 
   useEffect(() => {
     if (!canUse) {
@@ -266,11 +307,18 @@ export function SessionDesktopPanel({
           return;
         }
         void loadScreenshot(false);
+        void probeLivePreview();
       },
       isAgentActive ? 8_000 : 20_000,
     );
     return () => clearInterval(interval);
-  }, [canUse, isAgentActive, loadScreenshot]);
+  }, [canUse, isAgentActive, loadScreenshot, probeLivePreview]);
+
+  useEffect(() => {
+    if (layout === "panel" && liveReachable) {
+      setView("live");
+    }
+  }, [layout, liveReachable]);
 
   useEffect(() => {
     return () => {
@@ -295,6 +343,8 @@ export function SessionDesktopPanel({
   const isEmbed = layout === "embed";
   const captureInProgress =
     shotLoading && !shotUrl && (isAgentActive || isTerminal);
+  const showLive =
+    layout === "panel" && view === "live" && (liveReachable || liveCapable);
 
   return (
     <div
@@ -304,63 +354,135 @@ export function SessionDesktopPanel({
       )}
     >
       <div className="flex shrink-0 items-center justify-between gap-2 border-b border-white/[0.06] px-3 py-2">
-        <span className="text-[11px] text-zinc-500">
-          Sandbox snapshot (Playwright capture from localhost in the devbox)
-        </span>
-        <button
-          type="button"
-          onClick={() => refreshScreenshot(true)}
-          disabled={shotLoading}
-          className="inline-flex cursor-pointer items-center gap-1 rounded-md px-2 py-1 text-[11px] text-zinc-400 hover:bg-white/[0.06] hover:text-zinc-200 disabled:opacity-50"
-        >
-          <RefreshCw
-            className={cn("size-3.5", shotLoading && "animate-spin")}
-          />
-          Refresh
-        </button>
+        <div className="min-w-0">
+          <p className="truncate text-[11px] font-medium text-zinc-300">
+            {isEmbed ? "App preview" : "Desktop"}
+          </p>
+          <p className="truncate text-[10px] text-zinc-600">
+            {showLive
+              ? "Live localhost in the devbox (1024×768)"
+              : "Playwright snapshot from localhost"}
+          </p>
+        </div>
+        <div className="flex shrink-0 items-center gap-1">
+          {!isEmbed ? (
+            <div className="mr-1 flex rounded-lg border border-white/[0.08] bg-[#111] p-0.5">
+              <button
+                type="button"
+                onClick={() => setView("live")}
+                className={cn(
+                  "rounded-md px-2 py-0.5 text-[10px] font-medium transition-colors",
+                  view === "live"
+                    ? "bg-white/[0.08] text-zinc-100"
+                    : "text-zinc-500 hover:text-zinc-300",
+                )}
+              >
+                Live
+              </button>
+              <button
+                type="button"
+                onClick={() => setView("snapshot")}
+                className={cn(
+                  "rounded-md px-2 py-0.5 text-[10px] font-medium transition-colors",
+                  view === "snapshot"
+                    ? "bg-white/[0.08] text-zinc-100"
+                    : "text-zinc-500 hover:text-zinc-300",
+                )}
+              >
+                Snapshot
+              </button>
+            </div>
+          ) : null}
+          <button
+            type="button"
+            onClick={() => refreshScreenshot(true)}
+            disabled={shotLoading}
+            className="inline-flex cursor-pointer items-center gap-1 rounded-md px-2 py-1 text-[11px] text-zinc-400 hover:bg-white/[0.06] hover:text-zinc-200 disabled:opacity-50"
+          >
+            <RefreshCw
+              className={cn("size-3.5", shotLoading && "animate-spin")}
+            />
+            Refresh
+          </button>
+        </div>
       </div>
 
       <div
         className={cn(
           "relative flex min-h-0 flex-1 items-center justify-center bg-[#0a0a0a]",
-          isEmbed ? "min-h-[180px] p-2" : "p-4",
+          isEmbed ? "min-h-[180px] p-2" : "p-0",
         )}
       >
-        {captureInProgress ? (
-          <div className="flex flex-col items-center gap-2">
-            <Loader2 className="size-6 animate-spin text-zinc-600" />
-            <p className="max-w-sm text-center text-[12px] text-zinc-500">
-              {isTerminal
-                ? "Starting app and capturing preview…"
-                : "Capturing desktop preview…"}
-            </p>
-          </div>
-        ) : null}
-        {retryPending && !shotUrl && !shotLoading ? (
-          <p className="max-w-sm text-center text-[12px] text-zinc-500">
-            App still starting — retrying capture shortly…
-          </p>
-        ) : null}
-        {shotError && !shotUrl ? (
-          <p className="max-w-sm text-center text-[12px] text-zinc-500">
-            {shotErrorDetail ??
-              (task.sessionSleeping
-                ? "Waking devbox to load saved snapshot — try Refresh."
-                : "No desktop snapshot yet — click Refresh to start the app and capture localhost (1024×768).")}
-          </p>
-        ) : null}
-        {shotUrl ? (
-          /* eslint-disable-next-line @next/next/no-img-element */
-          <img
-            src={shotUrl}
-            alt="Sandbox app snapshot"
+        {showLive ? (
+          <iframe
+            key={livePreviewSrc}
+            src={livePreviewSrc}
+            title="Live app preview"
             className={cn(
-              "rounded-lg border border-white/[0.08] object-contain object-top shadow-lg",
-              isEmbed ? "max-h-[280px] w-full" : "max-h-full w-full max-w-5xl",
+              "h-full w-full border-0 bg-white",
+              isEmbed ? "min-h-[180px] rounded-lg" : "",
             )}
+            sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals"
           />
-        ) : null}
+        ) : (
+          <>
+            {captureInProgress ? (
+              <div className="flex flex-col items-center gap-2">
+                <Loader2 className="size-6 animate-spin text-zinc-600" />
+                <p className="max-w-sm text-center text-[12px] text-zinc-500">
+                  {isTerminal
+                    ? "Starting app and capturing preview…"
+                    : "Capturing desktop preview…"}
+                </p>
+              </div>
+            ) : null}
+            {retryPending && !shotUrl && !shotLoading ? (
+              <p className="max-w-sm text-center text-[12px] text-zinc-500">
+                App still starting — retrying capture shortly…
+              </p>
+            ) : null}
+            {shotError && !shotUrl ? (
+              <p className="max-w-sm text-center text-[12px] text-zinc-500">
+                {shotErrorDetail ??
+                  (task.sessionSleeping
+                    ? "Waking devbox to load saved snapshot — try Refresh."
+                    : "No desktop snapshot yet — click Refresh to start the app and capture localhost (1024×768).")}
+              </p>
+            ) : null}
+            {shotUrl ? (
+              <div className="relative flex h-full w-full items-start justify-center p-4">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={shotUrl}
+                  alt="Sandbox app snapshot"
+                  className={cn(
+                    "rounded-lg border border-white/[0.08] object-contain object-top shadow-lg",
+                    isEmbed
+                      ? "max-h-[280px] w-full"
+                      : "max-h-full w-full max-w-5xl",
+                  )}
+                />
+                {shotLoading ? (
+                  <div className="absolute inset-0 flex items-center justify-center rounded-lg bg-black/35">
+                    <Loader2 className="size-6 animate-spin text-zinc-200" />
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
+          </>
+        )}
       </div>
+
+      {isEmbed && onOpenDesktop ? (
+        <button
+          type="button"
+          onClick={onOpenDesktop}
+          className="mx-3 mt-1 mb-3 flex w-[calc(100%-1.5rem)] cursor-pointer items-center justify-center gap-2 rounded-xl border border-white/[0.08] bg-[#141414] py-2 text-[12px] font-medium text-zinc-200 transition-colors hover:bg-[#1a1a1a]"
+        >
+          <Monitor className="size-4 text-zinc-400" />
+          Open Desktop
+        </button>
+      ) : null}
     </div>
   );
 }
