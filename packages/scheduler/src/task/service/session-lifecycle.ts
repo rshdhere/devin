@@ -17,6 +17,7 @@ import {
   waitForRuntime,
   wakeSandbox,
 } from "./sandbox-lifecycle.js";
+import { requestWorkerRehydrate } from "./resolve-session-proxy.js";
 import { ensureTaskLoaded } from "./resolve-task.js";
 import { emit, patchTask, updateTask } from "./task-state.js";
 
@@ -65,6 +66,11 @@ export async function continueTask(
     svc.mode !== "brain"
   ) {
     session = await hydrateSessionFromStore(svc, taskId, persisted);
+  }
+
+  if (!session && svc.mode === "brain") {
+    await requestWorkerRehydrate(svc, taskId);
+    persisted = await svc.taskStore.getSession(taskId);
   }
 
   const jobBase = session?.job ?? persisted?.job;

@@ -2,7 +2,17 @@ import type { TaskEvent } from "@devin/events";
 import type { Task } from "../types.js";
 import { fetchWorkerEventHistory, fetchWorkerTask } from "../worker-client.js";
 import { hydrateTaskRuntime } from "./config.js";
+import { requestWorkerRehydrate } from "./resolve-session-proxy.js";
+import { fetchSandbox } from "./sandbox-lifecycle.js";
 import type { TaskService } from "./task-service.js";
+import { updateTask } from "./task-state.js";
+
+const ACTIVE_ON_BRAIN = new Set<Task["status"]>([
+  "sandbox_starting",
+  "runtime_ready",
+  "running",
+  "awaiting_review",
+]);
 
 const TERMINAL_STATUSES = new Set<Task["status"]>([
   "completed",
@@ -104,7 +114,26 @@ export async function syncTaskFromWorker(
 
   const worker = await fetchWorkerTask(svc.executionWorkerUrl, taskId);
   if (!worker) {
-    return hydrateTaskRuntime(brain);
+    if (ACTIVE_ON_BRAIN.has(brain.status) || brain.sessionActive) {
+      const rehydrated = await requestWorkerRehydrate(svc, taskId);
+      if (!rehydrated) {
+        const sandboxName = brain.sandboxName ?? `sbx-${taskId.slice(0, 8)}`;
+        const sandbox = await fetchSandbox(svc, sandboxName);
+        if (sandbox?.status?.phase !== "Running") {
+          const message =
+            "Execution worker lost task state and devbox is no longer running. Start a new session.";
+          updateTask(svc, taskId, "failed", message);
+          svc.tasks.set(taskId, {
+            ...brain,
+            status: "failed",
+            message,
+            sessionActive: false,
+          });
+          await svc.taskStore.upsertTask(svc.tasks.get(taskId)!);
+        }
+      }
+    }
+    return hydrateTaskRuntime(svc.tasks.get(taskId) ?? brain);
   }
 
   const merged = mergeWorkerTask(brain, worker);

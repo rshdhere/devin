@@ -165,6 +165,24 @@ export function createTaskRouter(tasks: TaskService): Router {
     await handleTerminalProxy(tasks, req.params.id, req, res);
   });
 
+  router.post("/:id/rehydrate", async (req, res) => {
+    const taskId = req.params.id;
+    try {
+      const session = await tasks.rehydrateDevboxSession(taskId);
+      if (!session) {
+        res.status(404).json({ error: "no devbox session" });
+        return;
+      }
+      res.status(200).json({
+        ok: true,
+        runtimeBaseUrl: session.runtimeBaseUrl,
+        sandboxName: session.sandboxName,
+      });
+    } catch (error) {
+      sendError(res, 500, error, "rehydrate failed");
+    }
+  });
+
   router.get("/:id/files", async (req, res) => {
     const path = normalizeSandboxFilePath(queryString(req, "path", "."));
     await proxyRuntimeGet(

@@ -60,6 +60,11 @@ import {
   syncTaskFromStore,
 } from "./resolve-task.js";
 import { recoverStuckQueuedTasks } from "./brain-recovery.js";
+import {
+  resolveRuntimeSession,
+  brainDelegateOrRuntime,
+} from "./resolve-session-proxy.js";
+import { hydrateSessionFromOrchestrator } from "./orchestrator-session.js";
 import { syncTaskFromWorker as syncTaskFromWorkerImpl } from "./sync-task-from-worker.js";
 import type {
   ReviewSession,
@@ -376,6 +381,12 @@ export class TaskService implements TaskServiceHost {
     return syncTaskFromWorkerImpl(this, taskId);
   }
 
+  async rehydrateDevboxSession(
+    taskId: string,
+  ): Promise<ReviewSession | undefined> {
+    return hydrateSessionFromOrchestrator(this, taskId);
+  }
+
   listTasks(): Task[] {
     if (this.tasks.size > 0) {
       return [...this.tasks.values()]
@@ -534,43 +545,36 @@ export class TaskService implements TaskServiceHost {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            ...(init?.headers ?? {}),
+            ...(init?.headers as Record<string, string> | undefined),
           },
           body: init?.body,
         });
       }
-      if (path.startsWith("/files/list") || path.startsWith("/files/read")) {
-        return delegateRequestToWorkerImpl(this, workerPath, { method: "GET" });
-      }
-      if (path.startsWith("/terminal")) {
-        return delegateRequestToWorkerImpl(this, workerPath, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            ...(init?.headers ?? {}),
-          },
-          body: init?.body,
-        });
-      }
-      return delegateRequestToWorkerImpl(this, workerPath, {
-        method: init?.method ?? "GET",
-        headers: init?.headers,
-        signal: init?.signal,
-      });
+
+      const workerInit =
+        path.startsWith("/files/list") || path.startsWith("/files/read")
+          ? { method: "GET" as const }
+          : path.startsWith("/terminal")
+            ? {
+                method: "POST" as const,
+                headers: {
+                  "Content-Type": "application/json",
+                  ...(init?.headers as Record<string, string> | undefined),
+                },
+                body: init?.body,
+              }
+            : {
+                method: init?.method ?? "GET",
+                headers: init?.headers,
+                signal: init?.signal,
+              };
+
+      return brainDelegateOrRuntime(this, taskId, workerPath, path, workerInit);
     }
 
-    const session =
-      this.activeSessions.get(taskId) ??
-      this.reviewSessions.get(taskId) ??
-      (await this.wakeSession(taskId));
-
+    const session = await resolveRuntimeSession(this, taskId);
     if (!session) {
-      const persisted = await this.taskStore.getSession(taskId);
-      if (!persisted) {
-        throw new Error("no devbox session for task");
-      }
-      const runtimeBaseUrl = persisted.runtimeBaseUrl;
-      return fetch(`${runtimeBaseUrl}${path}`, init);
+      throw new Error("no devbox session for task");
     }
 
     return fetch(`${session.runtimeBaseUrl}${path}`, init);

@@ -6,6 +6,7 @@ import {
 } from "../../devbox/recording-s3.js";
 import type { TaskService } from "./task-service.js";
 import { resolveLiveSession } from "./desktop-capture-render.js";
+import { brainDelegateOrRuntime } from "./resolve-session-proxy.js";
 import { delegateRequestToWorker, wakeSession } from "./session-lifecycle.js";
 
 export async function ensureDesktopComputer(
@@ -13,21 +14,22 @@ export async function ensureDesktopComputer(
   taskId: string,
 ): Promise<Response> {
   if (svc.mode === "brain") {
-    return delegateRequestToWorker(
+    return brainDelegateOrRuntime(
       svc,
+      taskId,
       `/api/v1/tasks/${encodeURIComponent(taskId)}/desktop/ensure`,
+      "/desktop/ensure",
       { method: "POST" },
     );
   }
-  const session =
-    (await resolveLiveSession(svc, taskId)) ?? (await wakeSession(svc, taskId));
+  const session = await resolveLiveSession(svc, taskId);
   if (!session) {
     return new Response(JSON.stringify({ error: "no devbox session" }), {
       status: 404,
       headers: { "Content-Type": "application/json" },
     });
   }
-  return svc.proxyRuntimeRequest(taskId, "/desktop/ensure", { method: "POST" });
+  return fetch(`${session.runtimeBaseUrl}/desktop/ensure`, { method: "POST" });
 }
 
 export async function proxyDesktopVNCPage(
@@ -35,18 +37,19 @@ export async function proxyDesktopVNCPage(
   taskId: string,
 ): Promise<Response> {
   if (svc.mode === "brain") {
-    return delegateRequestToWorker(
+    return brainDelegateOrRuntime(
       svc,
+      taskId,
       `/api/v1/tasks/${encodeURIComponent(taskId)}/desktop-vnc`,
+      "/desktop/vnc",
     );
   }
-  const session =
-    (await resolveLiveSession(svc, taskId)) ?? (await wakeSession(svc, taskId));
+  const session = await resolveLiveSession(svc, taskId);
   if (!session) {
     return new Response("No devbox session", { status: 404 });
   }
   await ensureDesktopComputer(svc, taskId);
-  return svc.proxyRuntimeRequest(taskId, "/desktop/vnc");
+  return fetch(`${session.runtimeBaseUrl}/desktop/vnc`);
 }
 
 export async function proxyRuntimeWebSocket(

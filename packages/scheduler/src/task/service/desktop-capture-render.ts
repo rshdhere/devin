@@ -27,6 +27,10 @@ import {
   hydrateSessionFromStore,
   wakeSession,
 } from "./session-lifecycle.js";
+import {
+  requestWorkerRehydrate,
+  resolveRuntimeSession,
+} from "./resolve-session-proxy.js";
 import { emit, patchTask } from "./task-state.js";
 
 const DESKTOP_CAPTURE_TIMEOUT_MS = 120_000;
@@ -275,28 +279,7 @@ export async function resolveLiveSession(
   svc: TaskService,
   taskId: string,
 ): Promise<ReviewSession | undefined> {
-  const inMemory =
-    svc.activeSessions.get(taskId) ?? svc.reviewSessions.get(taskId);
-  if (inMemory) {
-    return inMemory;
-  }
-
-  const woken = await wakeSession(svc, taskId);
-  if (woken) {
-    return woken;
-  }
-
-  const persisted = await svc.taskStore.getSession(taskId);
-  if (
-    persisted &&
-    (persisted.state === "review" ||
-      persisted.state === "active" ||
-      persisted.state === "sleeping")
-  ) {
-    return hydrateSessionFromStore(svc, taskId, persisted);
-  }
-
-  return undefined;
+  return resolveRuntimeSession(svc, taskId);
 }
 
 /** Start or rediscover the product dev server before live preview / capture. */
@@ -401,36 +384,50 @@ export async function proxyDevboxPreview(
     const warmQuery = opts?.warm ? "&warm=1" : "";
     const workerPath = `/api/v1/tasks/${encodeURIComponent(taskId)}/devbox-preview?path=${encodeURIComponent(previewPath)}${warmQuery}`;
     try {
-      const upstream = await delegateRequestToWorker(svc, workerPath, {
+      let upstream = await delegateRequestToWorker(svc, workerPath, {
         method: req.method === "HEAD" ? "HEAD" : "GET",
         headers: {
           Accept: "*/*",
           "Accept-Encoding": "identity",
         },
       });
-      res.status(upstream.status);
-      upstream.headers.forEach((value, key) => {
-        const lower = key.toLowerCase();
-        if (
-          lower === "transfer-encoding" ||
-          lower === "content-encoding" ||
-          lower === "content-length"
-        ) {
+      if (upstream.status === 404) {
+        await requestWorkerRehydrate(svc, taskId);
+        upstream = await delegateRequestToWorker(svc, workerPath, {
+          method: req.method === "HEAD" ? "HEAD" : "GET",
+          headers: {
+            Accept: "*/*",
+            "Accept-Encoding": "identity",
+          },
+        });
+      }
+      if (upstream.ok || upstream.status !== 404) {
+        res.status(upstream.status);
+        upstream.headers.forEach((value, key) => {
+          const lower = key.toLowerCase();
+          if (
+            lower === "transfer-encoding" ||
+            lower === "content-encoding" ||
+            lower === "content-length"
+          ) {
+            return;
+          }
+          res.setHeader(key, value);
+        });
+        if (req.method === "HEAD") {
+          res.end();
           return;
         }
-        res.setHeader(key, value);
-      });
-      if (req.method === "HEAD") {
-        res.end();
+        const body = await upstream.arrayBuffer();
+        res.end(Buffer.from(body));
         return;
       }
-      const body = await upstream.arrayBuffer();
-      res.end(Buffer.from(body));
-    } catch (error) {
-      if (!res.headersSent) {
-        res.writeHead(502, { "Content-Type": "text/plain" });
-      }
-      res.end(error instanceof Error ? error.message : "devbox preview failed");
+    } catch {
+      // Worker unreachable after rehydrate attempt.
+    }
+    if (!res.headersSent) {
+      res.writeHead(404, { "Content-Type": "text/plain" });
+      res.end("No live devbox session");
     }
     return;
   }

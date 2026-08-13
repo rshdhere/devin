@@ -24,6 +24,7 @@ import {
   resolveLiveSession,
 } from "./desktop-capture-render.js";
 import { delegateRequestToWorker, wakeSession } from "./session-lifecycle.js";
+import { requestWorkerRehydrate } from "./resolve-session-proxy.js";
 import { emit, patchTask } from "./task-state.js";
 
 export async function fetchDesktopScreenshot(
@@ -33,10 +34,25 @@ export async function fetchDesktopScreenshot(
 ): Promise<Response> {
   if (svc.mode === "brain") {
     const freshQuery = opts?.fresh ? "?fresh=1" : "";
-    return delegateRequestToWorker(
-      svc,
-      `/api/v1/tasks/${encodeURIComponent(taskId)}/desktop-screenshot${freshQuery}`,
-    );
+    try {
+      let upstream = await delegateRequestToWorker(
+        svc,
+        `/api/v1/tasks/${encodeURIComponent(taskId)}/desktop-screenshot${freshQuery}`,
+      );
+      if (upstream.status === 404) {
+        await requestWorkerRehydrate(svc, taskId);
+        upstream = await delegateRequestToWorker(
+          svc,
+          `/api/v1/tasks/${encodeURIComponent(taskId)}/desktop-screenshot${freshQuery}`,
+        );
+      }
+      if (upstream.ok || upstream.status !== 404) {
+        return upstream;
+      }
+    } catch {
+      // Worker unreachable after rehydrate attempt.
+    }
+    return new Response("No devbox session", { status: 404 });
   }
 
   const cached = opts?.fresh
