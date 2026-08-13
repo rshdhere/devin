@@ -10,7 +10,9 @@ on:
 
 concurrency:
   group: registry-${{ github.ref }}
-  cancel-in-progress: true
+  # Only cancel superseded pushes; workflow_dispatch must not cancel an in-flight push
+  # (and vice versa) or images build but GitOps never bumps and commit checks stay red.
+  cancel-in-progress: ${{ github.event_name == 'push' }}
 
 permissions:
   contents: read
@@ -178,7 +180,7 @@ jobs:
 
   bump-gitops:
     needs: build
-    if: github.event_name == 'push'
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     permissions:
       contents: write
