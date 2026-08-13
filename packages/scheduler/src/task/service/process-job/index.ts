@@ -56,6 +56,7 @@ export async function processJob(
 
   if (
     !job.skipDraft &&
+    !job.forceSandboxRecreate &&
     (task.status === "sandbox_starting" || task.status === "runtime_ready")
   ) {
     return;
@@ -103,6 +104,7 @@ export async function processJob(
       );
       const retryJob: ScheduleJob = {
         ...job,
+        skipDraft: true,
         forceSandboxRecreate: true,
         enqueuedAt: new Date().toISOString(),
       };
