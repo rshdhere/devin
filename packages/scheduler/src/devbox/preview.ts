@@ -1,7 +1,7 @@
 /** Well-known app ports probed before arbitrary listeners. */
 export const COMMON_DEVBOX_PORTS = [
-  3000, 8000, 5173, 8080, 5000, 4173, 3001, 3002, 4200, 9000, 8888, 1313, 4321,
-  24678,
+  3000, 3456, 8000, 5173, 8080, 5000, 4173, 3001, 3002, 4200, 9000, 8888, 1313,
+  4321, 24678,
 ] as const;
 
 /** Runtime supervisor port — must never be treated as the product app. */
@@ -92,6 +92,7 @@ export function buildSnapshotSmokeStartScript(): string {
   return [
     "set +e",
     "mkdir -p /workspace/.home",
+    "if [ -f .env ]; then set -a; . ./.env 2>/dev/null || true; set +a; fi",
     "PIDFILE=/workspace/.home/devin-snapshot-server.pid",
     "LOG=/workspace/.home/devin-snapshot-server.log",
     'if [ -f "$PIDFILE" ]; then',

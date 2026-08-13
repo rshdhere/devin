@@ -1,11 +1,28 @@
+import { RuntimeClient } from "@devin/agent-sdk";
 import {
   delegateRequestToWorker,
   hydrateSessionFromStore,
+  isWorkerDelegateTimeout,
   wakeSession,
+  WORKER_DELEGATE_PREVIEW_TIMEOUT_MS,
+  WORKER_DELEGATE_REHYDRATE_TIMEOUT_MS,
+  WORKER_DELEGATE_SCREENSHOT_TIMEOUT_MS,
+  WORKER_DELEGATE_TIMEOUT_MS,
+  type WorkerDelegateOptions,
 } from "./session-lifecycle.js";
 import { hydrateSessionFromOrchestrator } from "./orchestrator-session.js";
+import { persistSession } from "./persistence.js";
+import { ensurePendingJob } from "./resolve-task.js";
+import { patchTask } from "./task-state.js";
 import type { TaskService } from "./task-service.js";
 import type { ReviewSession } from "./types.js";
+
+export type RehydrateWorkerResult = {
+  ok: boolean;
+  runtimeBaseUrl?: string;
+  sandboxName?: string;
+  previewPort?: number;
+};
 
 /**
  * Resolve a live devbox session for UI proxy routes (preview, files, desktop).
@@ -59,23 +76,108 @@ export async function resolveRuntimeSession(
   return undefined;
 }
 
+async function persistBrainSessionFromRehydrate(
+  svc: TaskService,
+  taskId: string,
+  body: RehydrateWorkerResult,
+): Promise<void> {
+  if (svc.mode !== "brain" || !body.runtimeBaseUrl || !body.sandboxName) {
+    return;
+  }
+
+  const task = svc.tasks.get(taskId) ?? (await svc.taskStore.getTask(taskId));
+  if (!task) {
+    return;
+  }
+
+  const persisted = await svc.taskStore.getSession(taskId);
+  const job = persisted?.job ?? (await ensurePendingJob(svc, taskId));
+  if (!job) {
+    return;
+  }
+
+  const runtime = new RuntimeClient({ baseUrl: body.runtimeBaseUrl });
+  const session: ReviewSession = {
+    runtime,
+    sandboxName: body.sandboxName,
+    runtimeBaseUrl: body.runtimeBaseUrl,
+    repoCwd: persisted?.repoCwd ?? "repo",
+    job,
+    githubToken: persisted?.githubToken ?? job.githubToken,
+    createdNewRepo: persisted?.createdNewRepo ?? false,
+    guestHost: persisted?.guestHost,
+    devboxPreviewPort: body.previewPort ?? persisted?.previewPort,
+  };
+
+  const state =
+    persisted?.state === "review" || persisted?.state === "sleeping"
+      ? persisted.state
+      : "active";
+
+  if (state === "review") {
+    svc.reviewSessions.set(taskId, session);
+  } else {
+    svc.activeSessions.set(taskId, session);
+  }
+
+  task.sessionActive = true;
+  task.sandboxName = body.sandboxName;
+  svc.tasks.set(taskId, task);
+  void svc.taskStore.upsertTask(task);
+  void persistSession(svc, taskId, session, state);
+  patchTask(svc, taskId, {
+    sessionActive: true,
+    sandboxName: body.sandboxName,
+  });
+}
+
 export async function requestWorkerRehydrate(
   svc: TaskService,
   taskId: string,
-): Promise<boolean> {
+): Promise<RehydrateWorkerResult> {
   if (!svc.executionWorkerUrl?.trim()) {
-    return false;
+    return { ok: false };
   }
   try {
     const upstream = await delegateRequestToWorker(
       svc,
       `/api/v1/tasks/${encodeURIComponent(taskId)}/rehydrate`,
       { method: "POST" },
+      { timeoutMs: WORKER_DELEGATE_REHYDRATE_TIMEOUT_MS },
     );
-    return upstream.ok;
+    if (!upstream.ok) {
+      return { ok: false };
+    }
+    const body = (await upstream.json().catch(() => ({}))) as {
+      runtimeBaseUrl?: string;
+      sandboxName?: string;
+      previewPort?: number;
+    };
+    const result: RehydrateWorkerResult = {
+      ok: true,
+      runtimeBaseUrl: body.runtimeBaseUrl,
+      sandboxName: body.sandboxName,
+      previewPort:
+        typeof body.previewPort === "number" ? body.previewPort : undefined,
+    };
+    await persistBrainSessionFromRehydrate(svc, taskId, result);
+    return result;
   } catch {
-    return false;
+    return { ok: false };
   }
+}
+
+export function workerPathTimeoutMs(path: string): number {
+  if (path.includes("/rehydrate")) {
+    return WORKER_DELEGATE_REHYDRATE_TIMEOUT_MS;
+  }
+  if (path.includes("/devbox-preview")) {
+    return WORKER_DELEGATE_PREVIEW_TIMEOUT_MS;
+  }
+  if (path.includes("/desktop-screenshot")) {
+    return WORKER_DELEGATE_SCREENSHOT_TIMEOUT_MS;
+  }
+  return WORKER_DELEGATE_TIMEOUT_MS;
 }
 
 export async function brainDelegateOrRuntime(
@@ -84,19 +186,30 @@ export async function brainDelegateOrRuntime(
   workerPath: string,
   _runtimePath: string,
   init?: RequestInit,
+  options?: WorkerDelegateOptions,
 ): Promise<Response> {
+  const timeoutMs = options?.timeoutMs ?? workerPathTimeoutMs(workerPath);
+
   if (svc.executionWorkerUrl?.trim()) {
     try {
-      let upstream = await delegateRequestToWorker(svc, workerPath, init);
+      let upstream = await delegateRequestToWorker(svc, workerPath, init, {
+        timeoutMs,
+      });
       if (upstream.status === 404) {
-        await requestWorkerRehydrate(svc, taskId);
-        upstream = await delegateRequestToWorker(svc, workerPath, init);
+        const rehydrated = await requestWorkerRehydrate(svc, taskId);
+        if (rehydrated.ok) {
+          upstream = await delegateRequestToWorker(svc, workerPath, init, {
+            timeoutMs,
+          });
+        }
       }
       if (upstream.ok || upstream.status !== 404) {
         return upstream;
       }
-    } catch {
-      // Fall through — worker unreachable.
+    } catch (error) {
+      if (isWorkerDelegateTimeout(error)) {
+        return new Response("Devbox warming — retry shortly", { status: 504 });
+      }
     }
   }
 

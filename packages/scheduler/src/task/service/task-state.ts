@@ -43,6 +43,29 @@ export function patchTask(
   void svc.taskStore.upsertTask(task);
 }
 
+export async function nextEventSequenceFromStore(
+  svc: TaskService,
+  taskId: string,
+): Promise<number> {
+  if (svc.mode === "brain" && svc.taskStore.isEnabled()) {
+    const max = await svc.taskStore.maxEventSequence(taskId);
+    const memory = svc.eventSequences.get(taskId) ?? 0;
+    const next = Math.max(max, memory) + 1;
+    svc.eventSequences.set(taskId, next);
+    return next;
+  }
+  return nextEventSequence(svc, taskId);
+}
+
+function publishEvent(
+  svc: TaskService,
+  event: TaskEvent,
+  sequence: number,
+): void {
+  svc.eventBus.publish(event);
+  void svc.taskStore.appendEvent(event, sequence).catch(() => undefined);
+}
+
 export function emit(
   svc: TaskService,
   type: TaskEventType,
@@ -50,21 +73,22 @@ export function emit(
   message: string,
   data?: Record<string, unknown>,
 ): void {
-  const sequence = nextEventSequence(svc, taskId);
-  const event: TaskEvent = {
-    id: crypto.randomUUID(),
-    taskId,
-    type,
-    message,
-    timestamp: new Date().toISOString(),
-    data: {
-      source: "scheduler",
-      sequence,
-      ...(data ?? {}),
-    },
-  };
-  svc.eventBus.publish(event);
-  void svc.taskStore.appendEvent(event, sequence);
+  void (async () => {
+    const sequence = await nextEventSequenceFromStore(svc, taskId);
+    const event: TaskEvent = {
+      id: crypto.randomUUID(),
+      taskId,
+      type,
+      message,
+      timestamp: new Date().toISOString(),
+      data: {
+        source: "scheduler",
+        sequence,
+        ...(data ?? {}),
+      },
+    };
+    publishEvent(svc, event, sequence);
+  })();
 }
 
 export function emitRuntime(
@@ -74,21 +98,22 @@ export function emitRuntime(
   message: string,
   data?: Record<string, unknown>,
 ): void {
-  const sequence = nextEventSequence(svc, taskId);
-  const event: TaskEvent = {
-    id: crypto.randomUUID(),
-    taskId,
-    type,
-    message,
-    timestamp: new Date().toISOString(),
-    data: {
-      source: "runtime",
-      sequence,
-      ...(data ?? {}),
-    },
-  };
-  svc.eventBus.publish(event);
-  void svc.taskStore.appendEvent(event, sequence);
+  void (async () => {
+    const sequence = await nextEventSequenceFromStore(svc, taskId);
+    const event: TaskEvent = {
+      id: crypto.randomUUID(),
+      taskId,
+      type,
+      message,
+      timestamp: new Date().toISOString(),
+      data: {
+        source: "runtime",
+        sequence,
+        ...(data ?? {}),
+      },
+    };
+    publishEvent(svc, event, sequence);
+  })();
 }
 
 export function nextEventSequence(svc: TaskService, taskId: string): number {

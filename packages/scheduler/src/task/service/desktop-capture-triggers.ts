@@ -1,6 +1,7 @@
 import type { TaskService } from "./task-service.js";
 import type { ReviewSession } from "./types.js";
 import { captureDesktopScreenshotWithDevServer } from "./desktop-capture-render.js";
+import { navigateDesktopBrowserForTask } from "./desktop-navigate.js";
 import { patchTask } from "./task-state.js";
 
 export function maybeTriggerDesktopSnapshotFromRuntime(
@@ -59,6 +60,7 @@ export function maybeRememberPreviewPortFromText(
   void svc.taskStore.setPreviewPort(taskId, port);
   const previewPath = `/api/v1/tasks/${encodeURIComponent(taskId)}/devbox-preview?path=/`;
   svc.patchTask(taskId, { previewUrl: previewPath });
+  void navigateDesktopBrowserForTask(svc, taskId, port);
 }
 
 export async function triggerDesktopSnapshot(

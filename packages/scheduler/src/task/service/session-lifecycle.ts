@@ -379,7 +379,21 @@ export async function sleepIdleSession(
   });
 }
 
-const WORKER_DELEGATE_TIMEOUT_MS = 30_000;
+export const WORKER_DELEGATE_TIMEOUT_MS = 30_000;
+export const WORKER_DELEGATE_PREVIEW_TIMEOUT_MS = 180_000;
+export const WORKER_DELEGATE_SCREENSHOT_TIMEOUT_MS = 180_000;
+export const WORKER_DELEGATE_REHYDRATE_TIMEOUT_MS = 60_000;
+
+export type WorkerDelegateOptions = {
+  timeoutMs?: number;
+};
+
+export function isWorkerDelegateTimeout(error: unknown): boolean {
+  return (
+    error instanceof Error &&
+    (error.name === "TimeoutError" || error.name === "AbortError")
+  );
+}
 
 export async function delegateJobToWorker(
   svc: TaskService,
@@ -420,14 +434,16 @@ export async function delegateRequestToWorker(
   svc: TaskService,
   path: string,
   init?: RequestInit,
+  options?: WorkerDelegateOptions,
 ): Promise<Response> {
   if (!svc.executionWorkerUrl) {
     throw new Error("EXECUTION_WORKER_URL is required when SERVICE_MODE=brain");
   }
+  const timeoutMs = options?.timeoutMs ?? WORKER_DELEGATE_TIMEOUT_MS;
   const signal =
     init?.signal ??
     (typeof AbortSignal.timeout === "function"
-      ? AbortSignal.timeout(WORKER_DELEGATE_TIMEOUT_MS)
+      ? AbortSignal.timeout(timeoutMs)
       : undefined);
   return fetch(`${svc.executionWorkerUrl.replace(/\/$/, "")}${path}`, {
     ...init,

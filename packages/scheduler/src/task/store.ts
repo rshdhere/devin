@@ -91,15 +91,18 @@ export class TaskStore {
       return;
     }
 
-    await db.insert(agentTaskEvents).values({
-      id: event.id,
-      taskId: event.taskId,
-      type: event.type,
-      message: event.message,
-      data: event.data ?? null,
-      sequence,
-      timestamp: new Date(event.timestamp),
-    });
+    await db
+      .insert(agentTaskEvents)
+      .values({
+        id: event.id,
+        taskId: event.taskId,
+        type: event.type,
+        message: event.message,
+        data: event.data ?? null,
+        sequence,
+        timestamp: new Date(event.timestamp),
+      })
+      .onConflictDoNothing({ target: agentTaskEvents.id });
   }
 
   async upsertSession(session: PersistedSession): Promise<void> {

@@ -39,8 +39,12 @@ export function SessionDesktopPanel({
   const screenshotSrc = tasksApiUrl(
     `/${encodeURIComponent(task.id)}/desktop-screenshot`,
   );
-  const livePreviewSrc = tasksApiUrl(
-    `/${encodeURIComponent(task.id)}/devbox-preview?path=/&warm=1`,
+  const livePreviewBase = tasksApiUrl(
+    `/${encodeURIComponent(task.id)}/devbox-preview?path=/`,
+  );
+  const buildLivePreviewSrc = useCallback(
+    (warm: boolean) => `${livePreviewBase}${warm ? "&warm=1" : ""}`,
+    [livePreviewBase],
   );
   const interactiveSrc = tasksApiUrl(
     `/${encodeURIComponent(task.id)}/desktop-vnc`,
@@ -64,6 +68,9 @@ export function SessionDesktopPanel({
   const freshRetryCountRef = useRef(0);
   const freshRetryTimerRef = useRef<number | null>(null);
   const captureExhaustedRef = useRef(false);
+  const previewFailCountRef = useRef(0);
+  const previewBackoffUntilRef = useRef(0);
+  const [livePreviewError, setLivePreviewError] = useState<string | null>(null);
   const [recordingUrl, setRecordingUrl] = useState<string | null>(null);
   const [recordingError, setRecordingError] = useState(false);
   const [interactiveReady, setInteractiveReady] = useState(false);
@@ -87,35 +94,69 @@ export function SessionDesktopPanel({
     }
   }, []);
 
-  const probeLivePreview = useCallback(async () => {
-    if (!canUse) {
-      setLiveReachable(false);
-      return false;
-    }
-    setLiveWarming(true);
-    try {
-      const response = await fetch(livePreviewSrc, {
-        method: "GET",
-        credentials: "include",
-        signal: AbortSignal.timeout(120_000),
-      });
-      const reachable =
-        response.ok &&
-        !/404 page not found/i.test(
-          (await response.clone().text()).slice(0, 80),
-        );
-      setLiveReachable(reachable);
-      if (reachable && layout === "panel") {
-        setView("live");
+  const probeLivePreview = useCallback(
+    async (warm = false) => {
+      if (!canUse) {
+        setLiveReachable(false);
+        return false;
       }
-      return reachable;
-    } catch {
-      setLiveReachable(false);
-      return false;
-    } finally {
-      setLiveWarming(false);
-    }
-  }, [canUse, layout, livePreviewSrc]);
+      if (Date.now() < previewBackoffUntilRef.current) {
+        return false;
+      }
+      setLiveWarming(true);
+      setLivePreviewError(null);
+      try {
+        const response = await fetch(buildLivePreviewSrc(warm), {
+          method: "GET",
+          credentials: "include",
+          signal: AbortSignal.timeout(120_000),
+        });
+        if (response.status === 504) {
+          setLiveReachable(false);
+          return false;
+        }
+        if (response.status === 404) {
+          const body = (await response.clone().text()).slice(0, 200);
+          if (/no live devbox session/i.test(body)) {
+            previewFailCountRef.current += 1;
+            const delays = [30_000, 60_000, 120_000];
+            const delay =
+              delays[
+                Math.min(previewFailCountRef.current - 1, delays.length - 1)
+              ] ?? 120_000;
+            previewBackoffUntilRef.current = Date.now() + delay;
+            if (previewFailCountRef.current >= 3) {
+              setLivePreviewError(
+                "Worker lost devbox session — refresh or start a new task.",
+              );
+            }
+          }
+          setLiveReachable(false);
+          return false;
+        }
+        const reachable =
+          response.ok &&
+          !/404 page not found/i.test(
+            (await response.clone().text()).slice(0, 80),
+          );
+        if (reachable) {
+          previewFailCountRef.current = 0;
+          previewBackoffUntilRef.current = 0;
+        }
+        setLiveReachable(reachable);
+        if (reachable && layout === "panel") {
+          setView("live");
+        }
+        return reachable;
+      } catch {
+        setLiveReachable(false);
+        return false;
+      } finally {
+        setLiveWarming(false);
+      }
+    },
+    [buildLivePreviewSrc, canUse, layout],
+  );
 
   const loadRecording = useCallback(async () => {
     if (!canUse) {
@@ -237,7 +278,7 @@ export function SessionDesktopPanel({
         captureExhaustedRef.current = false;
         clearFreshRetryTimer();
         setRetryPending(false);
-        void probeLivePreview();
+        void probeLivePreview(false);
       } catch (error) {
         if (!shotUrlRef.current) {
           const captureExpected =
@@ -306,8 +347,11 @@ export function SessionDesktopPanel({
       freshRetryCountRef.current = 0;
       captureExhaustedRef.current = false;
       clearFreshRetryTimer();
+      previewFailCountRef.current = 0;
+      previewBackoffUntilRef.current = 0;
+      setLivePreviewError(null);
       void loadScreenshot(fresh);
-      void probeLivePreview();
+      void probeLivePreview(true);
     },
     [clearFreshRetryTimer, loadScreenshot, probeLivePreview],
   );
@@ -322,7 +366,7 @@ export function SessionDesktopPanel({
           void loadScreenshot(true);
         }
       });
-      void probeLivePreview();
+      void probeLivePreview(false);
     }
   }, [
     externalRefreshKey,
@@ -338,7 +382,7 @@ export function SessionDesktopPanel({
     autoFreshDoneRef.current = false;
     freshRetryCountRef.current = 0;
     captureExhaustedRef.current = false;
-    void probeLivePreview();
+    void probeLivePreview(false);
     void loadScreenshot(false).then(() => {
       if (
         !autoFreshDoneRef.current &&
@@ -361,7 +405,7 @@ export function SessionDesktopPanel({
           return;
         }
         void loadScreenshot(false);
-        void probeLivePreview();
+        void probeLivePreview(false);
       },
       isAgentActive ? 8_000 : 20_000,
     );
@@ -381,8 +425,11 @@ export function SessionDesktopPanel({
   }, [layout, liveReachable, view]);
 
   const openLivePreview = useCallback(async () => {
+    previewFailCountRef.current = 0;
+    previewBackoffUntilRef.current = 0;
+    setLivePreviewError(null);
     setView("live");
-    const ok = await probeLivePreview();
+    const ok = await probeLivePreview(true);
     if (!ok) {
       setView("snapshot");
       refreshScreenshot(true);
@@ -551,8 +598,8 @@ export function SessionDesktopPanel({
           )
         ) : showLive ? (
           <iframe
-            key={livePreviewSrc}
-            src={livePreviewSrc}
+            key={`${task.id}-live-preview`}
+            src={buildLivePreviewSrc(true)}
             title="Live app preview"
             className="h-full w-full border-0 bg-white"
             sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals"
@@ -575,6 +622,11 @@ export function SessionDesktopPanel({
                     : "Capturing desktop preview…"}
                 </p>
               </div>
+            ) : null}
+            {livePreviewError ? (
+              <p className="max-w-sm text-center text-[12px] text-amber-600/90">
+                {livePreviewError}
+              </p>
             ) : null}
             {retryPending && !shotUrl && !shotLoading ? (
               <p className="max-w-sm text-center text-[12px] text-zinc-500">

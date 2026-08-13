@@ -23,7 +23,11 @@ import {
   captureDesktopScreenshotWithDevServer,
   resolveLiveSession,
 } from "./desktop-capture-render.js";
-import { delegateRequestToWorker, wakeSession } from "./session-lifecycle.js";
+import {
+  delegateRequestToWorker,
+  wakeSession,
+  WORKER_DELEGATE_SCREENSHOT_TIMEOUT_MS,
+} from "./session-lifecycle.js";
 import { requestWorkerRehydrate } from "./resolve-session-proxy.js";
 import { emit, patchTask } from "./task-state.js";
 
@@ -38,13 +42,19 @@ export async function fetchDesktopScreenshot(
       let upstream = await delegateRequestToWorker(
         svc,
         `/api/v1/tasks/${encodeURIComponent(taskId)}/desktop-screenshot${freshQuery}`,
+        undefined,
+        { timeoutMs: WORKER_DELEGATE_SCREENSHOT_TIMEOUT_MS },
       );
       if (upstream.status === 404) {
-        await requestWorkerRehydrate(svc, taskId);
-        upstream = await delegateRequestToWorker(
-          svc,
-          `/api/v1/tasks/${encodeURIComponent(taskId)}/desktop-screenshot${freshQuery}`,
-        );
+        const rehydrated = await requestWorkerRehydrate(svc, taskId);
+        if (rehydrated.ok) {
+          upstream = await delegateRequestToWorker(
+            svc,
+            `/api/v1/tasks/${encodeURIComponent(taskId)}/desktop-screenshot${freshQuery}`,
+            undefined,
+            { timeoutMs: WORKER_DELEGATE_SCREENSHOT_TIMEOUT_MS },
+          );
+        }
       }
       if (upstream.ok || upstream.status !== 404) {
         return upstream;

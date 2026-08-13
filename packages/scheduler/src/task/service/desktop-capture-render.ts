@@ -25,12 +25,15 @@ import {
 import {
   delegateRequestToWorker,
   hydrateSessionFromStore,
+  isWorkerDelegateTimeout,
   wakeSession,
+  WORKER_DELEGATE_PREVIEW_TIMEOUT_MS,
 } from "./session-lifecycle.js";
 import {
   requestWorkerRehydrate,
   resolveRuntimeSession,
 } from "./resolve-session-proxy.js";
+import { navigateDesktopBrowserToPort } from "./desktop-navigate.js";
 import { emit, patchTask } from "./task-state.js";
 
 const DESKTOP_CAPTURE_TIMEOUT_MS = 120_000;
@@ -328,6 +331,7 @@ export async function ensureDevboxAppForPreview(
       port,
       desktop: true,
     });
+    void navigateDesktopBrowserToPort(svc, session, taskId, port);
     return port;
   }
 
@@ -384,22 +388,34 @@ export async function proxyDevboxPreview(
     const warmQuery = opts?.warm ? "&warm=1" : "";
     const workerPath = `/api/v1/tasks/${encodeURIComponent(taskId)}/devbox-preview?path=${encodeURIComponent(previewPath)}${warmQuery}`;
     try {
-      let upstream = await delegateRequestToWorker(svc, workerPath, {
-        method: req.method === "HEAD" ? "HEAD" : "GET",
-        headers: {
-          Accept: "*/*",
-          "Accept-Encoding": "identity",
-        },
-      });
-      if (upstream.status === 404) {
-        await requestWorkerRehydrate(svc, taskId);
-        upstream = await delegateRequestToWorker(svc, workerPath, {
+      let upstream = await delegateRequestToWorker(
+        svc,
+        workerPath,
+        {
           method: req.method === "HEAD" ? "HEAD" : "GET",
           headers: {
             Accept: "*/*",
             "Accept-Encoding": "identity",
           },
-        });
+        },
+        { timeoutMs: WORKER_DELEGATE_PREVIEW_TIMEOUT_MS },
+      );
+      if (upstream.status === 404) {
+        const rehydrated = await requestWorkerRehydrate(svc, taskId);
+        if (rehydrated.ok) {
+          upstream = await delegateRequestToWorker(
+            svc,
+            workerPath,
+            {
+              method: req.method === "HEAD" ? "HEAD" : "GET",
+              headers: {
+                Accept: "*/*",
+                "Accept-Encoding": "identity",
+              },
+            },
+            { timeoutMs: WORKER_DELEGATE_PREVIEW_TIMEOUT_MS },
+          );
+        }
       }
       if (upstream.ok || upstream.status !== 404) {
         res.status(upstream.status);
@@ -422,8 +438,14 @@ export async function proxyDevboxPreview(
         res.end(Buffer.from(body));
         return;
       }
-    } catch {
-      // Worker unreachable after rehydrate attempt.
+    } catch (error) {
+      if (isWorkerDelegateTimeout(error)) {
+        if (!res.headersSent) {
+          res.writeHead(504, { "Content-Type": "text/plain" });
+          res.end("Devbox warming — retry shortly");
+        }
+        return;
+      }
     }
     if (!res.headersSent) {
       res.writeHead(404, { "Content-Type": "text/plain" });

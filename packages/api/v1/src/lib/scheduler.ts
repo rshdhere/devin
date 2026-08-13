@@ -198,6 +198,8 @@ export async function fetchDesktopScreenshot(
   const freshQuery = opts?.fresh ? "?fresh=1" : "";
   return proxyScheduler(
     `/api/v1/tasks/${encodeURIComponent(id)}/desktop-screenshot${freshQuery}`,
+    undefined,
+    { timeoutMs: null },
   );
 }
 

@@ -87,7 +87,11 @@ async function ingestWorkerEvents(
     }
 
     const sequence = (await svc.getTaskStore().maxEventSequence(taskId)) + 1;
-    await svc.getTaskStore().appendEvent(event, sequence);
+    try {
+      await svc.getTaskStore().appendEvent(event, sequence);
+    } catch {
+      continue;
+    }
     const currentMax = svc.eventSequences.get(taskId) ?? 0;
     if (sequence > currentMax) {
       svc.eventSequences.set(taskId, sequence);
@@ -116,7 +120,7 @@ export async function syncTaskFromWorker(
   if (!worker) {
     if (ACTIVE_ON_BRAIN.has(brain.status) || brain.sessionActive) {
       const rehydrated = await requestWorkerRehydrate(svc, taskId);
-      if (!rehydrated) {
+      if (!rehydrated.ok) {
         const sandboxName = brain.sandboxName ?? `sbx-${taskId.slice(0, 8)}`;
         const sandbox = await fetchSandbox(svc, sandboxName);
         if (sandbox?.status?.phase !== "Running") {

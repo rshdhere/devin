@@ -63,8 +63,15 @@ export function createTaskRouter(tasks: TaskService): Router {
 
   router.get("/:id", async (req, res) => {
     const taskId = req.params.id;
+    let synced: Awaited<ReturnType<typeof tasks.syncTaskFromWorker>>;
+    try {
+      synced = await tasks.syncTaskFromWorker(taskId);
+    } catch (error) {
+      console.error("syncTaskFromWorker failed", { taskId, error });
+      synced = undefined;
+    }
     const task =
-      (await tasks.syncTaskFromWorker(taskId)) ??
+      synced ??
       (await tasks.syncTaskFromStore(taskId)) ??
       tasks.getTask(taskId) ??
       (await tasks.getTaskStore().getTask(taskId));
@@ -100,7 +107,11 @@ export function createTaskRouter(tasks: TaskService): Router {
       return;
     }
 
-    await tasks.syncTaskFromWorker(taskId);
+    try {
+      await tasks.syncTaskFromWorker(taskId);
+    } catch (error) {
+      console.error("syncTaskFromWorker failed", { taskId, error });
+    }
 
     const memoryHistory = tasks.getEventHistory(taskId);
     const history = tasks.getTaskStore().isEnabled()
@@ -177,6 +188,7 @@ export function createTaskRouter(tasks: TaskService): Router {
         ok: true,
         runtimeBaseUrl: session.runtimeBaseUrl,
         sandboxName: session.sandboxName,
+        previewPort: session.devboxPreviewPort,
       });
     } catch (error) {
       sendError(res, 500, error, "rehydrate failed");

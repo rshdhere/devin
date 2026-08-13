@@ -2,6 +2,7 @@ package supervisor
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net"
 	"net/http"
@@ -99,6 +100,71 @@ func (s *Server) desktopStatusLocked() desktopStatus {
 
 func (s *Server) handleDesktopStatus(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, s.desktopStatusLocked())
+}
+
+func (s *Server) navigateCDPBrowser(ctx context.Context, targetURL string) error {
+	if !portOpen(cdpDebugPort) {
+		if err := s.ensureDesktopComputer(ctx); err != nil {
+			return err
+		}
+	}
+	home := desktopHome(s.workspace)
+	scriptPath := filepath.Join(home, "desktop-cdp-navigate.mjs")
+	scriptBody := fmt.Sprintf(
+		`import { chromium } from 'playwright-core';
+const url = %s;
+const cdp = 'http://127.0.0.1:%d';
+const browser = await chromium.connectOverCDP(cdp);
+const context = browser.contexts()[0] ?? await browser.newContext({ viewport: { width: %d, height: %d } });
+const page = context.pages()[0] ?? await context.newPage();
+await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 15000 });
+await page.waitForTimeout(800);
+`,
+		jsonString(targetURL),
+		cdpDebugPort,
+		desktopWidth,
+		desktopHeight,
+	)
+	if err := os.WriteFile(scriptPath, []byte(scriptBody), 0o644); err != nil {
+		return err
+	}
+	env := displayEnv(s.workspace)
+	env = append(env, "NODE_PATH=/usr/local/lib/node_modules")
+	result, err := executil.RunGuest(
+		ctx,
+		s.workspace,
+		fmt.Sprintf("node %s", shellQuote(scriptPath)),
+		env,
+		nil,
+	)
+	if err != nil {
+		return err
+	}
+	if result.ExitCode != 0 {
+		return fmt.Errorf("%s", executil.CombinedOutput(result))
+	}
+	return nil
+}
+
+func (s *Server) handleDesktopNavigate(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "POST required")
+		return
+	}
+	var body struct {
+		URL string `json:"url"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || strings.TrimSpace(body.URL) == "" {
+		writeError(w, http.StatusBadRequest, "url is required")
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
+	if err := s.navigateCDPBrowser(ctx, strings.TrimSpace(body.URL)); err != nil {
+		writeError(w, http.StatusServiceUnavailable, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
 func (s *Server) handleDesktopEnsure(w http.ResponseWriter, r *http.Request) {

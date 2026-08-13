@@ -6,6 +6,7 @@ import {
 } from "../../devbox/recording-s3.js";
 import type { TaskService } from "./task-service.js";
 import { resolveLiveSession } from "./desktop-capture-render.js";
+import { navigateDesktopBrowserToPort } from "./desktop-navigate.js";
 import { brainDelegateOrRuntime } from "./resolve-session-proxy.js";
 import { delegateRequestToWorker, wakeSession } from "./session-lifecycle.js";
 
@@ -104,6 +105,10 @@ export async function startSessionRecording(
     });
   }
   await ensureDesktopComputer(svc, taskId);
+  const port = session.devboxPreviewPort;
+  if (port) {
+    await navigateDesktopBrowserToPort(svc, session, taskId, port);
+  }
   return svc.proxyRuntimeRequest(taskId, "/desktop/recording/start", {
     method: "POST",
   });
