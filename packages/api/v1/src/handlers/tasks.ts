@@ -93,7 +93,8 @@ tasksRouter.post("/", async (req, res) => {
     const createRepository = parsed.data.createRepository;
     const autoCreateRepository = parsed.data.autoCreateRepository;
     const userToken = await getGitHubAccessToken(userId);
-    const githubToken = userToken ?? undefined;
+    const githubToken =
+      userToken?.trim() || process.env.GITHUB_BOT_TOKEN?.trim() || undefined;
 
     const response = await createTask({
       prompt: parsed.data.prompt,

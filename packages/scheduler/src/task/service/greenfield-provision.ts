@@ -12,7 +12,10 @@ import {
   generateDraftPlan,
   type DraftPlan,
 } from "../../greenfield/draft-planner.js";
-import { generateProjectMetadata } from "../../greenfield/project-metadata.js";
+import {
+  generateProjectMetadata,
+  titleFromRepoSlug,
+} from "../../greenfield/project-metadata.js";
 import { scaffoldFilesFromDraft } from "../../greenfield/scaffold-from-draft.js";
 import { greenfieldShellScaffoldFiles } from "../../greenfield/shell-scaffold.js";
 import type { ScheduleJob, Task } from "../types.js";
@@ -21,12 +24,41 @@ import {
   buildCommitMessage,
   escapeShell,
   isNetworkCloneFailure,
+  resolveBotToken,
   resolveStackRuntime,
   sleep,
 } from "./config.js";
 import { configureSandboxGit } from "./git-operations.js";
 import { ensureSandboxDns } from "./sandbox-lifecycle.js";
 import { emit } from "./task-state.js";
+
+function resolveRepositoryCreateToken(job: ScheduleJob): string {
+  const token = job.githubToken?.trim() || resolveBotToken();
+  if (!token) {
+    throw new Error(
+      "GitHub is not connected and no repository bot token is configured",
+    );
+  }
+  return token;
+}
+
+function applyCreatedGreenfieldRepository(
+  svc: TaskService,
+  task: Task,
+  job: ScheduleJob,
+  created: { fullName: string; name: string },
+  githubToken: string,
+): string {
+  const repository = created.fullName;
+  task.title = created.name;
+  task.repository = repository;
+  task.updatedAt = new Date().toISOString();
+  job.repository = repository;
+  job.cloneUrl = authenticatedCloneUrl(githubToken, repository);
+  svc.pendingJobs.set(task.id, job);
+  void svc.taskStore.upsertTask(task);
+  return repository;
+}
 
 export function validateGreenfieldDraftSecrets(
   svc: TaskService,
@@ -124,27 +156,28 @@ export async function provisionGreenfieldRepository(
     return;
   }
 
-  const githubToken = job.githubToken;
-  if (!githubToken) {
-    throw new Error("GitHub token is required for repository creation");
-  }
+  const githubToken = resolveRepositoryCreateToken(job);
   if (!job.permissions?.canCreateRepo) {
     throw new Error("repository creation is not permitted");
   }
 
   const metadata = generateProjectMetadata(task.prompt);
-  task.title = metadata.title;
+  const preferredName = job.createRepository?.trim() || metadata.repoName;
 
   const created = await createGitHubRepositoryUnique(githubToken, {
     description: metadata.description,
-    preferredName: job.createRepository?.trim() || undefined,
+    preferredName,
+    pickName: () => metadata.repoName,
   });
 
-  const repository = created.fullName;
-  const cloneUrl = authenticatedCloneUrl(githubToken, repository);
-  job.repository = repository;
-  job.cloneUrl = cloneUrl;
-  task.repository = repository;
+  const repository = applyCreatedGreenfieldRepository(
+    svc,
+    task,
+    job,
+    created,
+    githubToken,
+  );
+  const scaffoldTitle = titleFromRepoSlug(created.name);
 
   emit(svc, "git.repo", task.id, `Created repository ${repository}`, {
     repository,
@@ -170,7 +203,7 @@ export async function provisionGreenfieldRepository(
   }
 
   const scaffoldFiles = scaffoldFilesFromDraft(plan, {
-    title: task.title ?? metadata.title,
+    title: scaffoldTitle,
     prompt: task.prompt,
   });
 
@@ -186,9 +219,7 @@ export async function provisionGreenfieldRepository(
     });
   }
 
-  const commitMessage = buildCommitMessage(
-    `devin: scaffold ${task.title ?? metadata.title}`,
-  );
+  const commitMessage = buildCommitMessage(`devin: scaffold ${scaffoldTitle}`);
 
   emit(svc, "git.commit", task.id, "Pushing scaffold to GitHub", {
     repository,
@@ -235,27 +266,28 @@ export async function provisionGreenfieldRepositoryShell(
     return;
   }
 
-  const githubToken = job.githubToken;
-  if (!githubToken) {
-    throw new Error("GitHub token is required for repository creation");
-  }
+  const githubToken = resolveRepositoryCreateToken(job);
   if (!job.permissions?.canCreateRepo) {
     throw new Error("repository creation is not permitted");
   }
 
   const metadata = generateProjectMetadata(task.prompt);
-  task.title = metadata.title;
+  const preferredName = job.createRepository?.trim() || metadata.repoName;
 
   const created = await createGitHubRepositoryUnique(githubToken, {
     description: metadata.description,
-    preferredName: job.createRepository?.trim() || undefined,
+    preferredName,
+    pickName: () => metadata.repoName,
   });
 
-  const repository = created.fullName;
-  const cloneUrl = authenticatedCloneUrl(githubToken, repository);
-  job.repository = repository;
-  job.cloneUrl = cloneUrl;
-  task.repository = repository;
+  const repository = applyCreatedGreenfieldRepository(
+    svc,
+    task,
+    job,
+    created,
+    githubToken,
+  );
+  const scaffoldTitle = titleFromRepoSlug(created.name);
 
   emit(svc, "git.repo", task.id, `Created repository ${repository}`, {
     repository,
@@ -275,12 +307,12 @@ export async function provisionGreenfieldRepositoryShell(
 
   const stackRuntime = resolveStackRuntime(task, job);
   const scaffoldFiles = greenfieldShellScaffoldFiles({
-    title: task.title ?? metadata.title,
+    title: scaffoldTitle,
     prompt: task.prompt,
     stackRuntime,
   });
   const commitMessage = buildCommitMessage(
-    `devin: initialize ${task.title ?? metadata.title}`,
+    `devin: initialize ${scaffoldTitle}`,
   );
 
   emit(
@@ -393,7 +425,7 @@ export function buildGreenfieldShellReadme(
   task: Task,
 ): string {
   const metadata = generateProjectMetadata(task.prompt);
-  const title = task.title ?? metadata.title;
+  const title = task.title ? titleFromRepoSlug(task.title) : metadata.title;
   return `# ${title}\n\n${metadata.description}\n\n_Implementation will be generated by the runtime agent in the sandbox._\n`;
 }
 

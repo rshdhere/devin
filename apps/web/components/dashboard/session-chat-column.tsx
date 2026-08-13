@@ -27,6 +27,7 @@ import {
   formatAgentFailureMessage,
 } from "@/lib/sessions/agent-activity";
 import { canUseDevbox } from "@/lib/sessions/devbox";
+import { taskSessionLabel } from "@/lib/sessions/labels";
 import { cn } from "@/lib/utils";
 
 export type ChatMessage = {
@@ -105,7 +106,8 @@ export function SessionChatColumn({
   const scrollRef = useRef<HTMLDivElement>(null);
   const modelMenuRef = useRef<HTMLDivElement>(null);
   const conversation = buildConversationMessages(task, events);
-  const systemMessages = buildChatMessages(task, events);
+  const systemMessages =
+    task.status === "failed" ? [] : buildChatMessages(task, events);
   const statusLine = pickStatusLine(task, events, isActive);
   const [showModelMenu, setShowModelMenu] = useState(false);
   const showModelPicker =
@@ -155,7 +157,7 @@ export function SessionChatColumn({
           <ArrowLeft className="size-4" />
         </MotionButton>
         <p className="min-w-0 flex-1 truncate text-[13px] font-medium text-zinc-100">
-          {task.title ?? task.prompt}
+          {taskSessionLabel(task)}
         </p>
         {task.repository ? (
           <a

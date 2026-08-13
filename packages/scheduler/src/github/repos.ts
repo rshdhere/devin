@@ -1,6 +1,10 @@
 import { pickRandomRepoName } from "../greenfield/project-metadata.js";
 import type { CreatedRepository, GitHubUserIdentity } from "./types.js";
 
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 export function authenticatedCloneUrl(
   token: string,
   repository: string,
@@ -343,38 +347,54 @@ export async function createGitHubRepository(
   name: string,
   opts?: { description?: string; private?: boolean },
 ): Promise<CreatedRepository> {
-  const response = await fetch("https://api.github.com/user/repos", {
-    method: "POST",
-    headers: {
-      Accept: "application/vnd.github+json",
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
-      "X-GitHub-Api-Version": "2022-11-28",
-    },
-    body: JSON.stringify({
-      name,
-      description: opts?.description,
-      private: opts?.private ?? false,
-      auto_init: true,
-    }),
-  });
+  let lastError: Error | undefined;
 
-  if (!response.ok) {
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    const response = await fetch("https://api.github.com/user/repos", {
+      method: "POST",
+      headers: {
+        Accept: "application/vnd.github+json",
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+        "X-GitHub-Api-Version": "2022-11-28",
+      },
+      body: JSON.stringify({
+        name,
+        description: opts?.description,
+        private: opts?.private ?? false,
+        auto_init: true,
+      }),
+    });
+
+    if (response.ok) {
+      const repo = (await response.json()) as {
+        full_name: string;
+        html_url: string;
+        default_branch?: string;
+      };
+
+      return {
+        fullName: repo.full_name,
+        htmlUrl: repo.html_url,
+        defaultBranch: repo.default_branch ?? "main",
+      };
+    }
+
     const body = await response.text();
-    throw new Error(`GitHub repo create error ${response.status}: ${body}`);
+    const detail = body.trim() || response.statusText || "no response body";
+    lastError = new Error(
+      `GitHub repo create error ${response.status}: ${detail}`,
+    );
+
+    if (response.status >= 500 && attempt < 3) {
+      await sleep(500 * (attempt + 1));
+      continue;
+    }
+
+    throw lastError;
   }
 
-  const repo = (await response.json()) as {
-    full_name: string;
-    html_url: string;
-    default_branch?: string;
-  };
-
-  return {
-    fullName: repo.full_name,
-    htmlUrl: repo.html_url,
-    defaultBranch: repo.default_branch ?? "main",
-  };
+  throw lastError ?? new Error("GitHub repo create failed");
 }
 
 export function isRepositoryNameTakenError(error: unknown): boolean {

@@ -1,4 +1,14 @@
-import type { TaskEventType, TaskStatus } from "@devin/types";
+import type { Task, TaskEventType, TaskStatus } from "@devin/types";
+
+export function taskSessionLabel(
+  task: Pick<Task, "title" | "prompt" | "repository">,
+): string {
+  const repoSlug = task.repository?.split("/").pop()?.trim();
+  if (repoSlug) {
+    return repoSlug;
+  }
+  return (task.title ?? task.prompt).trim();
+}
 
 export function taskStatusLabel(status: TaskStatus): string {
   switch (status) {

@@ -29,6 +29,7 @@ import { reviewRecentItems } from "@/components/dashboard/views/review-view";
 import { MotionButton } from "@/components/dashboard/motion-button";
 import { UserMenu } from "@/components/dashboard/user-menu";
 import { cn } from "@/lib/utils";
+import { taskSessionLabel } from "@/lib/sessions/labels";
 
 const navIcons = {
   sessions: MessageSquare,
@@ -169,7 +170,7 @@ export function Sidebar({ userName }: SidebarProps) {
                   <MessageSquare className="mt-0.5 size-3.5 shrink-0 text-gray-500" />
                   <div className="min-w-0">
                     <p className="truncate text-[13px] text-gray-300">
-                      {task.title ?? task.prompt}
+                      {taskSessionLabel(task)}
                     </p>
                     <p className="text-[11px] text-gray-600">
                       {task.repository ?? task.status}

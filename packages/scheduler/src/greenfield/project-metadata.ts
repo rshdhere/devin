@@ -37,21 +37,21 @@ const PROJECT_NAME_POOL = [
   "canvas-node",
 ] as const;
 
-function randomSuffix(length = 4): string {
-  return Math.random()
-    .toString(36)
-    .replace(/[^a-z0-9]/g, "")
-    .slice(0, length)
-    .padEnd(length, "x");
-}
-
-function titleFromRepoSlug(repoName: string): string {
+export function titleFromRepoSlug(repoName: string): string {
   const base = repoName.replace(/-[a-z0-9]{4}$/, "");
   return base
     .split("-")
     .filter(Boolean)
     .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
     .join(" ");
+}
+
+function randomSuffix(length = 4): string {
+  return Math.random()
+    .toString(36)
+    .replace(/[^a-z0-9]/g, "")
+    .slice(0, length)
+    .padEnd(length, "x");
 }
 
 export function pickRandomRepoName(): string {
