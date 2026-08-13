@@ -28,6 +28,10 @@ import {
 } from "./git-operations.js";
 import { alignHydratedRepoWithOriginMain } from "./greenfield-provision.js";
 import { ensureSandboxDns } from "./sandbox-lifecycle.js";
+import {
+  GUEST_FS_REBUILD_HINT,
+  isGuestFilesystemCorrupt,
+} from "./guest-fs-corrupt.js";
 import { emit } from "./task-state.js";
 
 export async function hydrateGreenfieldInSandbox(
@@ -211,14 +215,11 @@ export async function ensureSandboxConnectivity(
     );
 
     if (attempt === 2) {
-      const corrupt = /guest filesystem corrupt|Structure needs cleaning/i.test(
-        `${dnsCheck.detail} ${cursorCheck.detail} ${installCheck.detail}`,
-      );
+      const combined = `${dnsCheck.detail} ${cursorCheck.detail} ${installCheck.detail}`;
+      const corrupt = isGuestFilesystemCorrupt(combined);
       const message = corrupt
         ? "Sandbox guest filesystem is corrupt (rootfs/mem snapshot mismatch). " +
-          "On the execution host rebuild snapshots: " +
-          "DEVIN_FORCE_SNAPSHOT_REBUILD=true DEVIN_RUNTIMES='agent nextjs' " +
-          "devin-infra bootstrap-snapshots <instance-id>."
+          GUEST_FS_REBUILD_HINT
         : "Sandbox has no outbound DNS/HTTPS to the Cursor API (api2.cursor.sh). " +
           "On the execution host run: sudo devin-infra fix-sandbox-dns && sudo devin-infra fix-cni, then rebuild the agent snapshot.";
       emit(svc, "agent.log", taskId, message, {

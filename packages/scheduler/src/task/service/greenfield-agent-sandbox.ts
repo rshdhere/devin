@@ -30,6 +30,12 @@ import { probeSandboxHttps } from "./greenfield-connectivity-probes.js";
 import { alignHydratedRepoWithOriginMain } from "./greenfield-provision.js";
 import { ensureSandboxDns } from "./sandbox-lifecycle.js";
 import { emit } from "./task-state.js";
+import {
+  GUEST_FS_REBUILD_HINT,
+  isGuestFilesystemCorrupt,
+} from "./guest-fs-corrupt.js";
+
+const BASH_PROBE_DIR = "/workspace/.build/devin-bash-probe";
 
 export async function ensureBashInSandbox(
   svc: TaskService,
@@ -41,6 +47,8 @@ export async function ensureBashInSandbox(
     command: [
       "set +e",
       'export PATH="/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/local/bin:/root/.local/bin:$PATH"',
+      `probe_dir='${BASH_PROBE_DIR}'`,
+      'mkdir -p "$probe_dir" 2>/dev/null || { echo "probe-dir-failed"; exit 1; }',
       // Drop broken / circular bash stubs before probing (self-symlink loops).
       "for stub in /usr/local/bin/bash /root/.local/bin/bash; do",
       '  if [ -L "$stub" ] && ! [ -x "$stub" ]; then rm -f "$stub"; fi',
@@ -55,8 +63,8 @@ export async function ensureBashInSandbox(
       'if [ -z "$bash_bin" ] && [ -x /usr/bin/bash ]; then bash_bin=/usr/bin/bash; fi',
       'if [ -z "$bash_bin" ] && command -v bash >/dev/null 2>&1; then bash_bin=$(command -v bash); fi',
       'if [ -z "$bash_bin" ] && command -v apt-get >/dev/null 2>&1; then',
-      "  apt-get update -qq >/tmp/devin-bash-apt.log 2>&1",
-      "  apt-get install -y -qq bash >/tmp/devin-bash-apt.log 2>&1",
+      '  apt-get update -qq >"$probe_dir/devin-bash-apt.log" 2>&1',
+      '  apt-get install -y -qq bash >"$probe_dir/devin-bash-apt.log" 2>&1',
       "  if [ -x /bin/bash ]; then bash_bin=/bin/bash; fi",
       '  if [ -z "$bash_bin" ] && [ -x /usr/bin/bash ]; then bash_bin=/usr/bin/bash; fi',
       '  if [ -z "$bash_bin" ]; then bash_bin=$(command -v bash); fi',
@@ -84,19 +92,27 @@ export async function ensureBashInSandbox(
       'if [ ! -x /bin/bash ]; then ln -sfn "$bash_real" /bin/bash; fi',
       'if [ ! -x /usr/bin/bash ]; then ln -sfn "$bash_real" /usr/bin/bash; fi',
       // Simulate legacy agent launch PATH (no /bin) — must succeed.
-      'PATH="/usr/local/bin:/root/.local/bin" /usr/bin/env bash -c "echo ok" >/tmp/devin-bash-env-ok 2>/tmp/devin-bash-env-err',
+      // Never write probe files under /tmp: corrupt overlays often break /tmp first.
+      `PATH="/usr/local/bin:/root/.local/bin" /usr/bin/env bash -c "echo ok" >"$probe_dir/devin-bash-env-ok" 2>"$probe_dir/devin-bash-env-err"`,
       "ec=$?",
       'if [ "$ec" -ne 0 ]; then',
-      '  echo "env-bash-failed:$(cat /tmp/devin-bash-env-err 2>/dev/null)"',
+      '  echo "env-bash-failed:$(cat "$probe_dir/devin-bash-env-err" 2>/dev/null)"',
       "  exit 1",
       "fi",
       'printf "%s\\n" "$bash_real"',
     ].join("\n"),
   });
   if (probe.exitCode !== 0) {
+    const detail = (probe.stderr || probe.stdout || "").trim().slice(0, 240);
+    if (isGuestFilesystemCorrupt(detail)) {
+      throw new Error(
+        "Sandbox guest filesystem is corrupt inside the devbox. " +
+          `${detail}. ${GUEST_FS_REBUILD_HINT}`,
+      );
+    }
     throw new Error(
       "Sandbox has no usable bash for Cursor agent (#/usr/bin/env bash). " +
-        `detail=${(probe.stderr || probe.stdout || "").trim().slice(0, 240)}. ` +
+        `detail=${detail}. ` +
         "Rebuild the agent Firecracker snapshot (runtime/agent/Dockerfile).",
     );
   }

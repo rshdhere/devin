@@ -135,7 +135,8 @@ func isGuestFsCorruptString(value string) bool {
 	lower := strings.ToLower(value)
 	return strings.Contains(lower, "structure needs cleaning") ||
 		strings.Contains(lower, "guest-fs-corrupt") ||
-		strings.Contains(lower, "guest filesystem corrupt")
+		strings.Contains(lower, "guest filesystem corrupt") ||
+		strings.Contains(lower, "bad message")
 }
 
 func guestFsCorruptError(detail string) error {

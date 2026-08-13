@@ -1,6 +1,7 @@
 import { RuntimeClient } from "@devin/agent-sdk";
 import type { TaskService } from "./task-service.js";
 import { escapeShell } from "./config.js";
+import { isGuestFilesystemCorrupt } from "./guest-fs-corrupt.js";
 
 export async function probeSandboxDns(
   svc: TaskService,
@@ -42,6 +43,9 @@ export async function probeSandboxHttps(
       "  if echo \"$out\" | grep -qi 'Structure needs cleaning'; then",
       "    echo 'guest-fs-corrupt'",
       "  fi",
+      "  if echo \"$out\" | grep -qi 'Bad message'; then",
+      "    echo 'guest-fs-corrupt'",
+      "  fi",
       "  exit $code",
       "fi",
       "if command -v node >/dev/null 2>&1; then",
@@ -53,7 +57,7 @@ export async function probeSandboxHttps(
     ].join("\n"),
   });
   const combined = `${result.stdout}\n${result.stderr}`.trim();
-  if (/guest-fs-corrupt|Structure needs cleaning/i.test(combined)) {
+  if (isGuestFilesystemCorrupt(combined)) {
     return {
       ok: false,
       detail:

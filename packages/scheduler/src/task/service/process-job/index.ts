@@ -3,6 +3,7 @@ import type { TaskService } from "../task-service.js";
 import { hydrateTaskRuntime } from "../config.js";
 import { deleteSandbox } from "../sandbox-lifecycle.js";
 import { emergencyPushAgentWork } from "../greenfield-provision-2.js";
+import { isGuestFilesystemCorrupt } from "../guest-fs-corrupt.js";
 import { emit, updateTask } from "../task-state.js";
 import { runAgentPhase } from "./agent-phase.js";
 import { runSandboxSetupPhase } from "./sandbox-phase.js";
@@ -75,6 +76,41 @@ export async function processJob(
     await runAgentPhase(svc, job, task, state);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Task failed";
+
+    if (
+      !job.forceSandboxRecreate &&
+      isGuestFilesystemCorrupt(message) &&
+      state.sandboxName
+    ) {
+      emit(
+        svc,
+        "agent.log",
+        task.id,
+        "Guest filesystem corrupt — deleting devbox and retrying once with a fresh microVM",
+        { sandboxName: state.sandboxName },
+      );
+      await deleteSandbox(svc, state.sandboxName);
+      state.sandboxName = undefined;
+      state.runtime = undefined;
+      state.runtimeBaseUrl = undefined;
+      state.guestHost = undefined;
+      svc.activeSessions.delete(task.id);
+      updateTask(
+        svc,
+        task.id,
+        "sandbox_starting",
+        "Recreating devbox after guest filesystem error",
+      );
+      const retryJob: ScheduleJob = {
+        ...job,
+        forceSandboxRecreate: true,
+        enqueuedAt: new Date().toISOString(),
+      };
+      state.retainSandboxForPreview = true;
+      svc.processingTasks.delete(job.taskId);
+      return processJob(svc, retryJob);
+    }
+
     if (
       state.repository &&
       state.cloneUrl &&
