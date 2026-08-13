@@ -180,14 +180,22 @@ export function SessionChatColumn({
         {!canUseDevbox(task) ? <TipCard /> : null}
 
         {isActive && statusLine ? (
-          <p className="mb-3 text-[13px] leading-relaxed text-zinc-400">
+          <p className="mb-2 text-[13px] leading-relaxed text-zinc-400">
             {statusLine}
           </p>
         ) : null}
 
-        {!isActive ? (
-          <p className="mb-3 text-[12px] text-zinc-500">{workLabel}</p>
-        ) : null}
+        <p
+          className={cn(
+            "mb-3 flex items-center gap-2 text-[12px] text-zinc-500",
+            isActive && "font-medium text-zinc-400",
+          )}
+        >
+          {isActive ? (
+            <span className="size-1.5 shrink-0 animate-pulse rounded-full bg-emerald-400" />
+          ) : null}
+          {workLabel}
+        </p>
 
         <div className="space-y-4">
           {conversation.map((message) =>

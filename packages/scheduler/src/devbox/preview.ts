@@ -1,7 +1,27 @@
+/**
+ * Port for the platform-managed devin-snapshot-server. Kept off 3000 so agent
+ * smoke tests (`npm run start`) can bind the conventional Next.js port.
+ */
+export const DEVIN_SNAPSHOT_SERVER_PORT = 3099;
+
 /** Well-known app ports probed before arbitrary listeners. */
 export const COMMON_DEVBOX_PORTS = [
-  3000, 3456, 8000, 5173, 8080, 5000, 4173, 3001, 3002, 4200, 9000, 8888, 1313,
-  4321, 24678,
+  3000,
+  DEVIN_SNAPSHOT_SERVER_PORT,
+  3456,
+  8000,
+  5173,
+  8080,
+  5000,
+  4173,
+  3001,
+  3002,
+  4200,
+  9000,
+  8888,
+  1313,
+  4321,
+  24678,
 ] as const;
 
 /** Runtime supervisor port — must never be treated as the product app. */
@@ -23,6 +43,18 @@ function skipPortsShellList(): string {
     CDP_DEBUG_PORT,
     ...DESKTOP_VNC_PORTS,
   ].join(" ");
+}
+
+/** Bind snapshot-server starts to DEVIN_SNAPSHOT_SERVER_PORT (not agent port 3000). */
+function buildSnapshotServerPortLines(): string[] {
+  const port = DEVIN_SNAPSHOT_SERVER_PORT;
+  return [
+    `DEVIN_PREVIEW_PORT=${port}`,
+    'if [ -n "$CMD" ]; then',
+    `  CMD=$(printf '%s' "$CMD" | sed -E 's/--port[[:space:]]+3000/--port ${port}/g; s/--port=3000/--port=${port}/g; s/127\\.0\\.0\\.1:3000/127.0.0.1:${port}/g')`,
+    "fi",
+    `export HOST=127.0.0.1 PORT=${port} HOSTNAME=127.0.0.1`,
+  ];
 }
 
 /** Shell lines that set CMD for Node/Next snapshot servers. */
@@ -102,11 +134,11 @@ export function buildSnapshotSmokeStartScript(): string {
     "fi",
     ...buildNodeOrNextStartCommandLines(),
     'if [ -z "$CMD" ]; then echo "no snapshot start command" >>"$LOG"; exit 0; fi',
-    "export HOST=127.0.0.1 PORT=3000 HOSTNAME=127.0.0.1",
+    ...buildSnapshotServerPortLines(),
     'export PATH="/usr/local/go/bin:/usr/local/cargo/bin:/usr/local/bin:/root/.local/bin:$PATH"',
     'nohup bash -lc "set -m; $CMD" >>"$LOG" 2>&1 &',
     'echo $! > "$PIDFILE"',
-    'echo "started: $CMD" >>"$LOG"',
+    `echo "started: $CMD (port ${DEVIN_SNAPSHOT_SERVER_PORT})" >>"$LOG"`,
     "exit 0",
   ].join("\n");
 }
@@ -201,12 +233,12 @@ export function buildStartDevServerForSnapshotScript(): string {
     "fi",
     ...buildNodeOrNextStartCommandLines(),
     'if [ -z "$CMD" ]; then echo "no snapshot start command" >>"$LOG"; exit 0; fi',
-    "export HOST=127.0.0.1 PORT=3000 HOSTNAME=127.0.0.1",
+    ...buildSnapshotServerPortLines(),
     'export PATH="/usr/local/go/bin:/usr/local/cargo/bin:/usr/local/bin:/root/.local/bin:$PATH"',
     // New process group so stop can kill the whole tree (go build + server).
     'nohup bash -lc "set -m; $CMD" >>"$LOG" 2>&1 &',
     'echo $! > "$PIDFILE"',
-    'echo "started: $CMD" >>"$LOG"',
+    `echo "started: $CMD (port ${DEVIN_SNAPSHOT_SERVER_PORT})" >>"$LOG"`,
   ].join("\n");
 }
 

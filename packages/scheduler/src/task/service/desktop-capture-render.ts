@@ -14,6 +14,7 @@ import {
   saveTaskDesktopSnapshot,
 } from "../../devbox/snapshot-store.js";
 import { sanitizeProxyResponseHeaders } from "../../devbox/proxy-headers.js";
+import { maybeRewriteDevboxPreviewBody } from "../../devbox/preview-html.js";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { Task } from "../types.js";
 import type { TaskService } from "./task-service.js";
@@ -510,16 +511,24 @@ export async function proxyDevboxPreview(
       return;
     }
     const reader = upstream.body.getReader();
+    const chunks: Uint8Array[] = [];
     while (true) {
       const { done, value } = await reader.read();
       if (done) {
         break;
       }
       if (value) {
-        res.write(value);
+        chunks.push(value);
       }
     }
-    res.end();
+    const contentType =
+      upstream.headers.get("content-type") ?? "application/octet-stream";
+    const body = maybeRewriteDevboxPreviewBody(
+      taskId,
+      contentType,
+      Buffer.concat(chunks),
+    );
+    res.end(body);
   } catch (error) {
     if (!res.headersSent) {
       res.writeHead(502, { "Content-Type": "text/plain" });

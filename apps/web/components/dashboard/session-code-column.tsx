@@ -33,6 +33,7 @@ interface SessionCodeColumnProps {
   task: Task;
   events: TaskEvent[];
   isActive: boolean;
+  elapsedTime: string;
   onTaskChange?: (task: Task) => void;
   workspaceTab: WorkspaceTab;
   onWorkspaceTabChange: (tab: WorkspaceTab) => void;
@@ -45,6 +46,7 @@ export function SessionCodeColumn({
   task,
   events,
   isActive,
+  elapsedTime,
   workspaceTab,
   onWorkspaceTabChange,
   selectedPath,
@@ -254,11 +256,15 @@ export function SessionCodeColumn({
             <Plus className="size-4" />
           </button>
           {isActive ? (
-            <span className="ml-auto flex items-center gap-1.5 text-[10px] text-zinc-500">
+            <span className="ml-auto flex items-center gap-1.5 text-[11px] text-zinc-400 tabular-nums">
               <span className="size-1.5 animate-pulse rounded-full bg-emerald-400" />
-              Live
+              Working… {elapsedTime}
             </span>
-          ) : null}
+          ) : (
+            <span className="ml-auto text-[11px] text-zinc-500 tabular-nums">
+              Worked {elapsedTime}
+            </span>
+          )}
         </header>
 
         <div className="flex min-h-0 flex-1 overflow-hidden bg-[#0d0d0d]">

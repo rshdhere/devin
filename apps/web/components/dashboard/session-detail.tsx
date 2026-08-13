@@ -357,6 +357,7 @@ export function SessionDetail({
           task={task}
           events={events}
           isActive={isActive}
+          elapsedTime={elapsedTime}
           onTaskChange={setTask}
           workspaceTab={workspaceTab}
           onWorkspaceTabChange={setWorkspaceTab}

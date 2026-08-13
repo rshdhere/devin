@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
   COMMON_DEVBOX_PORTS,
+  DEVIN_SNAPSHOT_SERVER_PORT,
   RUNTIME_SUPERVISOR_PORTS,
   buildDiscoverDevboxPortScript,
+  buildSnapshotSmokeStartScript,
   buildStartDevServerForSnapshotScript,
   buildWaitForDevServerScript,
   buildDesktopScreenshotScript,
@@ -51,7 +53,21 @@ describe("buildStartDevServerForSnapshotScript", () => {
     const script = buildStartDevServerForSnapshotScript();
     expect(script).toContain("tsx src/index.ts");
     expect(script).toContain("node dist/index.js");
-    expect(script).toContain("PORT=3000");
+    expect(script).toContain(`PORT=${DEVIN_SNAPSHOT_SERVER_PORT}`);
+  });
+
+  it("rewrites hardcoded next start port 3000 for platform preview server", () => {
+    const script = buildStartDevServerForSnapshotScript();
+    expect(script).toContain(
+      `DEVIN_PREVIEW_PORT=${DEVIN_SNAPSHOT_SERVER_PORT}`,
+    );
+    expect(script).toContain("--port[[:space:]]+3000/--port 3099");
+    expect(COMMON_DEVBOX_PORTS).toContain(DEVIN_SNAPSHOT_SERVER_PORT);
+  });
+
+  it("uses the platform preview port in smoke start script", () => {
+    const script = buildSnapshotSmokeStartScript();
+    expect(script).toContain(`PORT=${DEVIN_SNAPSHOT_SERVER_PORT}`);
   });
 
   it("starts FastAPI via uvicorn when main.py exists", () => {
