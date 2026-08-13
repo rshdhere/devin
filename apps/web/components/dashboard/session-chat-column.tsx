@@ -113,11 +113,6 @@ export function SessionChatColumn({
   const showModelPicker =
     task.agent === "cursor" && cursorAgentModel && onCursorAgentModelChange;
 
-  const snapshotRefreshKey = events.reduce(
-    (count, event) => count + (event.data?.desktopSnapshot === true ? 1 : 0),
-    0,
-  );
-
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
       if (
@@ -232,7 +227,6 @@ export function SessionChatColumn({
             <SessionDesktopPanel
               task={task}
               layout="embed"
-              externalRefreshKey={snapshotRefreshKey}
               onOpenDesktop={onOpenDesktop}
             />
           </div>
@@ -399,41 +393,12 @@ export function SessionPhaseStrip({
     task.status === "completed" ||
     task.status === "awaiting_review" ||
     events.some((e) => e.type === "task.completed");
-  const hasDesktopSnapshot = events.some(
-    (e) => e.data?.desktopSnapshot === true,
-  );
-  const completedAt = events.find(
-    (e) => e.type === "task.completed",
-  )?.timestamp;
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    if (
-      task.status !== "completed" ||
-      hasDesktopSnapshot ||
-      !completedAt ||
-      !canUseDevbox(task)
-    ) {
-      return;
-    }
-    const timer = window.setInterval(() => setNow(Date.now()), 10_000);
-    return () => window.clearInterval(timer);
-  }, [completedAt, hasDesktopSnapshot, task]);
-  const captureTimedOut =
-    completedAt !== undefined && now - Date.parse(completedAt) > 130_000;
-  const capturingPreview =
-    task.status === "completed" &&
-    canUseDevbox(task) &&
-    !hasDesktopSnapshot &&
-    !captureTimedOut;
-  const done = task.status === "completed" && !capturingPreview;
+  const done = task.status === "completed";
 
   const steps = [
     { label: "Sandbox", done: sandboxDone },
-    { label: "Build", done: executeDone && !capturingPreview },
-    {
-      label: capturingPreview ? "Capturing preview…" : "Done",
-      done,
-    },
+    { label: "Build", done: executeDone },
+    { label: "Done", done },
   ];
 
   return (

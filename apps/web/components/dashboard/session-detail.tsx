@@ -320,16 +320,6 @@ export function SessionDetail({
     loadDiagnostics,
   });
 
-  useEffect(() => {
-    const latestSnapshot = events.reduce(
-      (count, event) => count + (event.data?.desktopSnapshot === true ? 1 : 0),
-      0,
-    );
-    if (latestSnapshot > 0 && canUseDevbox(task)) {
-      setWorkspaceTab("desktop");
-    }
-  }, [events, task]);
-
   return (
     <div className="flex min-h-0 w-full flex-1 flex-col overflow-hidden bg-[#0a0a0a]">
       <div className="flex min-h-0 flex-1 overflow-hidden lg:flex-row">

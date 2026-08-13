@@ -60,11 +60,6 @@ export function SessionCodeColumn({
     [changedFiles],
   );
 
-  const snapshotRefreshKey = events.reduce(
-    (count, event) => count + (event.data?.desktopSnapshot === true ? 1 : 0),
-    0,
-  );
-
   const [fileSearch, setFileSearch] = useState("");
   const [contents, setContents] = useState<Record<string, string>>({});
   const [diffLines, setDiffLines] = useState<Record<string, DiffLine[]>>({});
@@ -294,11 +289,7 @@ export function SessionCodeColumn({
               />
             ) : null}
             {workspaceTab === "desktop" ? (
-              <SessionDesktopPanel
-                task={task}
-                layout="panel"
-                externalRefreshKey={snapshotRefreshKey}
-              />
+              <SessionDesktopPanel task={task} layout="panel" />
             ) : null}
           </div>
 
