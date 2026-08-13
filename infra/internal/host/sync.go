@@ -6,10 +6,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"strings"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/ssm"
@@ -74,7 +77,11 @@ func SyncPlatformConfig(ctx context.Context) error {
 	}
 	secrets := fmt.Sprintf("DEFAULT_AGENT=cursor\nSERVICE_MODE=worker\nCURSOR_API_KEY=%s\nANTHROPIC_API_KEY=%s\nOPENAI_API_KEY=%s\nGITHUB_BOT_TOKEN=%s\nGITHUB_BOT_NAME=baby-devin-bot\nGITHUB_BOT_EMAIL=baby-devin-bot@users.noreply.github.com\nAGENT_RUN_TIMEOUT_MIN=60\nAGENT_MODEL=%s\nDEVIN_SNAPSHOT_DIR=/var/lib/devin/task-snapshots\n", read("cursor_api_key"), read("anthropic_api_key"), read("openai_api_key"), read("github_bot_token"), agentModel)
 	if db := read("database_url"); db != "" {
-		secrets += "DATABASE_URL=" + db + "\n"
+		if postgresReachable(db) {
+			secrets += "DATABASE_URL=" + db + "\n"
+		} else {
+			log.Printf("database_url in SSM but postgres unreachable from host — omitting DATABASE_URL")
+		}
 	}
 	if err := os.MkdirAll("/var/lib/devin/task-snapshots", 0o755); err != nil {
 		return err
@@ -93,6 +100,23 @@ func SyncPlatformConfig(ctx context.Context) error {
 		_ = registerHost(ctx, orchestrator, hostName)
 	}
 	return nil
+}
+
+func postgresReachable(dbURL string) bool {
+	parsed, err := url.Parse(dbURL)
+	if err != nil || parsed.Hostname() == "" {
+		return false
+	}
+	port := parsed.Port()
+	if port == "" {
+		port = "5432"
+	}
+	conn, err := net.DialTimeout("tcp", net.JoinHostPort(parsed.Hostname(), port), 3*time.Second)
+	if err != nil {
+		return false
+	}
+	_ = conn.Close()
+	return true
 }
 
 func registerHost(ctx context.Context, url, hostName string) error {

@@ -104,7 +104,7 @@ WantedBy=multi-user.target
 		_ = sysutil.Command(ctx, "journalctl", "-u", "devin-scheduler.service", "-n", "30", "--no-pager")
 		return err
 	}
-	if !sysutil.WaitHTTP(ctx, "http://127.0.0.1:9091/health", 60*time.Second) {
+	if !sysutil.WaitHTTP(ctx, "http://127.0.0.1:9091/health", 90*time.Second) {
 		_ = sysutil.Command(ctx, "journalctl", "-u", "devin-scheduler.service", "-n", "30", "--no-pager")
 		_ = sysutil.Command(ctx, "docker", "ps", "-a", "--filter", "name=scheduler", "--no-trunc")
 		return errors.New("scheduler health check failed")

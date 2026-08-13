@@ -4,9 +4,10 @@ import {
   loadCachedDesktopSnapshot,
   startDevboxPreviewWatcher,
 } from "./desktop-capture.js";
+import { resolveTimeoutMs } from "./config.js";
 import { ensurePendingJob } from "./resolve-task.js";
 
-export async function restoreFromStore(svc: TaskService): Promise<void> {
+async function restoreFromStoreInner(svc: TaskService): Promise<void> {
   const sequences = await svc.taskStore.restoreEventSequences();
   for (const [taskId, seq] of sequences) {
     svc.eventSequences.set(taskId, seq);
@@ -71,6 +72,24 @@ export async function restoreFromStore(svc: TaskService): Promise<void> {
     task.sandboxName = persisted.sandboxName;
     startDevboxPreviewWatcher(svc, persisted.taskId);
   }
+}
+
+export async function restoreFromStore(svc: TaskService): Promise<void> {
+  const timeoutMs =
+    resolveTimeoutMs("TASK_STORE_RESTORE_TIMEOUT_SECONDS", 30) * 1000;
+  await Promise.race([
+    restoreFromStoreInner(svc),
+    new Promise<never>((_, reject) => {
+      setTimeout(
+        () => reject(new Error("task store restore timed out")),
+        timeoutMs,
+      );
+    }),
+  ]).catch((error) => {
+    console.error(
+      error instanceof Error ? error.message : "task store restore failed",
+    );
+  });
 }
 
 export async function persistSession(

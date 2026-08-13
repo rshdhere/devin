@@ -40,14 +40,6 @@ export async function startSchedulerServer(
     executionWorkerUrl: options.executionWorkerUrl,
   });
 
-  await tasks.initialize();
-
-  if (options.mode === "worker" && !tasks.getTaskStore().isEnabled()) {
-    console.warn(
-      "DATABASE_URL is unset on worker — task events will not persist and brain cannot mirror progress. Run: sudo devin-infra sync-platform-config",
-    );
-  }
-
   await registerExecutionHostOnce({
     orchestratorUrl,
     hostName: preferredHost,
@@ -61,8 +53,6 @@ export async function startSchedulerServer(
       firecrackerHostUrl: options.firecrackerHostUrl,
     });
   }
-
-  tasks.startWorker();
 
   const app = express();
   app.disable("x-powered-by");
@@ -92,10 +82,32 @@ export async function startSchedulerServer(
 
   const server = createServer(app);
   attachDesktopVNCWebSocketUpgrade(tasks, server);
-  server.listen(options.port, "0.0.0.0", () => {
-    console.log(
-      `${options.mode ?? "standalone"} listening @ http://0.0.0.0:${options.port}`,
-    );
-    console.log(`orchestrator: ${orchestratorUrl}`);
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(options.port, "0.0.0.0", () => {
+      console.log(
+        `${options.mode ?? "standalone"} listening @ http://0.0.0.0:${options.port}`,
+      );
+      console.log(`orchestrator: ${orchestratorUrl}`);
+      resolve();
+    });
   });
+
+  if (options.mode === "worker" && !tasks.getTaskStore().isEnabled()) {
+    console.warn(
+      "DATABASE_URL is unset on worker — task events will not persist and brain cannot mirror progress. Run: sudo devin-infra sync-platform-config",
+    );
+  }
+
+  void tasks
+    .initialize()
+    .catch((error) => {
+      console.error(
+        "task store restore failed:",
+        error instanceof Error ? error.message : error,
+      );
+    })
+    .finally(() => {
+      tasks.startWorker();
+    });
 }
