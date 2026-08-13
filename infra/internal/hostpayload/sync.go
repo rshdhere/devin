@@ -31,6 +31,7 @@ umask 077
 } >/etc/devin/scheduler-secrets.env
 chmod 600 /etc/devin/scheduler-secrets.env
 mkdir -p /var/lib/devin/task-snapshots
+chown 1001:1001 /var/lib/devin/task-snapshots
 printf '[Service]\nEnvironmentFile=/etc/devin/scheduler-secrets.env\n' >/etc/systemd/system/devin-scheduler.service.d/secrets.conf
 systemctl daemon-reload
 systemctl restart devin-scheduler.service || true

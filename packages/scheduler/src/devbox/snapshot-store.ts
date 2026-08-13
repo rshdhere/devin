@@ -27,8 +27,22 @@ export async function saveTaskDesktopSnapshot(
     return;
   }
   const dir = snapshotDir();
-  await mkdir(dir, { recursive: true });
-  await writeFile(path.join(dir, `${taskId}.png`), data);
+  try {
+    await mkdir(dir, { recursive: true });
+    await writeFile(path.join(dir, `${taskId}.png`), data);
+  } catch (error) {
+    const code =
+      error instanceof Error && "code" in error
+        ? String((error as NodeJS.ErrnoException).code)
+        : "";
+    if (code === "EACCES" || code === "EPERM") {
+      console.warn(
+        `desktop snapshot disk cache skipped (${code}): ${dir}/${taskId}.png`,
+      );
+    } else {
+      throw error;
+    }
+  }
   await saveTaskDesktopSnapshotS3(taskId, data);
 }
 

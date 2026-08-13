@@ -76,7 +76,7 @@ WantedBy=multi-user.target
 	if err := sysutil.WriteFile("/etc/systemd/system/devin-firecracker.service", fc, 0644); err != nil {
 		return err
 	}
-	if err := os.MkdirAll("/var/lib/devin/task-snapshots", 0o755); err != nil {
+	if err := ensureTaskSnapshotDir(); err != nil {
 		return err
 	}
 	if err := sysutil.WriteFile("/etc/systemd/system/devin-scheduler.service", scheduler, 0644); err != nil {

@@ -83,7 +83,7 @@ func SyncPlatformConfig(ctx context.Context) error {
 			log.Printf("database_url in SSM but postgres unreachable from host — omitting DATABASE_URL")
 		}
 	}
-	if err := os.MkdirAll("/var/lib/devin/task-snapshots", 0o755); err != nil {
+	if err := ensureTaskSnapshotDir(); err != nil {
 		return err
 	}
 	if err := sysutil.WriteFile("/etc/devin/scheduler-secrets.env", secrets, 0600); err != nil {

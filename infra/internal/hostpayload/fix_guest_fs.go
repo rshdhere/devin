@@ -41,6 +41,7 @@ docker rm -f scheduler firecracker 2>/dev/null || true
 echo "==== prune stale microVM overlays ===="
 rm -rf /var/lib/devin/vms/*
 find /var/lib/devin/task-snapshots -type f -delete 2>/dev/null || true
+chown 1001:1001 /var/lib/devin/task-snapshots 2>/dev/null || true
 echo "==== remove corrupt golden snapshots ===="
 for rt in %s; do
   rm -rf "/var/lib/devin/snapshots/${rt}"

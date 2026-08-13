@@ -44,6 +44,7 @@ if ! command -v docker &>/dev/null; then
 fi
 
 mkdir -p /etc/cni/conf.d /opt/cni/bin /var/lib/devin/linux /var/lib/devin/snapshots /var/lib/devin/vms /var/lib/devin/task-snapshots
+chown 1001:1001 /var/lib/devin/task-snapshots
 
 # Install /usr/local/bin/devin-infra from the published image, or build from git.
 install_devin_infra() {
