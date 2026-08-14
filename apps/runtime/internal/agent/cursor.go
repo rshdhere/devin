@@ -71,7 +71,7 @@ func (r *CursorRunner) Run(
 		model = normalizeCursorModel(r.cfg.DefaultModel)
 	}
 	if model == "" {
-		model = "composer-2.5"
+		model = "auto"
 	}
 	args = append(args, "--model", model)
 	args = append(args, "--workspace", workDir)

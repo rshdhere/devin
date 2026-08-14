@@ -18,7 +18,6 @@ import {
   DEFAULT_CURSOR_AGENT_MODEL,
   resolveRuntimeForTask,
   runtimeLabel,
-  type CursorAgentModelId,
 } from "@devin/types";
 import { cn } from "@/lib/utils";
 
@@ -30,17 +29,12 @@ export function PromptComposer({ selectedRepository }: PromptComposerProps) {
   const { startSession } = useSessions();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const agentMenuRef = useRef<HTMLDivElement>(null);
-  const modelMenuRef = useRef<HTMLDivElement>(null);
   const repoMenuRef = useRef<HTMLDivElement>(null);
   const [showTerminalBanner, setShowTerminalBanner] = useState(true);
   const [prompt, setPrompt] = useState("");
   const [textareaHeight, setTextareaHeight] = useState(MIN_TEXTAREA_HEIGHT);
   const [agent, setAgent] = useState<AgentId>("cursor");
   const [showAgentMenu, setShowAgentMenu] = useState(false);
-  const [cursorModel, setCursorModel] = useState<CursorAgentModelId>(
-    DEFAULT_CURSOR_AGENT_MODEL,
-  );
-  const [showModelMenu, setShowModelMenu] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [repoMode, setRepoMode] = useState<RepoMode>(
@@ -62,12 +56,6 @@ export function PromptComposer({ selectedRepository }: PromptComposerProps) {
         !repoMenuRef.current.contains(event.target as Node)
       ) {
         setShowRepoOptions(false);
-      }
-      if (
-        modelMenuRef.current &&
-        !modelMenuRef.current.contains(event.target as Node)
-      ) {
-        setShowModelMenu(false);
       }
     }
 
@@ -114,7 +102,7 @@ export function PromptComposer({ selectedRepository }: PromptComposerProps) {
         autoCreateRepository:
           repoMode === "create" && !finalRepoName ? true : undefined,
         autoStartSandbox: true,
-        agentModel: agent === "cursor" ? cursorModel : undefined,
+        agentModel: agent === "cursor" ? DEFAULT_CURSOR_AGENT_MODEL : undefined,
       });
       setPrompt("");
       setNewRepoName("");
@@ -212,21 +200,8 @@ export function PromptComposer({ selectedRepository }: PromptComposerProps) {
           onToggleAgentMenu={() => {
             setShowAgentMenu((open) => !open);
             setShowRepoOptions(false);
-            setShowModelMenu(false);
           }}
           agentMenuRef={agentMenuRef}
-          cursorModel={cursorModel}
-          onCursorModelChange={(model) => {
-            setCursorModel(model);
-            setShowModelMenu(false);
-          }}
-          showModelMenu={showModelMenu}
-          onToggleModelMenu={() => {
-            setShowModelMenu((open) => !open);
-            setShowAgentMenu(false);
-            setShowRepoOptions(false);
-          }}
-          modelMenuRef={modelMenuRef}
           repoMode={repoMode}
           onRepoModeChange={(mode) => {
             setRepoMode(mode);
@@ -238,7 +213,6 @@ export function PromptComposer({ selectedRepository }: PromptComposerProps) {
           onToggleRepoOptions={() => {
             setShowRepoOptions((open) => !open);
             setShowAgentMenu(false);
-            setShowModelMenu(false);
           }}
           repoMenuRef={repoMenuRef}
           selectedRepository={selectedRepository}

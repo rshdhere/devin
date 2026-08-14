@@ -20,9 +20,8 @@ import {
 } from "@/components/dashboard/prompt-composer-constants";
 import { DEVIN_BOT } from "@/lib/devin-bot";
 import {
-  CURSOR_AGENT_MODELS,
   cursorAgentModelLabel,
-  type CursorAgentModelId,
+  DEFAULT_CURSOR_AGENT_MODEL,
 } from "@devin/types";
 import { cn } from "@/lib/utils";
 
@@ -32,11 +31,6 @@ interface PromptComposerToolbarProps {
   showAgentMenu: boolean;
   onToggleAgentMenu: () => void;
   agentMenuRef: React.RefObject<HTMLDivElement | null>;
-  cursorModel: CursorAgentModelId;
-  onCursorModelChange: (model: CursorAgentModelId) => void;
-  showModelMenu: boolean;
-  onToggleModelMenu: () => void;
-  modelMenuRef: React.RefObject<HTMLDivElement | null>;
   repoMode: RepoMode;
   onRepoModeChange: (mode: RepoMode) => void;
   newRepoName: string;
@@ -56,11 +50,6 @@ export function PromptComposerToolbar({
   showAgentMenu,
   onToggleAgentMenu,
   agentMenuRef,
-  cursorModel,
-  onCursorModelChange,
-  showModelMenu,
-  onToggleModelMenu,
-  modelMenuRef,
   repoMode,
   onRepoModeChange,
   newRepoName,
@@ -126,49 +115,9 @@ export function PromptComposerToolbar({
         </div>
 
         {agent === "cursor" ? (
-          <div className="relative" ref={modelMenuRef}>
-            <MotionButton
-              type="button"
-              onClick={onToggleModelMenu}
-              className="flex cursor-pointer items-center gap-1.5 rounded-full border border-[#333] bg-[#161616] px-2.5 py-1 text-[13px] text-gray-300 transition-colors hover:bg-[#222] hover:text-white"
-            >
-              {cursorAgentModelLabel(cursorModel)}
-              <ChevronDown
-                className={cn(
-                  "size-3 text-gray-500 transition-transform",
-                  showModelMenu && "rotate-180",
-                )}
-              />
-            </MotionButton>
-
-            <AnimatePresence>
-              {showModelMenu ? (
-                <motion.div
-                  initial={{ opacity: 0, y: -8, scale: 0.96 }}
-                  animate={{ opacity: 1, y: 0, scale: 1 }}
-                  exit={{ opacity: 0, y: -8, scale: 0.96 }}
-                  transition={{ duration: 0.15 }}
-                  className="absolute bottom-full left-0 z-[100] mb-2 min-w-[180px] overflow-hidden rounded-xl border border-[#333] bg-[#1e1e1e] py-1 shadow-2xl"
-                >
-                  {CURSOR_AGENT_MODELS.map((option) => (
-                    <MotionButton
-                      key={option.id}
-                      type="button"
-                      onClick={() => onCursorModelChange(option.id)}
-                      className={cn(
-                        "flex w-full cursor-pointer px-3 py-2 text-left text-[13px] transition-colors hover:bg-[#252525]",
-                        cursorModel === option.id
-                          ? "text-white"
-                          : "text-gray-400",
-                      )}
-                    >
-                      {option.label}
-                    </MotionButton>
-                  ))}
-                </motion.div>
-              ) : null}
-            </AnimatePresence>
-          </div>
+          <span className="flex items-center rounded-full border border-[#333] bg-[#161616] px-2.5 py-1 text-[13px] text-gray-400">
+            {cursorAgentModelLabel(DEFAULT_CURSOR_AGENT_MODEL)}
+          </span>
         ) : null}
 
         <div className="relative" ref={repoMenuRef}>

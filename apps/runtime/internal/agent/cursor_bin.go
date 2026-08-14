@@ -298,15 +298,12 @@ exit 1
 func normalizeCursorModel(model string) string {
 	m := strings.TrimSpace(strings.ToLower(model))
 	switch m {
-	case "", "composer-2.5-fast", "composer-2-fast":
-		if m == "" {
-			return ""
-		}
-		return "composer-2.5"
-	case "composer-2.5", "cursor-grok-4.5-medium":
-		return m
+	case "auto":
+		return "auto"
+	case "", "composer-2.5-fast", "composer-2-fast", "composer-2.5", "cursor-grok-4.5-medium", "cursor-grok-4.6-medium":
+		return "auto"
 	default:
-		return "composer-2.5"
+		return "auto"
 	}
 }
 

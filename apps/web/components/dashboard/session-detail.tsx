@@ -11,10 +11,7 @@ import type {
   TaskEvent,
 } from "@devin/types";
 import { usesRuntimeAgent } from "@devin/types";
-import {
-  DEFAULT_CURSOR_AGENT_MODEL,
-  type CursorAgentModelId,
-} from "@devin/types";
+import { DEFAULT_CURSOR_AGENT_MODEL } from "@devin/types";
 import {
   fetchInfraDiagnostics,
   fetchTaskDiagnostics,
@@ -61,9 +58,6 @@ export function SessionDetail({
   const [committingWork, setCommittingWork] = useState(false);
   const [raisingPr, setRaisingPr] = useState(false);
   const [followUpPrompt, setFollowUpPrompt] = useState("");
-  const [cursorAgentModel, setCursorAgentModel] = useState<CursorAgentModelId>(
-    DEFAULT_CURSOR_AGENT_MODEL,
-  );
   const [continuingSession, setContinuingSession] = useState(false);
   const [terminatingSession, setTerminatingSession] = useState(false);
   const [workspaceTab, setWorkspaceTab] = useState<
@@ -177,7 +171,11 @@ export function SessionDetail({
     setEvents((current) => mergeTaskEvents(current, [optimisticEvent]));
     setFollowUpPrompt("");
     try {
-      const updated = await continueTask(task.id, trimmed, cursorAgentModel);
+      const updated = await continueTask(
+        task.id,
+        trimmed,
+        DEFAULT_CURSOR_AGENT_MODEL,
+      );
       setTask(updated);
       const history = await fetchTaskEventHistory(task.id);
       if (history.length > 0) {
@@ -191,7 +189,7 @@ export function SessionDetail({
     } finally {
       setContinuingSession(false);
     }
-  }, [cursorAgentModel, followUpPrompt, refreshTasks, task.id]);
+  }, [followUpPrompt, refreshTasks, task.id]);
 
   const handleTerminateSession = useCallback(async () => {
     setTerminatingSession(true);
@@ -340,8 +338,6 @@ export function SessionDetail({
           }
           addedLineCount={sumLineCounts(fileLineCounts)}
           onOpenDesktop={() => setWorkspaceTab("desktop")}
-          cursorAgentModel={cursorAgentModel}
-          onCursorAgentModelChange={setCursorAgentModel}
         />
         <SessionCodeColumn
           task={task}

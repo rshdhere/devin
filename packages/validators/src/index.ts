@@ -86,14 +86,7 @@ export const createTaskSchema = z.object({
   testCommand: z.string().min(1).max(500).optional(),
   issueTitle: z.string().min(1).max(200).optional(),
   issueBody: z.string().max(8000).optional(),
-  agentModel: z
-    .enum([
-      "composer-2.5",
-      "cursor-grok-4.5-medium",
-      "composer-2.5-fast",
-      "composer-2-fast",
-    ])
-    .optional(),
+  agentModel: z.enum(["auto"]).optional(),
 });
 
 export type DashboardSettingsUpdate = z.infer<
