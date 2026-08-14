@@ -101,20 +101,20 @@ export function PromptComposer({ selectedRepository }: PromptComposerProps) {
 
   return (
     <div className="flex w-full flex-col items-center overflow-visible">
-      <div className="mb-3 flex w-full max-w-[520px] items-center justify-between px-0.5">
+      <div className="mb-3 flex w-full items-center justify-between px-0.5">
         <div className="flex items-center gap-2 text-[15px] font-semibold text-white">
           <DashboardLogo size={18} className="text-white" />
           <span>Devin</span>
         </div>
 
-        <div className="flex items-center rounded-full bg-[#1c1c1c] p-[3px] text-[12px]">
+        <div className="flex items-center rounded-full border border-white/10 bg-white/[0.04] p-[3px] text-[12px] backdrop-blur-md">
           <button
             type="button"
             onClick={() => setComposerMode("agent")}
             className={cn(
               "cursor-pointer rounded-full px-3 py-1 transition-colors",
               composerMode === "agent"
-                ? "bg-[#2e2e2e] font-medium text-white"
+                ? "bg-white/10 font-medium text-white"
                 : "text-zinc-500 hover:text-zinc-300",
             )}
           >
@@ -126,7 +126,7 @@ export function PromptComposer({ selectedRepository }: PromptComposerProps) {
             className={cn(
               "cursor-pointer rounded-full px-3 py-1 transition-colors",
               composerMode === "ask"
-                ? "bg-[#2e2e2e] font-medium text-white"
+                ? "bg-white/10 font-medium text-white"
                 : "text-zinc-500 hover:text-zinc-300",
             )}
           >
@@ -137,8 +137,9 @@ export function PromptComposer({ selectedRepository }: PromptComposerProps) {
 
       <div
         className={cn(
-          "relative w-full max-w-[520px] overflow-hidden rounded-2xl bg-[#1c1c1c]",
-          "shadow-[0_0_0_1px_rgba(255,255,255,0.04),0_12px_40px_rgba(0,0,0,0.45)]",
+          "relative w-full overflow-hidden rounded-2xl",
+          "border border-white/15 bg-[#1c1c1c]/75 backdrop-blur-xl",
+          "shadow-[inset_0_1px_0_0_rgba(255,255,255,0.12),0_0_0_1px_rgba(255,255,255,0.04),0_16px_48px_rgba(0,0,0,0.45)]",
         )}
       >
         <motion.textarea
