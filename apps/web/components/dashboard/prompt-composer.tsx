@@ -1,10 +1,8 @@
 "use client";
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { Terminal, X } from "lucide-react";
 import { motion } from "motion/react";
 import { DashboardLogo } from "@/components/dashboard/dashboard-logo";
-import { MotionButton } from "@/components/dashboard/motion-button";
 import { PromptMetadataBar } from "@/components/dashboard/prompt-metadata-bar";
 import {
   MIN_TEXTAREA_HEIGHT,
@@ -28,7 +26,6 @@ export function PromptComposer({ selectedRepository }: PromptComposerProps) {
   const { startSession } = useSessions();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const agentMenuRef = useRef<HTMLDivElement>(null);
-  const [showTerminalBanner, setShowTerminalBanner] = useState(true);
   const [prompt, setPrompt] = useState("");
   const [textareaHeight, setTextareaHeight] = useState(MIN_TEXTAREA_HEIGHT);
   const [agent, setAgent] = useState<AgentId>("cursor");
@@ -58,7 +55,7 @@ export function PromptComposer({ selectedRepository }: PromptComposerProps) {
     textarea.style.height = "0px";
     const nextHeight = Math.max(MIN_TEXTAREA_HEIGHT, textarea.scrollHeight);
     setTextareaHeight(nextHeight);
-  }, [prompt, showTerminalBanner]);
+  }, [prompt]);
 
   async function handleSubmit() {
     const trimmed = prompt.trim();
@@ -102,8 +99,8 @@ export function PromptComposer({ selectedRepository }: PromptComposerProps) {
   return (
     <div className="flex w-full flex-col items-center overflow-visible">
       <div className="mb-3 flex w-full items-center justify-between px-0.5">
-        <div className="flex items-center gap-2 text-[15px] font-semibold text-white">
-          <DashboardLogo size={18} className="text-white" />
+        <div className="flex items-center gap-2.5 text-[22px] font-semibold tracking-tight text-white">
+          <DashboardLogo size={26} className="text-white" />
           <span>Devin</span>
         </div>
 
@@ -180,34 +177,6 @@ export function PromptComposer({ selectedRepository }: PromptComposerProps) {
           isSubmitting={isSubmitting}
           onSubmit={() => void handleSubmit()}
         />
-
-        {showTerminalBanner ? (
-          <div className="flex items-center justify-between border-t border-white/[0.06] bg-[#171717] px-4 py-2.5">
-            <div className="flex min-w-0 items-center gap-2 text-[13px] text-zinc-300">
-              <Terminal className="size-3.5 shrink-0 text-zinc-500" />
-              <span className="truncate">
-                Run Devin directly from your terminal.
-              </span>
-            </div>
-            <div className="ml-3 flex shrink-0 items-center gap-2.5">
-              <MotionButton
-                type="button"
-                className="cursor-pointer text-[13px] font-medium text-[#4b9dff] hover:text-[#6eb0ff]"
-              >
-                Get started
-              </MotionButton>
-              <MotionButton
-                type="button"
-                pressStyle="icon"
-                onClick={() => setShowTerminalBanner(false)}
-                className="cursor-pointer rounded-md p-0.5 text-zinc-500 transition-colors hover:text-zinc-300"
-                aria-label="Dismiss banner"
-              >
-                <X className="size-3.5" />
-              </MotionButton>
-            </div>
-          </div>
-        ) : null}
       </div>
 
       {error ? (

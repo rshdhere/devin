@@ -11,6 +11,7 @@ import { cn } from "@/lib/utils";
 
 interface UserMenuProps {
   userName: string;
+  collapsed?: boolean;
 }
 
 function getInitial(name: string) {
@@ -22,7 +23,7 @@ const menuTransition = {
   ease: "easeIn" as const,
 };
 
-export function UserMenu({ userName }: UserMenuProps) {
+export function UserMenu({ userName, collapsed = false }: UserMenuProps) {
   const router = useRouter();
   const triggerRef = useRef<HTMLButtonElement>(null);
   const [open, setOpen] = useState(false);
@@ -115,22 +116,28 @@ export function UserMenu({ userName }: UserMenuProps) {
         data-user-menu-trigger
         onClick={toggleMenu}
         className={cn(
-          "flex min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-lg px-1.5 py-1.5 text-left transition-colors hover:bg-[#1a1a1a]",
+          "flex cursor-pointer items-center gap-2 rounded-lg px-1.5 py-1.5 text-left transition-colors hover:bg-[#1a1a1a]",
+          collapsed ? "justify-center" : "min-w-0 flex-1",
           open && "bg-[#1a1a1a]",
         )}
+        aria-label={collapsed ? userName : undefined}
       >
         <span className="flex size-6 shrink-0 items-center justify-center rounded-md bg-[#3a3a3a] text-[12px] font-semibold text-white">
           {getInitial(userName)}
         </span>
-        <span className="min-w-0 flex-1 truncate text-[14px] font-medium text-gray-100">
-          {userName}
-        </span>
-        <ChevronDown
-          className={cn(
-            "size-3.5 shrink-0 text-gray-500 transition-transform duration-200",
-            open && "rotate-180",
-          )}
-        />
+        {!collapsed ? (
+          <>
+            <span className="min-w-0 flex-1 truncate text-[14px] font-medium text-gray-100">
+              {userName}
+            </span>
+            <ChevronDown
+              className={cn(
+                "size-3.5 shrink-0 text-gray-500 transition-transform duration-200",
+                open && "rotate-180",
+              )}
+            />
+          </>
+        ) : null}
       </MotionButton>
 
       {typeof document !== "undefined"

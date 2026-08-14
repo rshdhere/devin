@@ -73,9 +73,7 @@ export function PromptComposerToolbar({
             className="flex cursor-pointer items-center gap-1 rounded-md px-1.5 py-1 text-[13px] text-zinc-200 transition-colors hover:bg-white/[0.06]"
           >
             <span>
-              {selectedAgent.label === "Cursor"
-                ? "Normal"
-                : selectedAgent.label}
+              {selectedAgent.label === "Cursor" ? "Agent" : selectedAgent.label}
             </span>
             <ChevronDown
               className={cn(
@@ -106,7 +104,7 @@ export function PromptComposerToolbar({
                   >
                     <span className="flex items-center gap-1.5 text-[13px]">
                       <Bot className="size-3.5 opacity-60" />
-                      {option.label === "Cursor" ? "Normal" : option.label}
+                      {option.label === "Cursor" ? "Agent" : option.label}
                     </span>
                     <span className="mt-0.5 text-[11px] text-zinc-600">
                       {option.id === "cursor"
