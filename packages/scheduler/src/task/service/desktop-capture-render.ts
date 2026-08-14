@@ -272,6 +272,12 @@ export async function refreshDevboxPreviewPort(
         guestHost: session.guestHost,
         desktop: true,
       });
+    }
+    // Recording captures the live X11 Chromium window. Always steer it to the
+    // app — screenshots may use a separate headless browser, so skipping
+    // navigation leaves the recording stuck on about:blank.
+    void navigateDesktopBrowserToPort(svc, session, taskId, port);
+    if (portChanged) {
       void captureDesktopScreenshot(svc, session, taskId);
     }
   } catch {
@@ -355,6 +361,14 @@ export function startDevboxPreviewWatcher(
       return;
     }
     await refreshDevboxPreviewPort(svc, session, taskId);
+    if (session.devboxPreviewPort) {
+      await navigateDesktopBrowserToPort(
+        svc,
+        session,
+        taskId,
+        session.devboxPreviewPort,
+      );
+    }
     // Watcher must not spin npm/uvicorn — that races the agent and can hang.
     void captureDesktopScreenshotWithDevServer(svc, session, taskId, {
       allowSpin: false,

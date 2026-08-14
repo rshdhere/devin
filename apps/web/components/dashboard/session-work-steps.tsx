@@ -1,7 +1,12 @@
 "use client";
 
-import { Check, Circle, Loader2 } from "lucide-react";
-import { Steps } from "@/components/prompt-kit/steps";
+import { Check, Circle, Loader2, Terminal } from "lucide-react";
+import {
+  ChainOfThought,
+  ChainOfThoughtContent,
+  ChainOfThoughtHeader,
+  ChainOfThoughtStep,
+} from "@/components/ai-elements/chain-of-thought";
 import { ShellSource } from "@/components/prompt-kit/source";
 import { cn } from "@/lib/utils";
 
@@ -16,14 +21,14 @@ function parseShellLine(line: string): {
   return { prefix: "Ran", command: match[1] };
 }
 
-function WorkStepBody({ line, active }: { line: string; active: boolean }) {
+function WorkStepLabel({ line, active }: { line: string; active: boolean }) {
   const shell = parseShellLine(line);
   if (shell) {
     return (
       <p
         className={cn(
           "flex flex-wrap items-center gap-1.5",
-          active && "text-zinc-200",
+          active ? "text-zinc-200" : "text-zinc-500",
         )}
       >
         <span className="text-zinc-500">{shell.prefix}</span>
@@ -50,47 +55,44 @@ export function SessionWorkSteps({
   }
 
   return (
-    <Steps>
-      <ol className="space-y-0">
+    <ChainOfThought defaultOpen className="space-y-3 text-zinc-400">
+      <ChainOfThoughtHeader className="text-zinc-500 hover:text-zinc-200">
+        Progress
+      </ChainOfThoughtHeader>
+      <ChainOfThoughtContent className="mt-3 space-y-0 text-zinc-400">
         {lines.map((line, index) => {
           const isLast = index === lines.length - 1;
           const active = isActive && isLast;
+          const shell = parseShellLine(line);
+          const StepIcon = active ? Loader2 : shell ? Terminal : Check;
+
           return (
-            <li
+            <ChainOfThoughtStep
               key={`${index}-${line.slice(0, 20)}`}
-              className="flex gap-3 border-l border-white/[0.06] py-2 pl-3"
-            >
-              <span
-                className={cn(
-                  "mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-full border",
-                  active
-                    ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-400"
-                    : "border-white/[0.08] bg-[#141414] text-zinc-500",
-                )}
-              >
-                {active ? (
-                  <Loader2 className="size-3 animate-spin" />
-                ) : (
-                  <Check className="size-3" />
-                )}
-              </span>
-              <div className="min-w-0 flex-1">
-                <WorkStepBody line={line} active={active} />
-              </div>
-            </li>
+              icon={StepIcon}
+              status={active ? "active" : "complete"}
+              label={<WorkStepLabel line={line} active={active} />}
+              className={cn(
+                "gap-3 border-l border-white/[0.06] py-2 pl-3 text-[12px]",
+                active ? "text-zinc-200" : "text-zinc-500",
+                active && "[&_svg]:animate-spin [&_svg]:text-emerald-400",
+              )}
+            />
           );
         })}
         {isActive && lines.length === 0 ? (
-          <li className="flex gap-3 py-2 pl-3">
-            <span className="mt-0.5 flex size-5 items-center justify-center rounded-full border border-white/[0.08] bg-[#141414]">
-              <Circle className="size-3 text-zinc-600" />
-            </span>
-            <p className="text-[12px] text-zinc-500">
-              Waiting for agent steps…
-            </p>
-          </li>
+          <ChainOfThoughtStep
+            icon={Circle}
+            status="pending"
+            label={
+              <p className="text-[12px] text-zinc-500">
+                Waiting for agent steps…
+              </p>
+            }
+            className="gap-3 py-2 pl-3 text-zinc-600"
+          />
         ) : null}
-      </ol>
-    </Steps>
+      </ChainOfThoughtContent>
+    </ChainOfThought>
   );
 }

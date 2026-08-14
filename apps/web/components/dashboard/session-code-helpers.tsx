@@ -106,13 +106,6 @@ export function ProgressPanel({
 
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden px-5 py-4">
-      <div className="mb-4 flex items-center gap-2 text-[12px] text-zinc-500">
-        <Code2 className="size-3.5 text-zinc-500" />
-        <span>Progress</span>
-        {isActive ? (
-          <Loader2 className="size-3.5 animate-spin text-zinc-500" />
-        ) : null}
-      </div>
       <div className="min-h-0 flex-1 overflow-y-auto">
         <SessionWorkSteps lines={filtered} isActive={isActive} />
       </div>

@@ -1,36 +1,68 @@
 import type { TaskService } from "./task-service.js";
 import type { ReviewSession } from "./types.js";
 import { resolveRuntimeSession } from "./resolve-session-proxy.js";
+import { emit } from "./task-state.js";
 
 export async function navigateDesktopBrowserToPort(
   svc: TaskService,
   session: ReviewSession,
-  _taskId: string,
+  taskId: string,
   port: number,
-): Promise<void> {
-  const url = `http://127.0.0.1:${port}/`;
-  try {
-    const response = await fetch(`${session.runtimeBaseUrl}/desktop/navigate`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ url }),
-    });
-    if (!response.ok) {
-      return;
-    }
-  } catch {
-    // best-effort — recording/screenshot may still use headless capture
+): Promise<boolean> {
+  if (!Number.isFinite(port) || port <= 0) {
+    return false;
   }
+  const url = `http://127.0.0.1:${port}/`;
+  let lastDetail = "";
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      const response = await fetch(
+        `${session.runtimeBaseUrl}/desktop/navigate`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ url }),
+          signal: AbortSignal.timeout(35_000),
+        },
+      );
+      if (response.ok) {
+        emit(
+          svc,
+          "agent.log",
+          taskId,
+          "Desktop browser navigated to app preview",
+          {
+            port,
+            url,
+            desktop: true,
+            attempt: attempt + 1,
+          },
+        );
+        return true;
+      }
+      lastDetail = `HTTP ${response.status}`;
+    } catch (error) {
+      lastDetail = error instanceof Error ? error.message : String(error);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 750 * (attempt + 1)));
+  }
+  emit(svc, "agent.log", taskId, "Desktop browser navigate failed", {
+    port,
+    url,
+    detail: lastDetail,
+    desktop: true,
+  });
+  return false;
 }
 
 export async function navigateDesktopBrowserForTask(
   svc: TaskService,
   taskId: string,
   port: number,
-): Promise<void> {
+): Promise<boolean> {
   const session = await resolveRuntimeSession(svc, taskId);
   if (!session) {
-    return;
+    return false;
   }
-  await navigateDesktopBrowserToPort(svc, session, taskId, port);
+  return navigateDesktopBrowserToPort(svc, session, taskId, port);
 }

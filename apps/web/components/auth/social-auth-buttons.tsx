@@ -21,6 +21,7 @@ const socialProviders = [
     icon: GitHubIcon,
     type: "social" as const,
     provider: "github" as const,
+    enabled: true,
   },
   {
     id: "google",
@@ -28,6 +29,7 @@ const socialProviders = [
     icon: GoogleIcon,
     type: "social" as const,
     provider: "google" as const,
+    enabled: false,
   },
   {
     id: "windsurf",
@@ -35,6 +37,7 @@ const socialProviders = [
     icon: WindsurfIcon,
     type: "oauth2" as const,
     providerId: "windsurf",
+    enabled: false,
   },
 ];
 
@@ -45,6 +48,10 @@ export function SocialAuthButtons({ callbackURL }: SocialAuthButtonsProps) {
   const handleSocialSignIn = async (
     provider: (typeof socialProviders)[number],
   ) => {
+    if (!provider.enabled) {
+      return;
+    }
+
     setLoadingProvider(provider.id);
     setError(null);
 
@@ -74,17 +81,21 @@ export function SocialAuthButtons({ callbackURL }: SocialAuthButtonsProps) {
       {socialProviders.map((provider) => {
         const Icon = provider.icon;
         const isLoading = loadingProvider === provider.id;
+        const isDisabled = !provider.enabled || loadingProvider !== null;
 
         return (
           <button
             key={provider.id}
             type="button"
-            disabled={loadingProvider !== null}
+            disabled={isDisabled}
             onClick={() => handleSocialSignIn(provider)}
             className={cn(
               "flex w-full items-center justify-center gap-3 rounded-md border border-[#333]",
               "bg-[#1e1e1e] px-4 py-3 text-[15px] font-medium text-white",
-              "cursor-pointer transition-colors hover:bg-[#252525] disabled:cursor-not-allowed disabled:opacity-60",
+              "transition-colors",
+              provider.enabled
+                ? "cursor-pointer hover:bg-[#252525] disabled:cursor-not-allowed disabled:opacity-60"
+                : "cursor-not-allowed opacity-50",
             )}
           >
             <Icon />

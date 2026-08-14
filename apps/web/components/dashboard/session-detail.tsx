@@ -2,6 +2,13 @@
 
 import { useCallback, useState } from "react";
 import { Loader2 } from "lucide-react";
+import {
+  Confirmation,
+  ConfirmationAction,
+  ConfirmationActions,
+  ConfirmationRequest,
+  ConfirmationTitle,
+} from "@/components/ai-elements/confirmation";
 import { MotionButton } from "@/components/dashboard/motion-button";
 import { useSessions } from "@/components/dashboard/sessions-context";
 import type {
@@ -252,22 +259,29 @@ export function SessionDetail({
         </div>
       ) : null}
       {awaitingSandboxApproval ? (
-        <div className="mt-3 flex items-center justify-between gap-3 rounded-xl border border-violet-500/25 bg-violet-500/10 px-3 py-2.5">
-          <p className="text-[12px] text-violet-100">
-            Draft ready — run in devbox
-          </p>
-          <MotionButton
-            type="button"
-            onClick={() => void handleStartSandbox()}
-            disabled={startingSandbox}
-            className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg bg-violet-600 px-2.5 py-1 text-[11px] text-white hover:bg-violet-500 disabled:opacity-60"
-          >
-            {startingSandbox ? (
-              <Loader2 className="size-3 animate-spin" />
-            ) : null}
-            Run
-          </MotionButton>
-        </div>
+        <Confirmation
+          approval={{ id: `sandbox-${task.id}` }}
+          state="approval-requested"
+          className="mt-3 flex-row items-center justify-between gap-3 border-violet-500/25 bg-violet-500/10 px-3 py-2.5 text-violet-100"
+        >
+          <ConfirmationRequest>
+            <ConfirmationTitle className="text-[12px] text-violet-100">
+              Draft ready — run in devbox
+            </ConfirmationTitle>
+          </ConfirmationRequest>
+          <ConfirmationActions className="self-auto">
+            <ConfirmationAction
+              disabled={startingSandbox}
+              onClick={() => void handleStartSandbox()}
+              className="h-auto cursor-pointer gap-1.5 rounded-lg bg-violet-600 px-2.5 py-1 text-[11px] text-white hover:bg-violet-500 disabled:opacity-60"
+            >
+              {startingSandbox ? (
+                <Loader2 className="size-3 animate-spin" />
+              ) : null}
+              Run
+            </ConfirmationAction>
+          </ConfirmationActions>
+        </Confirmation>
       ) : null}
       {awaitingReview ? (
         <div className="mt-3 flex flex-wrap items-center gap-2">

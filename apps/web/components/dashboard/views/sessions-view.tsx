@@ -82,7 +82,7 @@ export function SessionsView() {
         )}
       >
         <div className="flex min-h-0 items-center justify-center">
-          <div className="w-full max-w-[460px] space-y-4">
+          <div className="w-full max-w-[520px] space-y-4">
             <PromptComposer selectedRepository={selectedRepository} />
             <GitHubPermissionsPanel compact />
           </div>

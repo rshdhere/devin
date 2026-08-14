@@ -116,12 +116,35 @@ const url = %s;
 const cdp = 'http://127.0.0.1:%d';
 const browser = await chromium.connectOverCDP(cdp);
 const context = browser.contexts()[0] ?? await browser.newContext({ viewport: { width: %d, height: %d } });
-const page = context.pages()[0] ?? await context.newPage();
-await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 15000 });
-await page.waitForTimeout(800);
+let page = context.pages().find((p) => !p.url().startsWith('devtools://')) ?? context.pages()[0];
+if (!page) {
+  page = await context.newPage();
+}
+await page.bringToFront();
+await page.setViewportSize({ width: %d, height: %d });
+let lastErr;
+for (let attempt = 0; attempt < 3; attempt++) {
+  try {
+    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 20000 });
+    await page.waitForTimeout(1200);
+    lastErr = null;
+    break;
+  } catch (err) {
+    lastErr = err;
+    await page.waitForTimeout(1000);
+  }
+}
+if (lastErr) throw lastErr;
+for (const extra of context.pages()) {
+  if (extra !== page && (extra.url() === 'about:blank' || extra.url() === '')) {
+    await extra.close().catch(() => {});
+  }
+}
 `,
 		jsonString(targetURL),
 		cdpDebugPort,
+		desktopWidth,
+		desktopHeight,
 		desktopWidth,
 		desktopHeight,
 	)

@@ -5,7 +5,10 @@ import {
   saveTaskSessionRecordingS3,
 } from "../../devbox/recording-s3.js";
 import type { TaskService } from "./task-service.js";
-import { resolveLiveSession } from "./desktop-capture-render.js";
+import {
+  resolveLiveSession,
+  refreshDevboxPreviewPort,
+} from "./desktop-capture-render.js";
 import { navigateDesktopBrowserToPort } from "./desktop-navigate.js";
 import {
   brainDelegateOrRuntime,
@@ -166,6 +169,9 @@ export async function startSessionRecording(
     });
   }
   await ensureDesktopComputer(svc, taskId);
+  if (!session.devboxPreviewPort) {
+    await refreshDevboxPreviewPort(svc, session, taskId);
+  }
   const port = session.devboxPreviewPort;
   if (port) {
     await navigateDesktopBrowserToPort(svc, session, taskId, port);
@@ -289,8 +295,36 @@ export function startDesktopRecordingWatcher(
   svc: TaskService,
   taskId: string,
 ): () => void {
-  void startSessionRecording(svc, taskId);
+  let stopped = false;
+
+  const keepBrowserOnPreview = async () => {
+    if (stopped) {
+      return;
+    }
+    const session =
+      svc.activeSessions.get(taskId) ??
+      svc.reviewSessions.get(taskId) ??
+      (await resolveLiveSession(svc, taskId));
+    if (!session) {
+      return;
+    }
+    if (!session.devboxPreviewPort) {
+      await refreshDevboxPreviewPort(svc, session, taskId);
+    }
+    const port = session.devboxPreviewPort;
+    if (port) {
+      await navigateDesktopBrowserToPort(svc, session, taskId, port);
+    }
+  };
+
+  void startSessionRecording(svc, taskId).then(() => keepBrowserOnPreview());
+  const interval = setInterval(() => {
+    void keepBrowserOnPreview();
+  }, 8_000);
+
   return () => {
+    stopped = true;
+    clearInterval(interval);
     void stopAndPersistSessionRecording(svc, taskId);
   };
 }

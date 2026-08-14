@@ -10,7 +10,6 @@ import {
   MIN_TEXTAREA_HEIGHT,
   textareaSpring,
   type AgentId,
-  type RepoMode,
 } from "@/components/dashboard/prompt-composer-constants";
 import { PromptComposerToolbar } from "@/components/dashboard/prompt-composer-toolbar";
 import { useSessions } from "@/components/dashboard/sessions-context";
@@ -29,7 +28,6 @@ export function PromptComposer({ selectedRepository }: PromptComposerProps) {
   const { startSession } = useSessions();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const agentMenuRef = useRef<HTMLDivElement>(null);
-  const repoMenuRef = useRef<HTMLDivElement>(null);
   const [showTerminalBanner, setShowTerminalBanner] = useState(true);
   const [prompt, setPrompt] = useState("");
   const [textareaHeight, setTextareaHeight] = useState(MIN_TEXTAREA_HEIGHT);
@@ -37,11 +35,6 @@ export function PromptComposer({ selectedRepository }: PromptComposerProps) {
   const [showAgentMenu, setShowAgentMenu] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [repoMode, setRepoMode] = useState<RepoMode>(
-    selectedRepository ? "existing" : "create",
-  );
-  const [newRepoName, setNewRepoName] = useState("");
-  const [showRepoOptions, setShowRepoOptions] = useState(false);
   const [composerMode, setComposerMode] = useState<"agent" | "ask">("agent");
 
   useEffect(() => {
@@ -51,12 +44,6 @@ export function PromptComposer({ selectedRepository }: PromptComposerProps) {
         !agentMenuRef.current.contains(event.target as Node)
       ) {
         setShowAgentMenu(false);
-      }
-      if (
-        repoMenuRef.current &&
-        !repoMenuRef.current.contains(event.target as Node)
-      ) {
-        setShowRepoOptions(false);
       }
     }
 
@@ -73,12 +60,6 @@ export function PromptComposer({ selectedRepository }: PromptComposerProps) {
     setTextareaHeight(nextHeight);
   }, [prompt, showTerminalBanner]);
 
-  useLayoutEffect(() => {
-    if (selectedRepository) {
-      setRepoMode("existing");
-    }
-  }, [selectedRepository]);
-
   async function handleSubmit() {
     const trimmed = prompt.trim();
     if (!trimmed || isSubmitting) {
@@ -89,24 +70,15 @@ export function PromptComposer({ selectedRepository }: PromptComposerProps) {
     setError(null);
 
     try {
-      const finalRepoName = newRepoName.trim();
-
       await startSession({
         prompt: trimmed,
         agent,
-        repository:
-          repoMode === "existing"
-            ? (selectedRepository ?? undefined)
-            : undefined,
-        createRepository:
-          repoMode === "create" && finalRepoName ? finalRepoName : undefined,
-        autoCreateRepository:
-          repoMode === "create" && !finalRepoName ? true : undefined,
+        repository: selectedRepository ?? undefined,
+        autoCreateRepository: selectedRepository ? undefined : true,
         autoStartSandbox: true,
         agentModel: agent === "cursor" ? DEFAULT_CURSOR_AGENT_MODEL : undefined,
       });
       setPrompt("");
-      setNewRepoName("");
     } catch (submitError) {
       setError(
         submitError instanceof Error
@@ -129,76 +101,46 @@ export function PromptComposer({ selectedRepository }: PromptComposerProps) {
 
   return (
     <div className="flex w-full flex-col items-center overflow-visible">
-      <div className="mb-4 flex items-center gap-1.5 text-[15px] font-medium text-zinc-200">
-        <DashboardLogo size={18} className="text-zinc-200" />
-        <span>Devin</span>
-      </div>
+      <div className="mb-3 flex w-full max-w-[520px] items-center justify-between px-0.5">
+        <div className="flex items-center gap-2 text-[15px] font-semibold text-white">
+          <DashboardLogo size={18} className="text-white" />
+          <span>Devin</span>
+        </div>
 
-      <div className="mb-3 flex items-center rounded-full border border-white/[0.06] bg-[#171717] p-0.5 text-[10px]">
-        <button
-          type="button"
-          onClick={() => setComposerMode("agent")}
-          className={cn(
-            "rounded-full px-2.5 py-1 transition-colors",
-            composerMode === "agent"
-              ? "bg-[#292929] text-zinc-200"
-              : "text-zinc-600 hover:text-zinc-400",
-          )}
-        >
-          Agent
-        </button>
-        <button
-          type="button"
-          onClick={() => setComposerMode("ask")}
-          className={cn(
-            "rounded-full px-2.5 py-1 transition-colors",
-            composerMode === "ask"
-              ? "bg-[#292929] text-zinc-200"
-              : "text-zinc-600 hover:text-zinc-400",
-          )}
-        >
-          Ask
-        </button>
+        <div className="flex items-center rounded-full bg-[#1c1c1c] p-[3px] text-[12px]">
+          <button
+            type="button"
+            onClick={() => setComposerMode("agent")}
+            className={cn(
+              "cursor-pointer rounded-full px-3 py-1 transition-colors",
+              composerMode === "agent"
+                ? "bg-[#2e2e2e] font-medium text-white"
+                : "text-zinc-500 hover:text-zinc-300",
+            )}
+          >
+            Agent
+          </button>
+          <button
+            type="button"
+            onClick={() => setComposerMode("ask")}
+            className={cn(
+              "cursor-pointer rounded-full px-3 py-1 transition-colors",
+              composerMode === "ask"
+                ? "bg-[#2e2e2e] font-medium text-white"
+                : "text-zinc-500 hover:text-zinc-300",
+            )}
+          >
+            Ask
+          </button>
+        </div>
       </div>
 
       <div
         className={cn(
-          "relative w-full max-w-[460px] rounded-[18px] border border-[#333] bg-[#1a1a1a]",
-          "shadow-[0_0_0_1px_rgba(255,255,255,0.03),0_8px_32px_rgba(0,0,0,0.4)]",
+          "relative w-full max-w-[520px] overflow-hidden rounded-2xl bg-[#1c1c1c]",
+          "shadow-[0_0_0_1px_rgba(255,255,255,0.04),0_12px_40px_rgba(0,0,0,0.45)]",
         )}
       >
-        {showTerminalBanner ? (
-          <>
-            <div className="flex items-center justify-between rounded-t-[18px] bg-[#171717] px-3 py-2">
-              <div className="flex items-center gap-2 text-[13px] text-gray-400">
-                <Terminal className="size-4 shrink-0 text-gray-500" />
-                <span>Run Devin directly from your terminal.</span>
-              </div>
-              <div className="flex items-center gap-1">
-                <MotionButton
-                  type="button"
-                  className="cursor-pointer text-[13px] text-[#4a90e2] hover:text-[#6aa8ef]"
-                >
-                  Get started
-                </MotionButton>
-                <MotionButton
-                  type="button"
-                  pressStyle="icon"
-                  onClick={() => setShowTerminalBanner(false)}
-                  className="cursor-pointer rounded-full p-1 text-gray-500 transition-colors hover:bg-[#222] hover:text-gray-300"
-                  aria-label="Dismiss banner"
-                >
-                  <X className="size-4" />
-                </MotionButton>
-              </div>
-            </div>
-            <div
-              aria-hidden
-              className="h-px bg-gradient-to-r from-transparent via-[#404040] to-transparent"
-            />
-          </>
-        ) : null}
-
         <motion.textarea
           ref={textareaRef}
           value={prompt}
@@ -215,10 +157,9 @@ export function PromptComposer({ selectedRepository }: PromptComposerProps) {
           animate={{ height: textareaHeight }}
           transition={textareaSpring}
           className={cn(
-            "w-full resize-none overflow-hidden bg-transparent px-5 pb-2",
-            showTerminalBanner ? "pt-3" : "pt-5",
-            "text-[15px] leading-relaxed text-white placeholder:text-gray-500",
-            "selection:bg-white selection:text-[#1a1a1a]",
+            "w-full resize-none overflow-hidden bg-transparent px-4 pt-4 pb-2",
+            "text-[15px] leading-relaxed text-zinc-100 placeholder:text-zinc-500",
+            "selection:bg-white selection:text-[#1c1c1c]",
             "outline-none disabled:opacity-60",
           )}
         />
@@ -232,27 +173,40 @@ export function PromptComposer({ selectedRepository }: PromptComposerProps) {
           showAgentMenu={showAgentMenu}
           onToggleAgentMenu={() => {
             setShowAgentMenu((open) => !open);
-            setShowRepoOptions(false);
           }}
           agentMenuRef={agentMenuRef}
-          repoMode={repoMode}
-          onRepoModeChange={(mode) => {
-            setRepoMode(mode);
-            setShowRepoOptions(false);
-          }}
-          newRepoName={newRepoName}
-          onNewRepoNameChange={setNewRepoName}
-          showRepoOptions={showRepoOptions}
-          onToggleRepoOptions={() => {
-            setShowRepoOptions((open) => !open);
-            setShowAgentMenu(false);
-          }}
-          repoMenuRef={repoMenuRef}
-          selectedRepository={selectedRepository}
           prompt={prompt}
           isSubmitting={isSubmitting}
           onSubmit={() => void handleSubmit()}
         />
+
+        {showTerminalBanner ? (
+          <div className="flex items-center justify-between border-t border-white/[0.06] bg-[#171717] px-4 py-2.5">
+            <div className="flex min-w-0 items-center gap-2 text-[13px] text-zinc-300">
+              <Terminal className="size-3.5 shrink-0 text-zinc-500" />
+              <span className="truncate">
+                Run Devin directly from your terminal.
+              </span>
+            </div>
+            <div className="ml-3 flex shrink-0 items-center gap-2.5">
+              <MotionButton
+                type="button"
+                className="cursor-pointer text-[13px] font-medium text-[#4b9dff] hover:text-[#6eb0ff]"
+              >
+                Get started
+              </MotionButton>
+              <MotionButton
+                type="button"
+                pressStyle="icon"
+                onClick={() => setShowTerminalBanner(false)}
+                className="cursor-pointer rounded-md p-0.5 text-zinc-500 transition-colors hover:text-zinc-300"
+                aria-label="Dismiss banner"
+              >
+                <X className="size-3.5" />
+              </MotionButton>
+            </div>
+          </div>
+        ) : null}
       </div>
 
       {error ? (
@@ -260,12 +214,12 @@ export function PromptComposer({ selectedRepository }: PromptComposerProps) {
       ) : null}
 
       {prompt.trim() ? (
-        <p className="mt-2 text-center text-[12px] text-gray-500">
+        <p className="mt-2 text-center text-[12px] text-zinc-500">
           Devbox snapshot:{" "}
           <span className="font-medium text-indigo-300/90">
             {runtimeLabel(resolvedRuntime)}
           </span>
-          <span className="text-gray-600">
+          <span className="text-zinc-600">
             {" "}
             — runtime agents always use the agent image
           </span>
