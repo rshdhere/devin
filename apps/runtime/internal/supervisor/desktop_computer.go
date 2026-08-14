@@ -408,13 +408,27 @@ func (s *Server) handleRecordingStop(w http.ResponseWriter, r *http.Request) {
 	if pidAlive(pidPath) {
 		data, _ := os.ReadFile(pidPath)
 		pid := strings.TrimSpace(string(data))
-		script := fmt.Sprintf("kill %s 2>/dev/null || true; rm -f %s", shellQuote(pid), shellQuote(pidPath))
+		script := fmt.Sprintf(
+			"kill -INT %s 2>/dev/null || true; for i in $(seq 1 20); do kill -0 %s 2>/dev/null || break; sleep 0.25; done; kill -TERM %s 2>/dev/null || true; rm -f %s",
+			shellQuote(pid),
+			shellQuote(pid),
+			shellQuote(pid),
+			shellQuote(pidPath),
+		)
 		_, _ = executil.RunGuest(r.Context(), s.workspace, script, workspace.DevinProcessEnv(s.workspace), nil)
-		time.Sleep(500 * time.Millisecond)
+		time.Sleep(750 * time.Millisecond)
 	}
 	out := recordingPath(s.workspace)
-	info, err := os.Stat(out)
-	if err != nil || info.Size() < 1024 {
+	var info os.FileInfo
+	var err error
+	for attempt := 0; attempt < 8; attempt++ {
+		info, err = os.Stat(out)
+		if err == nil && info.Size() >= 1024 {
+			break
+		}
+		time.Sleep(250 * time.Millisecond)
+	}
+	if err != nil || info == nil || info.Size() < 1024 {
 		writeError(w, http.StatusNotFound, "no session recording saved yet")
 		return
 	}

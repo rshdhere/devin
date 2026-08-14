@@ -42,6 +42,7 @@ export function PromptComposer({ selectedRepository }: PromptComposerProps) {
   );
   const [newRepoName, setNewRepoName] = useState("");
   const [showRepoOptions, setShowRepoOptions] = useState(false);
+  const [composerMode, setComposerMode] = useState<"agent" | "ask">("agent");
 
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
@@ -128,19 +129,47 @@ export function PromptComposer({ selectedRepository }: PromptComposerProps) {
 
   return (
     <div className="flex w-full flex-col items-center overflow-visible">
-      <div className="mb-6 flex justify-center">
-        <DashboardLogo size={52} className="text-[#525252]" />
+      <div className="mb-4 flex items-center gap-1.5 text-[15px] font-medium text-zinc-200">
+        <DashboardLogo size={18} className="text-zinc-200" />
+        <span>Devin</span>
+      </div>
+
+      <div className="mb-3 flex items-center rounded-full border border-white/[0.06] bg-[#171717] p-0.5 text-[10px]">
+        <button
+          type="button"
+          onClick={() => setComposerMode("agent")}
+          className={cn(
+            "rounded-full px-2.5 py-1 transition-colors",
+            composerMode === "agent"
+              ? "bg-[#292929] text-zinc-200"
+              : "text-zinc-600 hover:text-zinc-400",
+          )}
+        >
+          Agent
+        </button>
+        <button
+          type="button"
+          onClick={() => setComposerMode("ask")}
+          className={cn(
+            "rounded-full px-2.5 py-1 transition-colors",
+            composerMode === "ask"
+              ? "bg-[#292929] text-zinc-200"
+              : "text-zinc-600 hover:text-zinc-400",
+          )}
+        >
+          Ask
+        </button>
       </div>
 
       <div
         className={cn(
-          "relative w-full rounded-[28px] border border-[#333] bg-[#1a1a1a]",
+          "relative w-full max-w-[460px] rounded-[18px] border border-[#333] bg-[#1a1a1a]",
           "shadow-[0_0_0_1px_rgba(255,255,255,0.03),0_8px_32px_rgba(0,0,0,0.4)]",
         )}
       >
         {showTerminalBanner ? (
           <>
-            <div className="flex items-center justify-between rounded-t-[28px] bg-[#171717] px-4 py-2.5">
+            <div className="flex items-center justify-between rounded-t-[18px] bg-[#171717] px-3 py-2">
               <div className="flex items-center gap-2 text-[13px] text-gray-400">
                 <Terminal className="size-4 shrink-0 text-gray-500" />
                 <span>Run Devin directly from your terminal.</span>
@@ -175,7 +204,11 @@ export function PromptComposer({ selectedRepository }: PromptComposerProps) {
           value={prompt}
           onChange={(event) => setPrompt(event.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder="Ask Devin to build features, fix bugs, or ship changes"
+          placeholder={
+            composerMode === "ask"
+              ? "Ask Devin anything about your code"
+              : "Ask Devin to build features, fix bugs, or work on your code"
+          }
           rows={1}
           disabled={isSubmitting}
           initial={false}

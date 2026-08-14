@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import { Loader2 } from "lucide-react";
 import { MotionButton } from "@/components/dashboard/motion-button";
 import { useSessions } from "@/components/dashboard/sessions-context";

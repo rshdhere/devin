@@ -202,10 +202,13 @@ export async function stopAndPersistSessionRecording(
     // best-effort
   }
   try {
-    const upstream = await svc.proxyRuntimeRequest(
-      taskId,
-      "/desktop/recording",
-    );
+    let upstream = await svc.proxyRuntimeRequest(taskId, "/desktop/recording");
+    // ffmpeg needs a short interval to finalize the WebM cluster after the
+    // stop signal. Retry instead of persisting an empty or truncated video.
+    for (let attempt = 0; !upstream.ok && attempt < 4; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      upstream = await svc.proxyRuntimeRequest(taskId, "/desktop/recording");
+    }
     if (!upstream.ok) {
       return;
     }

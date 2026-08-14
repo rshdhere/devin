@@ -82,7 +82,7 @@ export function SessionsView() {
         )}
       >
         <div className="flex min-h-0 items-center justify-center">
-          <div className="w-full max-w-[840px] space-y-4">
+          <div className="w-full max-w-[460px] space-y-4">
             <PromptComposer selectedRepository={selectedRepository} />
             <GitHubPermissionsPanel compact />
           </div>
@@ -103,7 +103,7 @@ export function SessionsView() {
         >
           <div
             className={cn(
-              "mx-auto w-full max-w-[840px]",
+              "mx-auto w-full max-w-[460px]",
               isDismissed && "pointer-events-none select-none",
             )}
           >

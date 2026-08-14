@@ -31,4 +31,22 @@ describe("greenfieldShellScaffoldFiles", () => {
     expect(files.some((file) => file.path === "package.json")).toBe(true);
     expect(files.some((file) => file.path === "src/index.js")).toBe(true);
   });
+
+  test("keeps Go scaffolds free of JavaScript and TypeScript files", () => {
+    const files = greenfieldShellScaffoldFiles({
+      title: "Greeting API",
+      prompt: "build a Go HTTP API",
+      stackRuntime: "go",
+    });
+
+    expect(files.map((file) => file.path)).toEqual([
+      "README.md",
+      ".gitignore",
+      "go.mod",
+      "main.go",
+    ]);
+    expect(files.some((file) => /\.(?:js|jsx|ts|tsx)$/.test(file.path))).toBe(
+      false,
+    );
+  });
 });

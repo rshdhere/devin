@@ -113,8 +113,8 @@ export function SessionChatColumn({
       }`;
 
   return (
-    <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-[#0a0a0a] lg:w-[340px] lg:max-w-[340px] lg:flex-none lg:border-r lg:border-white/[0.06]">
-      <header className="flex shrink-0 items-center gap-2 border-b border-white/[0.06] px-3 py-3">
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-[#0a0a0a] lg:w-[395px] lg:max-w-[395px] lg:flex-none lg:border-r lg:border-white/[0.06]">
+      <header className="flex shrink-0 items-center gap-2 border-b border-white/[0.06] px-3 py-2.5">
         <MotionButton
           type="button"
           pressStyle="icon"
@@ -146,7 +146,7 @@ export function SessionChatColumn({
         </div>
       ) : null}
 
-      <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
+      <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
         {!canUseDevbox(task) ? <TipCard /> : null}
 
         {isActive && statusLine ? (
@@ -208,7 +208,7 @@ export function SessionChatColumn({
 
       <div className="shrink-0 border-t border-white/[0.06] bg-[#0a0a0a] p-3">
         <form
-          className="rounded-2xl border border-white/[0.08] bg-[#111111] p-2"
+          className="rounded-xl border border-white/[0.08] bg-[#171717] p-2.5 shadow-[0_0_0_1px_rgba(255,255,255,0.02)]"
           onSubmit={(event) => {
             event.preventDefault();
             if (!composerDisabled && followUpPrompt.trim()) {
@@ -220,9 +220,9 @@ export function SessionChatColumn({
             value={followUpPrompt}
             onChange={(event) => onFollowUpChange(event.target.value)}
             disabled={composerDisabled || continuingSession}
-            rows={2}
+            rows={1}
             placeholder="Ask Devin to build features, fix bugs, or work on your code"
-            className="w-full resize-none bg-transparent px-2 py-1 text-[13px] leading-relaxed text-zinc-100 outline-none placeholder:text-zinc-600 disabled:opacity-50"
+            className="w-full resize-none bg-transparent px-2 py-1.5 text-[13px] leading-relaxed text-zinc-100 outline-none placeholder:text-zinc-600 disabled:opacity-50"
             onKeyDown={(event) => {
               if (event.key === "Enter" && !event.shiftKey) {
                 event.preventDefault();

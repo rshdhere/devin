@@ -3,12 +3,12 @@
 import {
   ArrowUp,
   Bot,
+  Bell,
   ChevronDown,
   FolderPlus,
   GitBranch,
   Loader2,
   Mic,
-  MoreHorizontal,
   Plus,
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
@@ -75,7 +75,7 @@ export function PromptComposerToolbar({
             className="flex cursor-pointer items-center gap-1.5 rounded-full border border-[#333] bg-[#161616] px-2.5 py-1 text-[13px] text-gray-300 transition-colors hover:bg-[#222] hover:text-white"
           >
             <Bot className="size-3.5 text-gray-400" strokeWidth={1.75} />
-            {selectedAgent.label}
+            {selectedAgent.label === "Cursor" ? "Normal" : selectedAgent.label}
             <ChevronDown
               className={cn(
                 "size-3 text-gray-500 transition-transform",
@@ -242,7 +242,7 @@ export function PromptComposerToolbar({
           className="cursor-pointer rounded-full p-1.5 text-gray-500 transition-colors hover:bg-[#222] hover:text-gray-300"
           aria-label="More options"
         >
-          <MoreHorizontal className="size-4" />
+          <Bell className="size-4" />
         </MotionButton>
       </div>
 
@@ -273,6 +273,14 @@ export function PromptComposerToolbar({
           ) : (
             <ArrowUp className="size-4" strokeWidth={2.5} />
           )}
+        </MotionButton>
+        <MotionButton
+          type="button"
+          pressStyle="icon"
+          aria-label="Send options"
+          className="cursor-pointer rounded-full p-1.5 text-gray-500 transition-colors hover:bg-[#222] hover:text-gray-300"
+        >
+          <ChevronDown className="size-3.5" />
         </MotionButton>
       </div>
     </div>

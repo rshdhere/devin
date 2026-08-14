@@ -6,8 +6,13 @@ import {
   ChevronRight,
   Code2,
   Copy,
+  FileCode2,
+  History,
+  MessageCircle,
   Loader2,
   Monitor,
+  TerminalSquare,
+  Users,
 } from "lucide-react";
 import {
   changeKindFromType,
@@ -150,12 +155,44 @@ export function ChangesStackPanel({
 
   if (files.length === 0) {
     return (
-      <div className="flex h-full flex-col items-center justify-center gap-2 px-6 text-center">
-        <Monitor className="size-8 text-zinc-700" />
-        <p className="text-[13px] text-zinc-500">No changes yet</p>
-        <p className="max-w-sm text-[12px] text-zinc-600">
-          File diffs will appear here as the agent edits the repo.
-        </p>
+      <div className="flex h-full flex-col items-center justify-center px-6 text-left">
+        <div className="w-full max-w-[250px] space-y-3">
+          <WorkspaceHint
+            icon={Monitor}
+            label="Desktop"
+            detail="Watch and control Devin's Desktop"
+          />
+          <WorkspaceHint
+            icon={FileCode2}
+            label="Editor"
+            detail="Full control of Devin's machine"
+          />
+          <WorkspaceHint
+            icon={Code2}
+            label="Changes"
+            detail="See Devin's file edits"
+          />
+          <WorkspaceHint
+            icon={TerminalSquare}
+            label="Shell"
+            detail="View Devin's command history"
+          />
+          <WorkspaceHint
+            icon={History}
+            label="Progress"
+            detail="Understand Devin's history and actions"
+          />
+          <WorkspaceHint
+            icon={Users}
+            label="Agents"
+            detail="Manage this session's child sessions"
+          />
+          <WorkspaceHint
+            icon={MessageCircle}
+            label="Side chat"
+            detail="Ask questions without interrupting your main agent"
+          />
+        </div>
       </div>
     );
   }
@@ -299,6 +336,26 @@ export function ChangesStackPanel({
             </section>
           );
         })}
+      </div>
+    </div>
+  );
+}
+
+function WorkspaceHint({
+  icon: Icon,
+  label,
+  detail,
+}: {
+  icon: typeof Monitor;
+  label: string;
+  detail: string;
+}) {
+  return (
+    <div className="flex items-start gap-2 text-zinc-500">
+      <Icon className="mt-0.5 size-3.5 shrink-0 text-zinc-500" />
+      <div>
+        <p className="text-[12px] text-zinc-300">{label}</p>
+        <p className="text-[10px] text-zinc-600">{detail}</p>
       </div>
     </div>
   );
