@@ -7,8 +7,76 @@ import {
 import type { TaskService } from "./task-service.js";
 import { resolveLiveSession } from "./desktop-capture-render.js";
 import { navigateDesktopBrowserToPort } from "./desktop-navigate.js";
-import { brainDelegateOrRuntime } from "./resolve-session-proxy.js";
+import {
+  brainDelegateOrRuntime,
+  requestWorkerRehydrate,
+} from "./resolve-session-proxy.js";
 import { delegateRequestToWorker, wakeSession } from "./session-lifecycle.js";
+
+function bridgeWebSockets(client: WebSocket, upstream: WebSocket): void {
+  client.on("message", (data, isBinary) => {
+    if (upstream.readyState === WebSocket.OPEN) {
+      upstream.send(data, { binary: isBinary });
+    }
+  });
+  upstream.on("message", (data, isBinary) => {
+    if (client.readyState === WebSocket.OPEN) {
+      client.send(data, { binary: isBinary });
+    }
+  });
+  client.on("close", () => upstream.close());
+  upstream.on("close", () => client.close());
+  client.on("error", () => upstream.close());
+  upstream.on("error", () => client.close());
+}
+
+function workerVNCWebSocketUrl(svc: TaskService, taskId: string): string {
+  const base = svc
+    .executionWorkerUrl!.replace(/^http/, "ws")
+    .replace(/\/$/, "");
+  return `${base}/api/v1/tasks/${encodeURIComponent(taskId)}/desktop-vnc/ws`;
+}
+
+function openWorkerVNCWebSocket(
+  svc: TaskService,
+  taskId: string,
+): Promise<WebSocket> {
+  return new Promise((resolve, reject) => {
+    const upstream = new WebSocket(workerVNCWebSocketUrl(svc, taskId));
+    upstream.once("open", () => resolve(upstream));
+    upstream.once("error", reject);
+  });
+}
+
+async function proxyBrainDesktopVNCWebSocket(
+  svc: TaskService,
+  taskId: string,
+  clientWs: WebSocket,
+): Promise<void> {
+  if (!svc.executionWorkerUrl?.trim()) {
+    clientWs.close(1011, "no execution worker");
+    return;
+  }
+
+  const connect = async (): Promise<WebSocket> => {
+    try {
+      return await openWorkerVNCWebSocket(svc, taskId);
+    } catch {
+      const rehydrated = await requestWorkerRehydrate(svc, taskId);
+      if (!rehydrated.ok) {
+        throw new Error("no devbox session");
+      }
+      return openWorkerVNCWebSocket(svc, taskId);
+    }
+  };
+
+  try {
+    const upstream = await connect();
+    bridgeWebSockets(clientWs, upstream);
+  } catch {
+    clientWs.close(1011, "no devbox session");
+  }
+}
 
 export async function ensureDesktopComputer(
   svc: TaskService,
@@ -59,6 +127,11 @@ export async function proxyRuntimeWebSocket(
   runtimePath: string,
   clientWs: WebSocket,
 ): Promise<void> {
+  if (svc.mode === "brain") {
+    await proxyBrainDesktopVNCWebSocket(svc, taskId, clientWs);
+    return;
+  }
+
   const session =
     (await resolveLiveSession(svc, taskId)) ?? (await wakeSession(svc, taskId));
   if (!session) {
@@ -68,21 +141,9 @@ export async function proxyRuntimeWebSocket(
   const base = session.runtimeBaseUrl.replace(/^http/, "ws");
   const upstream = new WebSocket(`${base}${runtimePath}`);
   upstream.on("open", () => {
-    clientWs.on("message", (data, isBinary) => {
-      if (upstream.readyState === WebSocket.OPEN) {
-        upstream.send(data, { binary: isBinary });
-      }
-    });
-    upstream.on("message", (data, isBinary) => {
-      if (clientWs.readyState === WebSocket.OPEN) {
-        clientWs.send(data, { binary: isBinary });
-      }
-    });
+    bridgeWebSockets(clientWs, upstream);
   });
-  upstream.on("close", () => clientWs.close());
   upstream.on("error", () => clientWs.close(1011, "runtime websocket failed"));
-  clientWs.on("close", () => upstream.close());
-  clientWs.on("error", () => upstream.close());
 }
 
 export async function startSessionRecording(

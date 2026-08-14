@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Loader2, Monitor } from "lucide-react";
+import { Loader2, Monitor, RefreshCw } from "lucide-react";
 import type { Task } from "@devin/types";
 import { tasksApiUrl } from "@/lib/api/http";
 import { canUseDevbox } from "@/lib/sessions/devbox";
@@ -34,6 +34,53 @@ export function SessionDesktopPanel({
   const [view, setView] = useState<DesktopView>("interactive");
   const [recordingUrl, setRecordingUrl] = useState<string | null>(null);
   const [recordingError, setRecordingError] = useState(false);
+  const [interactiveLoading, setInteractiveLoading] = useState(false);
+  const [interactiveError, setInteractiveError] = useState<string | null>(null);
+  const [interactiveReady, setInteractiveReady] = useState(false);
+
+  const prepareInteractive = useCallback(async () => {
+    if (!canUse) {
+      return;
+    }
+    setInteractiveLoading(true);
+    setInteractiveError(null);
+    setInteractiveReady(false);
+    try {
+      const response = await fetch(interactiveSrc, {
+        credentials: "include",
+        signal: AbortSignal.timeout(120_000),
+      });
+      if (response.status === 504) {
+        setInteractiveError(
+          "Devbox is still starting — try again in a moment.",
+        );
+        return;
+      }
+      if (!response.ok) {
+        const body = (await response.text()).slice(0, 200);
+        setInteractiveError(
+          body.trim() ||
+            `Desktop unavailable (HTTP ${response.status}). Wake the devbox or retry.`,
+        );
+        return;
+      }
+      setInteractiveReady(true);
+    } catch (error) {
+      if (error instanceof DOMException && error.name === "AbortError") {
+        setInteractiveError(
+          "Desktop connection timed out — the devbox may still be booting.",
+        );
+      } else {
+        setInteractiveError(
+          error instanceof Error
+            ? error.message
+            : "Could not connect to desktop",
+        );
+      }
+    } finally {
+      setInteractiveLoading(false);
+    }
+  }, [canUse, interactiveSrc]);
 
   const loadRecording = useCallback(async () => {
     if (!canUse) {
@@ -63,6 +110,12 @@ export function SessionDesktopPanel({
       setRecordingError(true);
     }
   }, [canUse, recordingSrc]);
+
+  useEffect(() => {
+    if (view === "interactive" && canUse) {
+      void prepareInteractive();
+    }
+  }, [canUse, prepareInteractive, task.id, view]);
 
   useEffect(() => {
     if (view === "recording" && isTerminal) {
@@ -103,7 +156,7 @@ export function SessionDesktopPanel({
       <div className="flex shrink-0 items-center justify-between gap-2 border-b border-white/[0.06] px-3 py-2">
         <div className="min-w-0">
           <p className="truncate text-[11px] font-medium text-zinc-300">
-            {isEmbed ? "Desktop" : "Desktop"}
+            Desktop
           </p>
           <p className="truncate text-[10px] text-zinc-600">
             {showRecording
@@ -144,6 +197,22 @@ export function SessionDesktopPanel({
                 </button>
               ) : null}
             </div>
+            {showInteractive ? (
+              <button
+                type="button"
+                onClick={() => void prepareInteractive()}
+                disabled={interactiveLoading}
+                className="inline-flex cursor-pointer items-center gap-1 rounded-md px-2 py-1 text-[11px] text-zinc-400 hover:bg-white/[0.06] hover:text-zinc-200 disabled:opacity-50"
+              >
+                <RefreshCw
+                  className={cn(
+                    "size-3.5",
+                    interactiveLoading && "animate-spin",
+                  )}
+                />
+                Retry
+              </button>
+            ) : null}
           </div>
         ) : null}
       </div>
@@ -155,13 +224,38 @@ export function SessionDesktopPanel({
         )}
       >
         {showInteractive ? (
-          <iframe
-            key={interactiveSrc}
-            src={interactiveSrc}
-            title="Interactive devbox desktop"
-            className="h-full w-full border-0 bg-black"
-            sandbox="allow-scripts allow-same-origin"
-          />
+          interactiveReady ? (
+            <iframe
+              key={`${task.id}-${interactiveSrc}`}
+              src={interactiveSrc}
+              title="Interactive devbox desktop"
+              className="h-full w-full border-0 bg-black"
+            />
+          ) : (
+            <div className="flex flex-col items-center gap-2 p-6">
+              <Loader2
+                className={cn(
+                  "size-6 text-zinc-600",
+                  interactiveLoading && "animate-spin",
+                )}
+              />
+              <p className="max-w-sm text-center text-[12px] text-zinc-500">
+                {interactiveError ??
+                  (interactiveLoading
+                    ? "Starting interactive desktop…"
+                    : "Preparing desktop…")}
+              </p>
+              {interactiveError && isEmbed ? (
+                <button
+                  type="button"
+                  onClick={() => void prepareInteractive()}
+                  className="mt-1 rounded-md border border-white/[0.08] px-2.5 py-1 text-[11px] text-zinc-300 hover:bg-white/[0.04]"
+                >
+                  Retry
+                </button>
+              ) : null}
+            </div>
+          )
         ) : showRecording ? (
           recordingUrl ? (
             <video

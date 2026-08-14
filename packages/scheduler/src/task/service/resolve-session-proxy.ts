@@ -177,6 +177,9 @@ export function workerPathTimeoutMs(path: string): number {
   if (path.includes("/desktop-screenshot")) {
     return WORKER_DELEGATE_SCREENSHOT_TIMEOUT_MS;
   }
+  if (path.includes("/desktop-vnc")) {
+    return WORKER_DELEGATE_PREVIEW_TIMEOUT_MS;
+  }
   return WORKER_DELEGATE_TIMEOUT_MS;
 }
 
