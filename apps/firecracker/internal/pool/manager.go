@@ -121,7 +121,6 @@ func (m *Manager) Start(ctx context.Context) {
 	m.ready[warmRuntime] = queue
 	m.mu.Unlock()
 	go m.warmRuntimePool(ctx, warmRuntime, queue)
-	go m.reapUnhealthyWarmVMs(ctx)
 	slog.Info("warming microvm pool", "runtime", warmRuntime, "poolSize", m.cfg.PoolSize)
 }
 

@@ -5,7 +5,6 @@ import (
 	"net/http"
 	"os"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/rshdhere/devin/apps/firecracker/internal/cnihelper"
@@ -99,22 +98,10 @@ func (s *Server) handleDeleteVM(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleFlushGuestNetwork(w http.ResponseWriter, _ *http.Request) {
-	confDir := firstNonEmpty(os.Getenv("FIRECRACKER_CNI_CONF_DIR"), "/etc/cni/conf.d")
-	networkName := firstNonEmpty(os.Getenv("FIRECRACKER_CNI_NETWORK"), "fcnet")
-	if err := cnihelper.RepairGuestEgress(confDir, networkName); err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
+	// Conntrack + NAT refresh only. Full CNI teardown here races the live guest
+	// (shared 192.168.127.8) and makes runtime health fail for 120s.
+	cnihelper.RefreshGuestNAT()
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
-}
-
-func firstNonEmpty(values ...string) string {
-	for _, value := range values {
-		if strings.TrimSpace(value) != "" {
-			return value
-		}
-	}
-	return ""
 }
 
 func writeJSON(w http.ResponseWriter, status int, payload any) {

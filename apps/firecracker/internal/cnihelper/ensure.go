@@ -44,9 +44,16 @@ const staticFCNetConflist = `{
 }
 `
 
+// RefreshGuestNAT flushes stale conntrack for the shared guest subnet and
+// ensures MASQUERADE/FORWARD rules exist. Safe while a microVM is running.
+func RefreshGuestNAT() {
+	FlushGuestConntrack()
+	ensureSubnetMasquerade()
+	ensureForwardAccept()
+}
+
 // RepairGuestEgress refreshes CNI config, iptables NAT/FORWARD, and conntrack
-// for the static guest subnet. Safe to call between microVM lifecycles when
-// sandbox HTTPS probes fail.
+// for the static guest subnet. Only call when no microVM is using the CNI netns.
 func RepairGuestEgress(confDir, networkName string) error {
 	if err := PrepareCNIEnvironment(confDir, networkName); err != nil {
 		return err
