@@ -341,7 +341,9 @@ export async function waitForRuntime(
 ): Promise<void> {
   const deadline = Date.now() + svc.runtimeReadyTimeoutMs;
   let lastError = "";
+  let attempt = 0;
   while (Date.now() < deadline) {
+    attempt += 1;
     try {
       const health = await runtime.health();
       if (health.status === "ok") {
@@ -351,6 +353,10 @@ export async function waitForRuntime(
     } catch (error) {
       lastError =
         error instanceof Error ? error.message : "runtime health probe failed";
+    }
+    // Guest CNI/conntrack often breaks after prior sandboxes; repair mid-wait.
+    if (attempt === 1 || attempt % 10 === 0) {
+      await repairGuestNetworkOnHost(svc, taskId);
     }
     await sleep(500);
   }

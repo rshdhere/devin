@@ -84,9 +84,26 @@ export function DiagnosticsPanel({
               dashboard to verify the brain and worker are connected.
             </p>
           ) : null}
-          {/cannot reach orchestrator|unable to connect|computer able to access/i.test(
-            task.message,
+          {/Runtime supervisor at .* did not become ready/i.test(
+            task.message ?? "",
           ) ? (
+            <p className="text-[12px] leading-relaxed text-amber-200/90">
+              The execution host cannot reach the sandbox runtime on{" "}
+              <span className="font-mono text-amber-100">
+                192.168.127.8:8081
+              </span>
+              . Guest network was likely stale — retry the task. If it persists,
+              on the Firecracker host run{" "}
+              <span className="font-mono text-amber-100">
+                sudo devin-infra fix-sandbox-dns
+              </span>{" "}
+              then{" "}
+              <span className="font-mono text-amber-100">
+                sudo systemctl restart devin-firecracker.service
+              </span>
+              .
+            </p>
+          ) : /cannot reach orchestrator/i.test(task.message ?? "") ? (
             <p className="text-[12px] leading-relaxed text-amber-200/90">
               The scheduler cannot reach the orchestrator API. In EKS set{" "}
               <span className="font-mono text-amber-100">ORCHESTRATOR_URL</span>{" "}

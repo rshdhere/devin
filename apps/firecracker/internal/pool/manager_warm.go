@@ -86,6 +86,66 @@ func (m *Manager) networkBusy() bool {
 	return len(m.assigned) > 0 || len(m.vms) > 0
 }
 
+// reapUnhealthyWarmVMs periodically probes warm-pool guests and discards any
+// that stop responding on the shared static IP. Without this, a dead warm VM
+// can stay counted as ready until claim time (or forever if never claimed).
+func (m *Manager) reapUnhealthyWarmVMs(ctx context.Context) {
+	ticker := time.NewTicker(20 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			m.reapWarmQueuesOnce()
+		}
+	}
+}
+
+func (m *Manager) reapWarmQueuesOnce() {
+	m.mu.RLock()
+	queues := make([]chan *vm.Instance, 0, len(m.ready))
+	for _, queue := range m.ready {
+		queues = append(queues, queue)
+	}
+	m.mu.RUnlock()
+
+	for _, queue := range queues {
+		kept := make([]*vm.Instance, 0, cap(queue))
+		for _, warm := range drainQueue(queue) {
+			checkCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			err := warm.HealthCheck(checkCtx)
+			cancel()
+			if err != nil {
+				m.mu.Lock()
+				if m.readyCount > 0 {
+					m.readyCount--
+				}
+				m.mu.Unlock()
+				slog.Warn("discarding unhealthy warm microVM",
+					"vmId", warm.ID, "runtime", warm.Runtime, "error", err)
+				_ = cnihelper.RepairGuestEgress(m.cfg.CNIConfDir, m.cfg.CNINetworkName)
+				_ = warm.Shutdown(context.Background())
+				continue
+			}
+			kept = append(kept, warm)
+		}
+		for _, warm := range kept {
+			select {
+			case queue <- warm:
+			default:
+				m.mu.Lock()
+				if m.readyCount > 0 {
+					m.readyCount--
+				}
+				m.mu.Unlock()
+				_ = warm.Shutdown(context.Background())
+			}
+		}
+	}
+}
+
 func (m *Manager) drainWarmPool() {
 	m.mu.RLock()
 	queues := make([]chan *vm.Instance, 0, len(m.ready))
