@@ -25,6 +25,9 @@ func SyncPlatformConfig(ctx context.Context) error {
 	if err := sysutil.MustRoot(); err != nil {
 		return err
 	}
+	if err := FixSandboxDNS(ctx); err != nil {
+		log.Printf("fix-sandbox-dns during sync: %v", err)
+	}
 	cfg, err := awsutil.Config(ctx, "")
 	if err != nil {
 		return err

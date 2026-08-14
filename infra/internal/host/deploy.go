@@ -19,6 +19,9 @@ func Deploy(ctx context.Context) error {
 	if err := sysutil.MustRoot(); err != nil {
 		return err
 	}
+	if err := FixSandboxDNS(ctx); err != nil {
+		log.Printf("fix-sandbox-dns during deploy: %v", err)
+	}
 	registry, tag := envx.Env("DEVIN_CONTAINER_REGISTRY", "docker.io/rshdhere"), envx.Env("DEVIN_IMAGE_TAG", "latest")
 	hostName := envx.Env("DEVIN_HOST_NAME", "")
 	if hostName == "" {

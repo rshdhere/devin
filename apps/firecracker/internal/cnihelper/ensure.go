@@ -44,6 +44,67 @@ const staticFCNetConflist = `{
 }
 `
 
+// RepairGuestEgress refreshes CNI config, iptables NAT/FORWARD, and conntrack
+// for the static guest subnet. Safe to call between microVM lifecycles when
+// sandbox HTTPS probes fail.
+func RepairGuestEgress(confDir, networkName string) error {
+	if err := PrepareCNIEnvironment(confDir, networkName); err != nil {
+		return err
+	}
+	if err := cleanupStaleCNIChains(); err != nil {
+		return err
+	}
+	ensureForwardAccept()
+	return nil
+}
+
+func ensureForwardAccept() {
+	rules := []struct {
+		check []string
+		add   []string
+	}{
+		{
+			check: []string{"-C", "FORWARD", "-s", "192.168.127.0/24", "-j", "ACCEPT"},
+			add:   []string{"-I", "FORWARD", "1", "-s", "192.168.127.0/24", "-j", "ACCEPT"},
+		},
+		{
+			check: []string{"-C", "FORWARD", "-d", "192.168.127.0/24", "-m", "state", "--state", "RELATED,ESTABLISHED", "-j", "ACCEPT"},
+			add:   []string{"-I", "FORWARD", "1", "-d", "192.168.127.0/24", "-m", "state", "--state", "RELATED,ESTABLISHED", "-j", "ACCEPT"},
+		},
+	}
+	for _, rule := range rules {
+		check := exec.Command("iptables", append([]string{}, rule.check...)...)
+		if check.Run() == nil {
+			continue
+		}
+		_ = exec.Command("iptables", append([]string{}, rule.add...)...).Run()
+	}
+
+	if exec.Command("iptables", "-L", "DOCKER-USER", "-n").Run() != nil {
+		return
+	}
+	dockerRules := []struct {
+		check []string
+		add   []string
+	}{
+		{
+			check: []string{"-C", "DOCKER-USER", "-s", "192.168.127.0/24", "-j", "ACCEPT"},
+			add:   []string{"-I", "DOCKER-USER", "1", "-s", "192.168.127.0/24", "-j", "ACCEPT"},
+		},
+		{
+			check: []string{"-C", "DOCKER-USER", "-d", "192.168.127.0/24", "-m", "conntrack", "--ctstate", "ESTABLISHED,RELATED", "-j", "ACCEPT"},
+			add:   []string{"-I", "DOCKER-USER", "1", "-d", "192.168.127.0/24", "-m", "conntrack", "--ctstate", "ESTABLISHED,RELATED", "-j", "ACCEPT"},
+		},
+	}
+	for _, rule := range dockerRules {
+		check := exec.Command("iptables", append([]string{}, rule.check...)...)
+		if check.Run() == nil {
+			continue
+		}
+		_ = exec.Command("iptables", append([]string{}, rule.add...)...).Run()
+	}
+}
+
 func PrepareCNIEnvironment(confDir, networkName string) error {
 	confDir = firstNonEmpty(confDir, "/etc/cni/conf.d")
 	networkName = firstNonEmpty(networkName, "fcnet")

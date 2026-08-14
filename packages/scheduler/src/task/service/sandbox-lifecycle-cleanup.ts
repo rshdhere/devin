@@ -277,25 +277,60 @@ export async function waitForSandbox(
   throw new Error(timeoutMessage);
 }
 
+export async function repairGuestNetworkOnHost(
+  svc: TaskService,
+  taskId: string,
+): Promise<boolean> {
+  const base = svc.firecrackerHostUrl?.trim().replace(/\/$/, "");
+  if (!base) {
+    return false;
+  }
+  try {
+    const response = await fetch(`${base}/v1/network/flush`, {
+      method: "POST",
+      signal: AbortSignal.timeout(15_000),
+    });
+    if (!response.ok) {
+      emit(
+        svc,
+        "agent.log",
+        taskId,
+        `Guest network repair failed (HTTP ${response.status})`,
+        { firecrackerHostUrl: base },
+      );
+      return false;
+    }
+    emit(
+      svc,
+      "agent.log",
+      taskId,
+      "Repaired guest network egress on execution host",
+      {
+        firecrackerHostUrl: base,
+        networkRepaired: true,
+      },
+    );
+    return true;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    emit(
+      svc,
+      "agent.log",
+      taskId,
+      `Guest network repair skipped (${message})`,
+      {
+        firecrackerHostUrl: base,
+      },
+    );
+    return false;
+  }
+}
+
 export async function flushGuestNetworkBeforeRuntimeProbe(
   svc: TaskService,
   taskId: string,
 ): Promise<void> {
-  const base = svc.firecrackerHostUrl?.trim().replace(/\/$/, "");
-  if (!base) {
-    return;
-  }
-  try {
-    await fetch(`${base}/v1/network/flush`, {
-      method: "POST",
-      signal: AbortSignal.timeout(5_000),
-    });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    emit(svc, "agent.log", taskId, `Guest network flush skipped (${message})`, {
-      firecrackerHostUrl: base,
-    });
-  }
+  await repairGuestNetworkOnHost(svc, taskId);
 }
 
 export async function waitForRuntime(

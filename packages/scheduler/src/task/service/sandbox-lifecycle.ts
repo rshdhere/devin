@@ -397,6 +397,7 @@ export {
   waitForSandboxDeleted,
   waitForSandbox,
   flushGuestNetworkBeforeRuntimeProbe,
+  repairGuestNetworkOnHost,
   waitForRuntime,
   suspendSandbox,
   wakeSandbox,

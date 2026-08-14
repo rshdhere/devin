@@ -28,6 +28,7 @@ import {
 } from "./git-operations.js";
 import { alignHydratedRepoWithOriginMain } from "./greenfield-provision.js";
 import { ensureSandboxDns } from "./sandbox-lifecycle.js";
+import { repairGuestNetworkOnHost } from "./sandbox-lifecycle-cleanup.js";
 import {
   GUEST_FS_REBUILD_HINT,
   isGuestFilesystemCorrupt,
@@ -165,9 +166,11 @@ export async function ensureSandboxConnectivity(
   emit(svc, "agent.log", taskId, "Checking sandbox outbound connectivity", {
     phase: "egress_probe",
   });
+  await repairGuestNetworkOnHost(svc, taskId);
   for (let attempt = 0; attempt < 3; attempt += 1) {
     await ensureSandboxDns(svc, runtime, taskId);
     if (attempt > 0) {
+      await repairGuestNetworkOnHost(svc, taskId);
       await sleep(2_000);
     }
 
@@ -221,7 +224,8 @@ export async function ensureSandboxConnectivity(
         ? "Sandbox guest filesystem is corrupt (rootfs/mem snapshot mismatch). " +
           GUEST_FS_REBUILD_HINT
         : "Sandbox has no outbound DNS/HTTPS to the Cursor API (api2.cursor.sh). " +
-          "On the execution host run: sudo devin-infra fix-sandbox-dns && sudo devin-infra fix-cni, then rebuild the agent snapshot.";
+          "Guest network repair was attempted automatically — retry the task. " +
+          "If it persists, on the execution host run: sudo devin-infra fix-sandbox-dns && sudo devin-infra fix-cni";
       emit(svc, "agent.log", taskId, message, {
         cursorReachable: false,
         dns: dnsCheck,
