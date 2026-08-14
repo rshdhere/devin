@@ -62,6 +62,12 @@ func (l *Launcher) Restore(ctx context.Context, vmID, name, runtime string, cpu 
 		return nil, err
 	}
 
+	rootfsClone := filepath.Join(vmDir, "rootfs.ext4")
+	if err := cloneRootfs(meta.RootfsPath, rootfsClone); err != nil {
+		_ = os.RemoveAll(vmDir)
+		return nil, fmt.Errorf("clone golden rootfs: %w", err)
+	}
+
 	socketPath := filepath.Join(vmDir, "firecracker.sock")
 	logPath := filepath.Join(vmDir, "firecracker.log")
 
@@ -69,18 +75,15 @@ func (l *Launcher) Restore(ctx context.Context, vmID, name, runtime string, cpu 
 		VMID:       vmID,
 		SocketPath: socketPath,
 		LogPath:    logPath,
-		// WARNING: snapshot restore does not re-attach drives (the SDK's
-		// loadSnapshot handler list omits AttachDrivesHandler), so IsReadOnly is
-		// inert here. Firecracker restores the drive recorded in the snapshot,
-		// which is the golden rootfs opened read-write — every microVM shares and
-		// mutates it. Isolating writes requires a per-VM backing file swapped in
-		// via UpdateGuestDrive while the restored VM is still paused.
+		// Snapshot load opens the drive path recorded at snapshot time (the
+		// golden rootfs). We restore paused, then PATCH the drive to a per-VM
+		// copy so guests cannot mutate the golden image.
 		Drives: []models.Drive{
 			{
 				DriveID:      firecracker.String("root"),
 				IsRootDevice: firecracker.Bool(true),
-				IsReadOnly:   firecracker.Bool(true),
-				PathOnHost:   firecracker.String(meta.RootfsPath),
+				IsReadOnly:   firecracker.Bool(false),
+				PathOnHost:   firecracker.String(rootfsClone),
 			},
 		},
 		NetworkInterfaces: firecracker.NetworkInterfaces{
@@ -111,23 +114,35 @@ func (l *Launcher) Restore(ctx context.Context, vmID, name, runtime string, cpu 
 		fcCfg,
 		firecracker.WithProcessRunner(cmd),
 		firecracker.WithSnapshot(meta.MemPath, meta.SnapshotPath, func(sc *firecracker.SnapshotConfig) {
-			sc.ResumeVM = true
+			sc.ResumeVM = false
 		}),
 	)
 	if err != nil {
 		cancel()
+		_ = os.RemoveAll(vmDir)
 		return nil, fmt.Errorf("create firecracker machine: %w", err)
+	}
+
+	fail := func(err error) (*Instance, error) {
+		cancel()
+		_ = machine.StopVMM()
+		_ = os.RemoveAll(vmDir)
+		return nil, err
 	}
 
 	// Single static guest IP (192.168.127.8): only one restore + health probe at a time.
 	restoreNetworkMu.Lock()
 	defer restoreNetworkMu.Unlock()
 
-	startErr := machine.Start(vmmCtx)
-	if startErr != nil {
-		cancel()
-		_ = machine.StopVMM()
-		return nil, fmt.Errorf("start firecracker machine: %w", startErr)
+	if startErr := machine.Start(vmmCtx); startErr != nil {
+		return fail(fmt.Errorf("start firecracker machine: %w", startErr))
+	}
+
+	if err := machine.UpdateGuestDrive(vmmCtx, "root", rootfsClone); err != nil {
+		return fail(fmt.Errorf("rebind rootfs to per-vm copy: %w", err))
+	}
+	if err := machine.ResumeVM(vmmCtx); err != nil {
+		return fail(fmt.Errorf("resume firecracker machine: %w", err))
 	}
 
 	if tapDevice, err := tapDeviceFromMachine(machine); err == nil {
@@ -141,11 +156,9 @@ func (l *Launcher) Restore(ctx context.Context, vmID, name, runtime string, cpu 
 
 	ip, err := machineIP(machine)
 	if err != nil {
-		cancel()
-		_ = machine.StopVMM()
 		slog.Error("failed to resolve microVM network after snapshot restore",
 			"vmId", vmID, "runtime", runtime, "error", err)
-		return nil, err
+		return fail(err)
 	}
 
 	runtimeURL := fmt.Sprintf("http://%s:%d", ip.String(), meta.RuntimePort)
@@ -159,6 +172,7 @@ func (l *Launcher) Restore(ctx context.Context, vmID, name, runtime string, cpu 
 		Message:    "microVM restored from snapshot",
 		machine:    machine,
 		cancel:     cancel,
+		vmDir:      vmDir,
 		cniConfig: cnihelper.Config{
 			NetworkName: l.cfg.CNINetworkName,
 			ConfDir:     l.cfg.CNIConfDir,

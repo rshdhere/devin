@@ -35,6 +35,7 @@ if [[ ! -f "${ROOTFS}" ]]; then
   echo "run: ./scripts/build-firecracker-rootfs.sh ${RUNTIME}" >&2
   exit 1
 fi
+chattr -i "${ROOTFS}" 2>/dev/null || true
 
 if [[ ! -f "${KERNEL}" ]]; then
   echo "missing kernel: ${KERNEL}" >&2

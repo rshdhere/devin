@@ -33,6 +33,7 @@ fi
 docker build "${BUILD_FLAGS[@]}" -f "${ROOT}/runtime/${RUNTIME}/Dockerfile" -t "${IMAGE}" "${ROOT}"
 
 mkdir -p "${OUT_DIR}"
+chattr -i "${ROOTFS}" 2>/dev/null || true
 rm -f "${ROOTFS}"
 
 echo "creating ${SIZE_MB}MB ext4 rootfs at ${ROOTFS}..."
@@ -131,6 +132,21 @@ if [[ "${RUNTIME}" == "agent" ]]; then
     exit 1
   fi
   echo "bash ready for env shebang: /usr/local/bin/bash -> ${BASH_GUEST}"
+fi
+
+if mountpoint -q "${MOUNT_DIR}"; then
+  sync
+  umount "${MOUNT_DIR}"
+fi
+echo "checking rootfs filesystem..."
+set +e
+e2fsck -f -y "${ROOTFS}" >/tmp/devin-rootfs-e2fsck.${RUNTIME}.log 2>&1
+fsck_status=$?
+set -e
+if [[ "${fsck_status}" -ge 4 ]]; then
+  echo "e2fsck failed for ${ROOTFS} (exit ${fsck_status})" >&2
+  tail -50 "/tmp/devin-rootfs-e2fsck.${RUNTIME}.log" >&2 || true
+  exit 1
 fi
 
 cat >"${OUT_DIR}/meta.partial.json" <<EOF

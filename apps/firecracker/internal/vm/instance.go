@@ -27,6 +27,7 @@ type Instance struct {
 	machine   *firecracker.Machine
 	cancel    context.CancelFunc
 	cniConfig cnihelper.Config
+	vmDir     string
 }
 
 func (i *Instance) HealthCheck(ctx context.Context) error {
@@ -66,5 +67,8 @@ func (i *Instance) Shutdown(ctx context.Context) error {
 	}
 	_ = os.Remove(filepath.Join("/var/run/netns", i.ID))
 	cnihelper.FlushGuestConntrack()
+	if i.vmDir != "" {
+		_ = os.RemoveAll(i.vmDir)
+	}
 	return stopErr
 }
