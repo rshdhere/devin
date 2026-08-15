@@ -7,14 +7,23 @@ const localDevLoginPath = path.join(
   __dirname,
   "components/auth/local-dev-login.local.tsx",
 );
+const hasLocalDevLogin = fs.existsSync(localDevLoginPath);
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   output: "standalone",
   transpilePackages: ["@devin/types"],
+  // Next 16 defaults to Turbopack; keep an explicit config so webpack-only
+  // aliases do not crash `next dev`.
+  turbopack: hasLocalDevLogin
+    ? {
+        resolveAlias: {
+          "@/components/auth/local-dev-login": localDevLoginPath,
+        },
+      }
+    : {},
   webpack: (config) => {
-    // Prefer the gitignored local-dev button when present; staging/prod keep the stub.
-    if (fs.existsSync(localDevLoginPath)) {
+    if (hasLocalDevLogin) {
       config.resolve.alias = {
         ...config.resolve.alias,
         "@/components/auth/local-dev-login": localDevLoginPath,
