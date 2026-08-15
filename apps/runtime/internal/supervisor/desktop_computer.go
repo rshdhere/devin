@@ -278,7 +278,8 @@ func (s *Server) handleDesktopVNCPage(w http.ResponseWriter, r *http.Request) {
 </head><body>
 <div id="screen"></div>
 <script type="module">
-import RFB from 'https://cdn.jsdelivr.net/npm/@novnc/novnc@1.5.0/core/rfb.js';
+// @novnc/novnc@1.5.0 publishes lib/ (CJS), not core/. Use jsDelivr's ESM build.
+import RFB from 'https://cdn.jsdelivr.net/npm/@novnc/novnc@1.5.0/+esm';
 const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
 const wsPath = location.pathname.replace(/\/?$/, '/ws');
 const url = proto + '//' + location.host + wsPath;
