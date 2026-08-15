@@ -401,10 +401,14 @@ export function isRepositoryNameTakenError(error: unknown): boolean {
   if (!(error instanceof Error)) {
     return false;
   }
+  const message = error.message;
+  if (/already exists/i.test(message) && /name/i.test(message)) {
+    return true;
+  }
   return (
-    error.message.includes('"code":"custom"') &&
-    error.message.includes('"field":"name"') &&
-    error.message.includes("already exists")
+    message.includes('"code":"custom"') &&
+    message.includes('"field":"name"') &&
+    message.includes("already exists")
   );
 }
 

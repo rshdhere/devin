@@ -130,12 +130,16 @@ export async function waitForSandbox(
         const failureMessage = lastMessage
           ? `sandbox ${sandboxName} failed: ${lastMessage}`
           : `sandbox ${sandboxName} failed for task ${taskId}`;
+        const retryableConflict =
+          /object has been modified|apply your changes to the latest version/i.test(
+            lastMessage,
+          );
         const retryableCapacity =
           /lacks capacity/i.test(lastMessage) ||
           (/not found/i.test(lastMessage) &&
             /firecracker\s*host/i.test(lastMessage));
         if (
-          retryableCapacity &&
+          (retryableConflict || retryableCapacity) &&
           reprovision &&
           Date.now() < deadline - 30_000
         ) {
@@ -146,13 +150,16 @@ export async function waitForSandbox(
             taskId,
             reclaimed > 0
               ? `Reclaimed ${reclaimed} devbox(es); re-creating sandbox`
-              : `Waiting for execution host capacity (${lastMessage})`,
+              : retryableConflict
+                ? `Retrying sandbox after Kubernetes conflict (${lastMessage})`
+                : `Waiting for execution host capacity (${lastMessage})`,
             {
               sandboxName,
               phase,
               message: lastMessage || undefined,
-              waitingForCapacity: reclaimed === 0,
+              waitingForCapacity: reclaimed === 0 && !retryableConflict,
               reclaimedSandboxes: reclaimed,
+              retryableConflict: retryableConflict || undefined,
             },
           );
           // The failed sandbox must be removed and re-created; otherwise the

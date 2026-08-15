@@ -229,6 +229,41 @@ export async function provisionSandboxWithCapacityRetry(
   await ensureSandbox(svc, sandboxName, taskId, spec, options);
 }
 
+function isTerminalTaskStatus(status: Task["status"] | undefined): boolean {
+  return (
+    status === "failed" || status === "cancelled" || status === "completed"
+  );
+}
+
+/** Sessions kept for Desktop preview must not block new sandboxes forever.
+ *  Guest networking uses a shared static IP, so only one live microVM works. */
+async function protectedLiveTaskIds(
+  svc: TaskService,
+  taskId: string,
+): Promise<Set<string>> {
+  const protectedIds = new Set<string>([taskId, ...svc.processingTasks]);
+
+  for (const id of [
+    ...svc.activeSessions.keys(),
+    ...svc.reviewSessions.keys(),
+  ]) {
+    const owner = svc.tasks.get(id) ?? (await svc.taskStore.getTask(id));
+    if (!owner || isTerminalTaskStatus(owner.status)) {
+      // Drop stale preview sessions so reclaim can free the shared guest IP.
+      svc.activeSessions.delete(id);
+      svc.reviewSessions.delete(id);
+      void svc.taskStore.deleteSession(id);
+      if (owner) {
+        owner.sessionActive = false;
+      }
+      continue;
+    }
+    protectedIds.add(id);
+  }
+
+  return protectedIds;
+}
+
 export async function reclaimDevboxCapacity(
   svc: TaskService,
   taskId: string,
@@ -236,12 +271,7 @@ export async function reclaimDevboxCapacity(
 ): Promise<number> {
   const sandboxes = await listSandboxes(svc.orchestratorUrl);
   let reclaimed = 0;
-  const protectedTaskIds = new Set<string>([
-    taskId,
-    ...svc.activeSessions.keys(),
-    ...svc.reviewSessions.keys(),
-    ...svc.processingTasks,
-  ]);
+  const protectedTaskIds = await protectedLiveTaskIds(svc, taskId);
 
   for (const sandbox of sandboxes) {
     if (sandbox.phase !== "Failed") {
@@ -273,11 +303,7 @@ export async function reclaimDevboxCapacity(
 
     const owner =
       svc.tasks.get(ownerTaskId) ?? (await svc.taskStore.getTask(ownerTaskId));
-    const abandoned =
-      !owner ||
-      owner.status === "failed" ||
-      owner.status === "cancelled" ||
-      owner.status === "completed";
+    const abandoned = !owner || isTerminalTaskStatus(owner.status);
     if (!abandoned) {
       continue;
     }

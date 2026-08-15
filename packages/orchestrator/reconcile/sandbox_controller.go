@@ -3,6 +3,7 @@ package reconcile
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -16,6 +17,18 @@ import (
 	devinv1 "github.com/rshdhere/devin/packages/sandbox/api/v1"
 	"github.com/rshdhere/devin/packages/orchestrator/config"
 )
+
+func isOptimisticLockConflict(err error) bool {
+	if err == nil {
+		return false
+	}
+	if apierrors.IsConflict(err) {
+		return true
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "the object has been modified") ||
+		strings.Contains(msg, "please apply your changes to the latest version")
+}
 
 const sandboxFinalizer = "sandbox.devin.baby/finalizer"
 
@@ -38,7 +51,7 @@ func (r *SandboxReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	if !controllerutil.ContainsFinalizer(&sandbox, sandboxFinalizer) {
 		controllerutil.AddFinalizer(&sandbox, sandboxFinalizer)
 		if err := r.Update(ctx, &sandbox); err != nil {
-			if apierrors.IsConflict(err) {
+			if isOptimisticLockConflict(err) {
 				return ctrl.Result{Requeue: true}, nil
 			}
 			return ctrl.Result{}, err
@@ -52,7 +65,7 @@ func (r *SandboxReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	if err := r.ensureMachine(ctx, &sandbox); err != nil {
 		// Concurrent status writers (machine ↔ sandbox) race often; never mark
 		// the sandbox Failed for a conflict — just retry.
-		if apierrors.IsConflict(err) {
+		if isOptimisticLockConflict(err) {
 			return ctrl.Result{Requeue: true}, nil
 		}
 		return r.fail(ctx, &sandbox, err)
@@ -151,7 +164,7 @@ func (r *SandboxReconciler) finalize(ctx context.Context, sandbox *devinv1.Sandb
 
 		controllerutil.RemoveFinalizer(sandbox, sandboxFinalizer)
 		if err := r.Update(ctx, sandbox); err != nil {
-			if apierrors.IsConflict(err) {
+			if isOptimisticLockConflict(err) {
 				return ctrl.Result{Requeue: true}, nil
 			}
 			return ctrl.Result{}, err
@@ -161,6 +174,11 @@ func (r *SandboxReconciler) finalize(ctx context.Context, sandbox *devinv1.Sandb
 }
 
 func (r *SandboxReconciler) fail(ctx context.Context, sandbox *devinv1.Sandbox, err error) (ctrl.Result, error) {
+	// Never persist optimistic-lock noise as a terminal Failed phase — the
+	// scheduler treats Failed as fatal and kills the user task.
+	if isOptimisticLockConflict(err) {
+		return ctrl.Result{Requeue: true}, nil
+	}
 	_, _ = r.writeStatus(ctx, sandbox, devinv1.SandboxPhaseFailed, err.Error())
 	return ctrl.Result{RequeueAfter: 30 * time.Second}, err
 }
