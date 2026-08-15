@@ -113,7 +113,7 @@ export function SessionChatColumn({
       }`;
 
   return (
-    <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-[#0a0a0a] lg:w-[395px] lg:max-w-[395px] lg:flex-none lg:border-r lg:border-white/[0.06]">
+    <div className="flex h-full min-h-0 w-full min-w-0 flex-1 flex-col bg-[#0a0a0a] lg:border-r lg:border-white/[0.06]">
       <header className="flex shrink-0 items-center gap-2 border-b border-white/[0.06] px-3 py-2.5">
         <MotionButton
           type="button"

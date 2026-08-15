@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { motion } from "motion/react";
 import type { Task } from "@devin/types";
 import { SessionDetail } from "@/components/dashboard/session-detail";
 import { useSessions } from "@/components/dashboard/sessions-context";
@@ -11,6 +12,8 @@ import { LoadingScreen } from "@/components/loading-screen";
 interface SessionPageProps {
   sessionId: string;
 }
+
+const enterEase = [0.22, 1, 0.36, 1] as const;
 
 export function SessionPage({ sessionId }: SessionPageProps) {
   const router = useRouter();
@@ -57,8 +60,22 @@ export function SessionPage({ sessionId }: SessionPageProps) {
 
   const task = fromList ?? fetchedTask;
 
-  if (tasksLoading || isFetching || (!task && !fetchFailed)) {
-    return <LoadingScreen />;
+  if (!task && (tasksLoading || isFetching) && !fetchFailed) {
+    // Fresh navigation from composer already has the task in context —
+    // only show the heavy loader for cold deep-links.
+    if (tasksLoading && tasks.length === 0) {
+      return <LoadingScreen />;
+    }
+    return (
+      <motion.div
+        className="flex min-h-0 w-full flex-1 items-center justify-center bg-[#0a0a0a]"
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        transition={{ duration: 0.25 }}
+      >
+        <div className="h-8 w-8 animate-pulse rounded-full bg-white/10" />
+      </motion.div>
+    );
   }
 
   if (!task || fetchFailed) {
@@ -77,12 +94,17 @@ export function SessionPage({ sessionId }: SessionPageProps) {
   }
 
   return (
-    <div className="flex min-h-0 w-full flex-1 flex-col overflow-hidden">
+    <motion.div
+      className="flex min-h-0 w-full flex-1 flex-col overflow-hidden"
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      transition={{ duration: 0.35, ease: enterEase }}
+    >
       <SessionDetail
         key={task.id}
         task={task}
         onBack={() => router.push("/s")}
       />
-    </div>
+    </motion.div>
   );
 }
