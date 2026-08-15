@@ -278,8 +278,9 @@ func (s *Server) handleDesktopVNCPage(w http.ResponseWriter, r *http.Request) {
 </head><body>
 <div id="screen"></div>
 <script type="module">
-// @novnc/novnc@1.5.0 publishes lib/ (CJS), not core/. Use jsDelivr's ESM build.
-import RFB from 'https://cdn.jsdelivr.net/npm/@novnc/novnc@1.5.0/+esm';
+// Load noVNC from this runtime. Keeping the module graph same-origin avoids
+// CDN CORS/MIME failures and works in isolated or offline sandboxes.
+import RFB from './assets/core/rfb.js';
 const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
 const wsPath = location.pathname.replace(/\/?$/, '/ws');
 const url = proto + '//' + location.host + wsPath;
@@ -294,6 +295,31 @@ rfb.scaleViewport = true;
 	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write([]byte(page))
+}
+
+func (s *Server) handleDesktopVNCAsset(w http.ResponseWriter, r *http.Request) {
+	relative := filepath.Clean("/" + r.PathValue("path"))
+	if relative == "/" || strings.HasPrefix(relative, "/../") {
+		http.NotFound(w, r)
+		return
+	}
+
+	const noVNCBase = "/usr/share/novnc"
+	assetPath := filepath.Join(noVNCBase, relative)
+	if filepath.Dir(assetPath) != noVNCBase &&
+		!strings.HasPrefix(assetPath, noVNCBase+string(filepath.Separator)) {
+		http.NotFound(w, r)
+		return
+	}
+
+	info, err := os.Stat(assetPath)
+	if err != nil || info.IsDir() {
+		http.NotFound(w, r)
+		return
+	}
+
+	w.Header().Set("Cache-Control", "public, max-age=3600")
+	http.ServeFile(w, r, assetPath)
 }
 
 func (s *Server) handleDesktopVNCWebSocket(w http.ResponseWriter, r *http.Request) {
@@ -381,4 +407,3 @@ func (s *Server) handleBrowserCDPJSON(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(bodyBytes)
 }
-
