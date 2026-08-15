@@ -9,7 +9,6 @@ import {
   fetchDesktopScreenshot,
   fetchDesktopVNC,
   fetchDevboxPreview,
-  fetchSessionRecording,
   fetchTaskEventHistory,
   getInfraDiagnostics,
   getTask,
@@ -351,21 +350,6 @@ tasksRouter.get("/:id/desktop-vnc", async (req, res) => {
     response.headers.forEach((value, key) => {
       res.setHeader(key, value);
     });
-    res.send(Buffer.from(await response.arrayBuffer()));
-  } catch (error) {
-    respondSchedulerFailure(req, res, error);
-  }
-});
-
-tasksRouter.get("/:id/session-recording", async (req, res) => {
-  try {
-    const response = await fetchSessionRecording(req.params.id);
-    res.status(response.status);
-    res.setHeader(
-      "Content-Type",
-      response.headers.get("content-type") ?? "video/webm",
-    );
-    res.setHeader("Cache-Control", "no-store");
     res.send(Buffer.from(await response.arrayBuffer()));
   } catch (error) {
     respondSchedulerFailure(req, res, error);

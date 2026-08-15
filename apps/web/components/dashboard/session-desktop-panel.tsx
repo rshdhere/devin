@@ -1,42 +1,120 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Loader2, Monitor, RefreshCw } from "lucide-react";
 import type { Task } from "@devin/types";
 import { tasksApiUrl } from "@/lib/api/http";
 import { canUseDevbox } from "@/lib/sessions/devbox";
 import { cn } from "@/lib/utils";
 
-type DesktopView = "interactive" | "recording";
+type DesktopView = "snapshot" | "interactive";
+
+async function blobLooksLikePng(blob: Blob): Promise<boolean> {
+  if (blob.type.includes("image")) {
+    return true;
+  }
+  const header = await blob.slice(0, 8).arrayBuffer();
+  const bytes = new Uint8Array(header);
+  return (
+    bytes.length >= 8 &&
+    bytes[0] === 0x89 &&
+    bytes[1] === 0x50 &&
+    bytes[2] === 0x4e &&
+    bytes[3] === 0x47
+  );
+}
 
 export function SessionDesktopPanel({
   task,
   layout = "panel",
+  externalRefreshKey = 0,
   onOpenDesktop,
 }: {
   task: Task;
   layout?: "panel" | "embed";
-  /** @deprecated No longer used — snapshots were removed. */
   externalRefreshKey?: number;
   onOpenDesktop?: () => void;
 }) {
   const canUse = canUseDevbox(task);
+  const screenshotSrc = tasksApiUrl(
+    `/${encodeURIComponent(task.id)}/desktop-screenshot`,
+  );
   const interactiveSrc = tasksApiUrl(
     `/${encodeURIComponent(task.id)}/desktop-vnc`,
   );
-  const recordingSrc = tasksApiUrl(
-    `/${encodeURIComponent(task.id)}/session-recording`,
-  );
 
-  const isTerminal =
-    task.status === "completed" || task.status === "awaiting_review";
+  const isAgentActive =
+    task.status === "running" ||
+    task.status === "runtime_ready" ||
+    task.status === "sandbox_starting" ||
+    task.status === "drafting" ||
+    task.status === "scheduling" ||
+    task.status === "awaiting_review";
 
-  const [view, setView] = useState<DesktopView>("interactive");
-  const [recordingUrl, setRecordingUrl] = useState<string | null>(null);
-  const [recordingError, setRecordingError] = useState(false);
+  const [view, setView] = useState<DesktopView>("snapshot");
+  const [shotUrl, setShotUrl] = useState<string | null>(null);
+  const [shotLoading, setShotLoading] = useState(false);
+  const [shotError, setShotError] = useState<string | null>(null);
   const [interactiveLoading, setInteractiveLoading] = useState(false);
   const [interactiveError, setInteractiveError] = useState<string | null>(null);
   const [interactiveReady, setInteractiveReady] = useState(false);
+  const shotUrlRef = useRef<string | null>(null);
+  const inFlightRef = useRef(false);
+  shotUrlRef.current = shotUrl;
+
+  const loadScreenshot = useCallback(
+    async (fresh: boolean) => {
+      if (!canUse || inFlightRef.current) {
+        return;
+      }
+      inFlightRef.current = true;
+      if (!shotUrlRef.current) {
+        setShotLoading(true);
+      }
+      setShotError(null);
+      try {
+        const freshQuery = fresh ? "&fresh=1" : "";
+        const response = await fetch(
+          `${screenshotSrc}?t=${Date.now()}${freshQuery}`,
+          {
+            credentials: "include",
+            signal: AbortSignal.timeout(fresh ? 180_000 : 25_000),
+          },
+        );
+        if (!response.ok) {
+          throw new Error(`snapshot HTTP ${response.status}`);
+        }
+        const blob = await response.blob();
+        if (!(await blobLooksLikePng(blob))) {
+          throw new Error("snapshot is not an image");
+        }
+        const nextUrl = URL.createObjectURL(blob);
+        setShotUrl((prev) => {
+          if (prev?.startsWith("blob:")) {
+            URL.revokeObjectURL(prev);
+          }
+          return nextUrl;
+        });
+        setShotError(null);
+      } catch (error) {
+        if (!shotUrlRef.current) {
+          setShotError(
+            error instanceof Error
+              ? error.message.startsWith("snapshot HTTP 503")
+                ? "Could not capture localhost yet — click Refresh to retry."
+                : error.name === "TimeoutError" || error.name === "AbortError"
+                  ? "Snapshot timed out — try Refresh."
+                  : error.message
+              : "Could not load snapshot",
+          );
+        }
+      } finally {
+        inFlightRef.current = false;
+        setShotLoading(false);
+      }
+    },
+    [canUse, screenshotSrc],
+  );
 
   const prepareInteractive = useCallback(async () => {
     if (!canUse) {
@@ -82,34 +160,22 @@ export function SessionDesktopPanel({
     }
   }, [canUse, interactiveSrc]);
 
-  const loadRecording = useCallback(async () => {
-    if (!canUse) {
+  useEffect(() => {
+    if (!canUse || view !== "snapshot") {
       return;
     }
-    try {
-      const response = await fetch(`${recordingSrc}?t=${Date.now()}`, {
-        credentials: "include",
-      });
-      if (!response.ok) {
-        setRecordingError(true);
-        return;
-      }
-      const blob = await response.blob();
-      if (blob.size < 1024) {
-        setRecordingError(true);
-        return;
-      }
-      setRecordingUrl((prev) => {
-        if (prev?.startsWith("blob:")) {
-          URL.revokeObjectURL(prev);
-        }
-        return URL.createObjectURL(blob);
-      });
-      setRecordingError(false);
-    } catch {
-      setRecordingError(true);
+    void loadScreenshot(false);
+  }, [canUse, loadScreenshot, task.id, view, externalRefreshKey]);
+
+  useEffect(() => {
+    if (!canUse || view !== "snapshot" || !isAgentActive) {
+      return;
     }
-  }, [canUse, recordingSrc]);
+    const timer = window.setInterval(() => {
+      void loadScreenshot(false);
+    }, 12_000);
+    return () => window.clearInterval(timer);
+  }, [canUse, isAgentActive, loadScreenshot, view]);
 
   useEffect(() => {
     if (view === "interactive" && canUse) {
@@ -118,18 +184,12 @@ export function SessionDesktopPanel({
   }, [canUse, prepareInteractive, task.id, view]);
 
   useEffect(() => {
-    if (view === "recording" && isTerminal) {
-      void loadRecording();
-    }
-  }, [isTerminal, loadRecording, view]);
-
-  useEffect(() => {
     return () => {
-      if (recordingUrl?.startsWith("blob:")) {
-        URL.revokeObjectURL(recordingUrl);
+      if (shotUrlRef.current?.startsWith("blob:")) {
+        URL.revokeObjectURL(shotUrlRef.current);
       }
     };
-  }, [recordingUrl]);
+  }, []);
 
   if (!canUse) {
     return (
@@ -143,8 +203,8 @@ export function SessionDesktopPanel({
   }
 
   const isEmbed = layout === "embed";
-  const showRecording = !isEmbed && view === "recording";
-  const showInteractive = !showRecording;
+  const showSnapshot = view === "snapshot" || isEmbed;
+  const showInteractive = !isEmbed && view === "interactive";
 
   return (
     <div
@@ -159,14 +219,26 @@ export function SessionDesktopPanel({
             Desktop
           </p>
           <p className="truncate text-[10px] text-zinc-600">
-            {showRecording
-              ? "Annotated screen recording from agent session"
-              : "Full VM desktop — mouse and keyboard (1024×768)"}
+            {showInteractive
+              ? "Full VM desktop — mouse and keyboard (1024×768)"
+              : "Latest screenshot of the agent desktop"}
           </p>
         </div>
         {!isEmbed ? (
           <div className="flex shrink-0 items-center gap-1">
             <div className="flex rounded-lg border border-white/[0.08] bg-[#111] p-0.5">
+              <button
+                type="button"
+                onClick={() => setView("snapshot")}
+                className={cn(
+                  "rounded-md px-2 py-0.5 text-[10px] font-medium transition-colors",
+                  view === "snapshot"
+                    ? "bg-white/[0.08] text-zinc-100"
+                    : "text-zinc-500 hover:text-zinc-300",
+                )}
+              >
+                Snapshot
+              </button>
               <button
                 type="button"
                 onClick={() => setView("interactive")}
@@ -179,25 +251,20 @@ export function SessionDesktopPanel({
               >
                 Interactive
               </button>
-              {isTerminal ? (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setView("recording");
-                    void loadRecording();
-                  }}
-                  className={cn(
-                    "rounded-md px-2 py-0.5 text-[10px] font-medium transition-colors",
-                    view === "recording"
-                      ? "bg-white/[0.08] text-zinc-100"
-                      : "text-zinc-500 hover:text-zinc-300",
-                  )}
-                >
-                  Recording
-                </button>
-              ) : null}
             </div>
-            {showInteractive ? (
+            {showSnapshot ? (
+              <button
+                type="button"
+                onClick={() => void loadScreenshot(true)}
+                disabled={shotLoading}
+                className="inline-flex cursor-pointer items-center gap-1 rounded-md px-2 py-1 text-[11px] text-zinc-400 hover:bg-white/[0.06] hover:text-zinc-200 disabled:opacity-50"
+              >
+                <RefreshCw
+                  className={cn("size-3.5", shotLoading && "animate-spin")}
+                />
+                Refresh
+              </button>
+            ) : (
               <button
                 type="button"
                 onClick={() => void prepareInteractive()}
@@ -212,9 +279,21 @@ export function SessionDesktopPanel({
                 />
                 Retry
               </button>
-            ) : null}
+            )}
           </div>
-        ) : null}
+        ) : (
+          <button
+            type="button"
+            onClick={() => void loadScreenshot(true)}
+            disabled={shotLoading}
+            className="inline-flex cursor-pointer items-center gap-1 rounded-md px-2 py-1 text-[11px] text-zinc-400 hover:bg-white/[0.06] hover:text-zinc-200 disabled:opacity-50"
+          >
+            <RefreshCw
+              className={cn("size-3.5", shotLoading && "animate-spin")}
+            />
+            Refresh
+          </button>
+        )}
       </div>
 
       <div
@@ -223,6 +302,32 @@ export function SessionDesktopPanel({
           isEmbed ? "min-h-[180px] p-2" : "p-0",
         )}
       >
+        {showSnapshot ? (
+          shotUrl ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={shotUrl}
+              alt="Desktop snapshot"
+              className="max-h-full max-w-full object-contain"
+            />
+          ) : (
+            <div className="flex flex-col items-center gap-2 p-6">
+              <Loader2
+                className={cn(
+                  "size-6 text-zinc-600",
+                  shotLoading && "animate-spin",
+                )}
+              />
+              <p className="max-w-sm text-center text-[12px] text-zinc-500">
+                {shotError ??
+                  (shotLoading
+                    ? "Capturing desktop snapshot…"
+                    : "Waiting for snapshot…")}
+              </p>
+            </div>
+          )
+        ) : null}
+
         {showInteractive ? (
           interactiveReady ? (
             <iframe
@@ -244,37 +349,6 @@ export function SessionDesktopPanel({
                   (interactiveLoading
                     ? "Starting interactive desktop…"
                     : "Preparing desktop…")}
-              </p>
-              {interactiveError && isEmbed ? (
-                <button
-                  type="button"
-                  onClick={() => void prepareInteractive()}
-                  className="mt-1 rounded-md border border-white/[0.08] px-2.5 py-1 text-[11px] text-zinc-300 hover:bg-white/[0.04]"
-                >
-                  Retry
-                </button>
-              ) : null}
-            </div>
-          )
-        ) : showRecording ? (
-          recordingUrl ? (
-            <video
-              src={recordingUrl}
-              controls
-              className="max-h-full w-full max-w-5xl rounded-lg border border-white/[0.08] bg-black"
-            />
-          ) : (
-            <div className="flex flex-col items-center gap-2 p-6">
-              <Loader2
-                className={cn(
-                  "size-6 text-zinc-600",
-                  !recordingError && "animate-spin",
-                )}
-              />
-              <p className="max-w-sm text-center text-[12px] text-zinc-500">
-                {recordingError
-                  ? "No session recording yet — recordings are saved when the agent finishes."
-                  : "Loading session recording…"}
               </p>
             </div>
           )

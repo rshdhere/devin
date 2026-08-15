@@ -52,9 +52,7 @@ test.describe("Devin session journey", () => {
       .poll(
         async () =>
           await page
-            .getByText(
-              /recording|no session recording|loading session recording/i,
-            )
+            .getByText(/snapshot|capturing desktop|desktop snapshot/i)
             .count(),
         { timeout: 5 * 60 * 1000 },
       )

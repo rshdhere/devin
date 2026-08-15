@@ -32,13 +32,12 @@ var vncUpgrader = websocket.Upgrader{
 }
 
 type desktopStatus struct {
-	Xvfb      bool `json:"xvfb"`
-	VNC       bool `json:"vnc"`
-	NoVNC     bool `json:"novnc"`
-	CDP       bool `json:"cdp"`
-	Recording bool `json:"recording"`
-	Display   int  `json:"display"`
-	CDPPort   int  `json:"cdpPort"`
+	Xvfb    bool `json:"xvfb"`
+	VNC     bool `json:"vnc"`
+	NoVNC   bool `json:"novnc"`
+	CDP     bool `json:"cdp"`
+	Display int  `json:"display"`
+	CDPPort int  `json:"cdpPort"`
 }
 
 func desktopHome(workspaceRoot string) string {
@@ -51,10 +50,6 @@ func desktopPIDPath(workspaceRoot, name string) string {
 
 func desktopLogPath(workspaceRoot, name string) string {
 	return filepath.Join(desktopHome(workspaceRoot), "desktop-"+name+".log")
-}
-
-func recordingPath(workspaceRoot string) string {
-	return filepath.Join(desktopHome(workspaceRoot), "session-recording.webm")
 }
 
 func displayEnv(workspaceRoot string) []string {
@@ -88,13 +83,12 @@ func portOpen(port int) bool {
 
 func (s *Server) desktopStatusLocked() desktopStatus {
 	return desktopStatus{
-		Xvfb:      pidAlive(desktopPIDPath(s.workspace, "xvfb")),
-		VNC:       pidAlive(desktopPIDPath(s.workspace, "vnc")) || portOpen(vncRFBPort),
-		NoVNC:     pidAlive(desktopPIDPath(s.workspace, "novnc")) || portOpen(novncWebPort),
-		CDP:       pidAlive(desktopPIDPath(s.workspace, "cdp")) || portOpen(cdpDebugPort),
-		Recording: pidAlive(desktopPIDPath(s.workspace, "recording")),
-		Display:   desktopDisplayNum,
-		CDPPort:   cdpDebugPort,
+		Xvfb:    pidAlive(desktopPIDPath(s.workspace, "xvfb")),
+		VNC:     pidAlive(desktopPIDPath(s.workspace, "vnc")) || portOpen(vncRFBPort),
+		NoVNC:   pidAlive(desktopPIDPath(s.workspace, "novnc")) || portOpen(novncWebPort),
+		CDP:     pidAlive(desktopPIDPath(s.workspace, "cdp")) || portOpen(cdpDebugPort),
+		Display: desktopDisplayNum,
+		CDPPort: cdpDebugPort,
 	}
 }
 
@@ -387,90 +381,3 @@ func (s *Server) handleBrowserCDPJSON(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write(bodyBytes)
 }
 
-func (s *Server) handleRecordingStart(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		writeError(w, http.StatusMethodNotAllowed, "POST required")
-		return
-	}
-	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
-	defer cancel()
-	if err := s.ensureDesktopComputer(ctx); err != nil {
-		writeError(w, http.StatusServiceUnavailable, err.Error())
-		return
-	}
-	if pidAlive(desktopPIDPath(s.workspace, "recording")) {
-		writeJSON(w, http.StatusOK, map[string]string{"status": "already_recording"})
-		return
-	}
-	out := recordingPath(s.workspace)
-	script := fmt.Sprintf(
-		"set -e; export DISPLAY=:%d; rm -f %s; if command -v ffmpeg >/dev/null 2>&1; then nohup ffmpeg -y -f x11grab -video_size %dx%d -framerate 12 -i :%d.0 -c:v libvpx-vp9 -deadline realtime -cpu-used 8 %s >>%s 2>&1 & echo $! > %s; else exit 1; fi",
-		desktopDisplayNum,
-		shellQuote(out),
-		desktopWidth,
-		desktopHeight,
-		desktopDisplayNum,
-		shellQuote(out),
-		shellQuote(desktopLogPath(s.workspace, "recording")),
-		shellQuote(desktopPIDPath(s.workspace, "recording")),
-	)
-	result, err := executil.RunGuest(ctx, s.workspace, script, displayEnv(s.workspace), nil)
-	if err != nil || result.ExitCode != 0 {
-		writeError(w, http.StatusServiceUnavailable, "ffmpeg recording unavailable in snapshot")
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]string{"status": "recording"})
-}
-
-func (s *Server) handleRecordingStop(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		writeError(w, http.StatusMethodNotAllowed, "POST required")
-		return
-	}
-	pidPath := desktopPIDPath(s.workspace, "recording")
-	if pidAlive(pidPath) {
-		data, _ := os.ReadFile(pidPath)
-		pid := strings.TrimSpace(string(data))
-		script := fmt.Sprintf(
-			"kill -INT %s 2>/dev/null || true; for i in $(seq 1 20); do kill -0 %s 2>/dev/null || break; sleep 0.25; done; kill -TERM %s 2>/dev/null || true; rm -f %s",
-			shellQuote(pid),
-			shellQuote(pid),
-			shellQuote(pid),
-			shellQuote(pidPath),
-		)
-		_, _ = executil.RunGuest(r.Context(), s.workspace, script, workspace.DevinProcessEnv(s.workspace), nil)
-		time.Sleep(750 * time.Millisecond)
-	}
-	out := recordingPath(s.workspace)
-	var info os.FileInfo
-	var err error
-	for attempt := 0; attempt < 8; attempt++ {
-		info, err = os.Stat(out)
-		if err == nil && info.Size() >= 1024 {
-			break
-		}
-		time.Sleep(250 * time.Millisecond)
-	}
-	if err != nil || info == nil || info.Size() < 1024 {
-		writeError(w, http.StatusNotFound, "no session recording saved yet")
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"status": "stopped",
-		"bytes":  info.Size(),
-		"path":   out,
-	})
-}
-
-func (s *Server) handleRecordingGet(w http.ResponseWriter, r *http.Request) {
-	out := recordingPath(s.workspace)
-	data, err := os.ReadFile(out)
-	if err != nil || len(data) < 1024 {
-		writeError(w, http.StatusNotFound, "no session recording saved yet")
-		return
-	}
-	w.Header().Set("Content-Type", "video/webm")
-	w.Header().Set("Cache-Control", "no-store")
-	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write(data)
-}

@@ -273,9 +273,7 @@ export async function refreshDevboxPreviewPort(
         desktop: true,
       });
     }
-    // Recording captures the live X11 Chromium window. Always steer it to the
-    // app — screenshots may use a separate headless browser, so skipping
-    // navigation leaves the recording stuck on about:blank.
+    // Keep Chromium on the live preview URL so snapshots show the app, not about:blank.
     void navigateDesktopBrowserToPort(svc, session, taskId, port);
     if (portChanged) {
       void captureDesktopScreenshot(svc, session, taskId);

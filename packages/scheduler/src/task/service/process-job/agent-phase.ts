@@ -10,7 +10,6 @@ import {
   schedulePostCompletionDesktopCapture,
   startDevboxPreviewWatcher,
 } from "../desktop-capture.js";
-import { startDesktopRecordingWatcher } from "../desktop-computer.js";
 import {
   assertGreenfieldAgentProgress,
   createTaskIssue,
@@ -115,7 +114,6 @@ export async function runAgentPhase(
       : () => undefined;
 
   const stopDevboxPreview = startDevboxPreviewWatcher(svc, task.id);
-  const stopDesktopRecording = startDesktopRecordingWatcher(svc, task.id);
   const stopDiskPrune = startWorkspaceDiskPruneWatcher(
     svc,
     state.runtime,
@@ -262,7 +260,6 @@ export async function runAgentPhase(
     stopAutoCommit();
     stopGreenfieldPush();
     stopDevboxPreview();
-    stopDesktopRecording();
     stopDiskPrune();
     stopEvents();
   }

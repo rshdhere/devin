@@ -52,7 +52,7 @@ Set `SCHEDULER_URL` on the API server to the brain URL in cloud deployments.
 | **Desktop** | `GET /tasks/:id/desktop-screenshot` | Playwright/Chromium capture of localhost in the devbox |
 | **Interactive desktop** | `GET /tasks/:id/desktop-vnc` | noVNC stream with mouse/keyboard (1024×768 Xvfb) |
 | **CDP** | port `29229` in guest | Playwright `connectOverCDP` attaches to persistent Chromium |
-| **Session recording** | `GET /tasks/:id/session-recording` | ffmpeg x11grab WebM, uploaded to S3 on agent completion |
+| **Desktop snapshot** | `GET /tasks/:id/desktop-screenshot` | Playwright/Chromium capture of the agent desktop |
 
 Desktop snapshots:
 
@@ -113,6 +113,6 @@ OpenAI plan → control-plane scaffold push → `nextjs` snapshot verify. Kept f
 - `SCHEDULER_HOST_NAME` must match `FirecrackerHost` CR name (pins devbox to execution host).
 - Cloud: `DATABASE_URL` on brain + worker; `EXECUTION_WORKER_URL` on brain; `SCHEDULER_URL` on API → brain.
 - Run `sudo devin-infra sync-platform-config` after SSM or image updates.
-- Apply migrations through `0005_session_recording.sql` (preview port, desktop PNG, recording key on `agent_sessions`).
+- Apply migrations through `0005_session_recording.sql` (preview port and desktop PNG on `agent_sessions`).
 - Execution hosts: `DEVIN_SNAPSHOT_DIR=/var/lib/devin/task-snapshots` (mounted into the scheduler container).
-- Optional: `DEVIN_RECORDING_S3_BUCKET` (falls back to `DEVIN_SNAPSHOT_S3_BUCKET`) for session WebM recordings.
+- Optional: `DEVIN_SNAPSHOT_S3_BUCKET` / `DEVIN_SNAPSHOT_S3_PREFIX` for durable desktop PNG storage.

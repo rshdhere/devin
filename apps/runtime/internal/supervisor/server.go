@@ -60,9 +60,6 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /desktop/status", s.handleDesktopStatus)
 	mux.HandleFunc("GET /desktop/vnc", s.handleDesktopVNCPage)
 	mux.HandleFunc("GET /desktop/vnc/ws", s.handleDesktopVNCWebSocket)
-	mux.HandleFunc("POST /desktop/recording/start", s.handleRecordingStart)
-	mux.HandleFunc("POST /desktop/recording/stop", s.handleRecordingStop)
-	mux.HandleFunc("GET /desktop/recording", s.handleRecordingGet)
 	mux.HandleFunc("GET /events", s.handleEvents)
 	return mux
 }

@@ -203,12 +203,6 @@ export async function fetchDesktopScreenshot(
   );
 }
 
-export async function fetchSessionRecording(id: string): Promise<Response> {
-  return proxyScheduler(
-    `/api/v1/tasks/${encodeURIComponent(id)}/session-recording`,
-  );
-}
-
 export async function fetchDesktopVNC(id: string): Promise<Response> {
   return proxyScheduler(`/api/v1/tasks/${encodeURIComponent(id)}/desktop-vnc`);
 }

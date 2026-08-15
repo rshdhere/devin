@@ -296,42 +296,6 @@ export function createTaskRouter(tasks: TaskService): Router {
     }
   });
 
-  router.post("/:id/desktop/recording/start", async (req, res) => {
-    try {
-      const upstream = await tasks.startSessionRecording(req.params.id);
-      res.status(upstream.status);
-      res.type(upstream.headers.get("content-type") ?? "application/json");
-      res.send(await upstream.text());
-    } catch (error) {
-      sendError(res, 502, error, "recording start failed");
-    }
-  });
-
-  router.post("/:id/desktop/recording/stop", async (req, res) => {
-    try {
-      await tasks.stopAndPersistSessionRecording(req.params.id);
-      res.status(200).json({ status: "stopped" });
-    } catch (error) {
-      sendError(res, 502, error, "recording stop failed");
-    }
-  });
-
-  router.get("/:id/session-recording", async (req, res) => {
-    try {
-      const response = await tasks.fetchSessionRecording(req.params.id);
-      const body = await response.arrayBuffer();
-      res.status(response.status);
-      res.setHeader(
-        "Content-Type",
-        response.headers.get("content-type") ?? "video/webm",
-      );
-      res.setHeader("Cache-Control", "no-store");
-      res.send(Buffer.from(body));
-    } catch (error) {
-      sendError(res, 502, error, "session recording failed");
-    }
-  });
-
   return router;
 }
 
