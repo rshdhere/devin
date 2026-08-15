@@ -7,7 +7,6 @@ import {
   ArrowLeft,
   ArrowUp,
   GitCommit,
-  Lightbulb,
   Loader2,
   Mic,
   Plus,
@@ -113,7 +112,7 @@ export function SessionChatColumn({
       }`;
 
   return (
-    <div className="flex h-full min-h-0 w-full min-w-0 flex-1 flex-col bg-[#0a0a0a] lg:border-r lg:border-white/[0.06]">
+    <div className="flex h-full min-h-0 w-full min-w-0 flex-1 flex-col bg-transparent">
       <header className="flex shrink-0 items-center gap-2 border-b border-white/[0.06] px-3 py-2.5">
         <MotionButton
           type="button"
@@ -147,34 +146,24 @@ export function SessionChatColumn({
       ) : null}
 
       <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
-        {!canUseDevbox(task) ? <TipCard /> : null}
-
-        {isActive && statusLine ? (
-          <p className="mb-2 text-[13px] leading-relaxed text-zinc-400">
-            {statusLine}
-          </p>
-        ) : null}
-
-        <p
-          className={cn(
-            "mb-3 flex items-center gap-2 text-[12px] text-zinc-500",
-            isActive && "font-medium text-zinc-400",
-          )}
-        >
-          {isActive ? (
-            <span className="size-1.5 shrink-0 animate-pulse rounded-full bg-emerald-400" />
-          ) : null}
-          {workLabel}
-        </p>
-
         <div className="space-y-4">
           {conversation.map((message) =>
             message.role === "user" ? (
-              <div key={message.id} className="flex justify-end gap-2">
-                <div className="max-w-[88%] rounded-2xl rounded-tr-md bg-[#1a1a1a] px-3.5 py-2.5 text-[13px] leading-relaxed text-zinc-100">
-                  {message.content}
+              <div key={message.id} className="flex flex-col items-end gap-1">
+                {message.timestamp ? (
+                  <time
+                    dateTime={message.timestamp}
+                    className="mr-10 text-[11px] text-zinc-500 tabular-nums"
+                  >
+                    {formatMessageTime(message.timestamp)}
+                  </time>
+                ) : null}
+                <div className="flex items-end gap-2">
+                  <div className="max-w-[min(88%,20rem)] rounded-2xl rounded-tr-md bg-[#1a1a1a] px-3.5 py-2.5 text-[13px] leading-relaxed text-zinc-100">
+                    {message.content}
+                  </div>
+                  <UserAvatar />
                 </div>
-                <UserAvatar />
               </div>
             ) : (
               <div key={message.id} className="pr-2">
@@ -183,6 +172,24 @@ export function SessionChatColumn({
             ),
           )}
         </div>
+
+        {isActive && statusLine ? (
+          <p className="mt-4 text-[13px] leading-relaxed text-zinc-400">
+            {statusLine}
+          </p>
+        ) : null}
+
+        <p
+          className={cn(
+            "mt-3 flex items-center gap-2 text-[12px] text-zinc-500",
+            isActive && "font-medium text-zinc-400",
+          )}
+        >
+          {isActive ? (
+            <span className="size-1.5 shrink-0 animate-pulse rounded-full bg-emerald-400" />
+          ) : null}
+          {workLabel}
+        </p>
 
         {systemMessages.map((message) => (
           <p
@@ -195,8 +202,8 @@ export function SessionChatColumn({
       </div>
 
       {canUseDevbox(task) ? (
-        <div className="shrink-0 border-t border-white/[0.06] bg-[#0a0a0a] px-3 pt-3">
-          <div className="overflow-hidden rounded-xl border border-white/[0.08] bg-[#111]">
+        <div className="shrink-0 border-t border-white/[0.06] bg-transparent px-3 pt-3">
+          <div className="overflow-hidden rounded-xl border border-white/10 bg-[#111]/90">
             <SessionDesktopPanel
               task={task}
               layout="embed"
@@ -206,9 +213,9 @@ export function SessionChatColumn({
         </div>
       ) : null}
 
-      <div className="shrink-0 border-t border-white/[0.06] bg-[#0a0a0a] p-3">
+      <div className="shrink-0 border-t border-white/[0.06] bg-transparent p-3">
         <form
-          className="rounded-xl border border-white/[0.08] bg-[#171717] p-2.5 shadow-[0_0_0_1px_rgba(255,255,255,0.02)]"
+          className="rounded-xl border border-white/15 bg-[#1c1c1c]/75 p-2.5 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.08),0_0_0_1px_rgba(255,255,255,0.03)] backdrop-blur-md"
           onSubmit={(event) => {
             event.preventDefault();
             if (!composerDisabled && followUpPrompt.trim()) {
@@ -274,18 +281,15 @@ export function SessionChatColumn({
   );
 }
 
-function TipCard() {
-  return (
-    <div className="mb-4 flex gap-2.5 rounded-xl border border-white/[0.06] bg-[#111111] px-3 py-2.5">
-      <div className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-violet-500/15">
-        <Lightbulb className="size-3.5 text-violet-400" />
-      </div>
-      <p className="text-[12px] leading-relaxed text-zinc-500">
-        Tip: ask for a specific stack, tests, or a live preview — Devin works in
-        your repo and devbox.
-      </p>
-    </div>
-  );
+function formatMessageTime(iso: string) {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) {
+    return "";
+  }
+  return date.toLocaleTimeString([], {
+    hour: "numeric",
+    minute: "2-digit",
+  });
 }
 
 function UserAvatar() {

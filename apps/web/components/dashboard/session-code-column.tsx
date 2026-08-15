@@ -225,7 +225,7 @@ export function SessionCodeColumn({
   };
 
   return (
-    <div className="flex min-h-0 min-w-0 flex-1 bg-[#0d0d0d] lg:min-h-0">
+    <div className="flex min-h-0 min-w-0 flex-1 bg-transparent lg:min-h-0">
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         <header className="flex shrink-0 items-center gap-0 border-b border-white/[0.06] px-4 py-2">
           <TabButton
@@ -262,10 +262,14 @@ export function SessionCodeColumn({
           )}
         </header>
 
-        <div className="flex min-h-0 flex-1 overflow-hidden bg-[#0d0d0d]">
+        <div className="flex min-h-0 flex-1 overflow-hidden bg-[#121212]/55">
           <div className="min-h-0 min-w-0 flex-1 overflow-hidden">
             {workspaceTab === "progress" ? (
-              <ProgressPanel lines={activityLines} isActive={isActive} />
+              <ProgressPanel
+                lines={activityLines}
+                isActive={isActive}
+                elapsedTime={elapsedTime}
+              />
             ) : null}
             {workspaceTab === "changes" ? (
               <ChangesStackPanel
@@ -294,9 +298,9 @@ export function SessionCodeColumn({
           </div>
 
           {workspaceTab === "changes" ? (
-            <aside className="flex w-[210px] shrink-0 flex-col border-l border-white/[0.06] bg-[#0a0a0a]">
+            <aside className="flex w-[210px] shrink-0 flex-col border-l border-white/[0.06] bg-[#101010]/70">
               <div className="shrink-0 border-b border-white/[0.06] p-2.5">
-                <div className="flex items-center gap-1 rounded-lg border border-white/[0.08] bg-[#111] px-2 py-1.5">
+                <div className="flex items-center gap-1 rounded-lg border border-white/[0.08] bg-[#171717]/90 px-2 py-1.5">
                   <Search className="size-3.5 shrink-0 text-zinc-600" />
                   <input
                     value={fileSearch}

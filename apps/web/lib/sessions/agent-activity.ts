@@ -264,7 +264,7 @@ export function buildConversationMessages(
   }
 
   if (!hasUserFromEvents && task.prompt.trim()) {
-    pushUser("user-initial", task.prompt);
+    pushUser("user-initial", task.prompt, task.createdAt);
   }
 
   messages.sort((a, b) => {
@@ -420,8 +420,15 @@ export function pickAssistantSummary(
   return null;
 }
 
-export function progressActivityLines(events: TaskEvent[]): string[] {
-  const lines: string[] = [];
+export type ProgressActivityLine = {
+  line: string;
+  timestamp?: string;
+};
+
+export function progressActivityLines(
+  events: TaskEvent[],
+): ProgressActivityLine[] {
+  const lines: ProgressActivityLine[] = [];
   const seen = new Set<string>();
 
   for (const event of events) {
@@ -435,7 +442,7 @@ export function progressActivityLines(events: TaskEvent[]): string[] {
       const line = humanizeToolProgressLine(tool, detail);
       if (line && !seen.has(line)) {
         seen.add(line);
-        lines.push(line);
+        lines.push({ line, timestamp: event.timestamp });
       }
       continue;
     }
@@ -443,7 +450,7 @@ export function progressActivityLines(events: TaskEvent[]): string[] {
       const text = event.message.trim();
       if (text.length >= 24 && text.length <= 200 && !seen.has(text)) {
         seen.add(text);
-        lines.push(text);
+        lines.push({ line: text, timestamp: event.timestamp });
       }
     }
   }

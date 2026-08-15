@@ -58,9 +58,15 @@ describe("progressActivityLines", () => {
         data: { tool: "Bash", detail: "npm run build" },
       }),
     ]);
-    expect(lines.some((line) => line.includes("toolCallId"))).toBe(false);
-    expect(lines).toContain("Edited `page.tsx`");
-    expect(lines.some((line) => line.includes("bun run build"))).toBe(true);
+    expect(lines.some((entry) => entry.line.includes("toolCallId"))).toBe(
+      false,
+    );
+    expect(lines.some((entry) => entry.line === "Edited `page.tsx`")).toBe(
+      true,
+    );
+    expect(lines.some((entry) => entry.line.includes("bun run build"))).toBe(
+      true,
+    );
   });
 });
 

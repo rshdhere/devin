@@ -93,10 +93,6 @@ function encodeBase64Content(content: string): string {
   return Buffer.from(content, "utf-8").toString("base64");
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
 export async function waitForGitHubRepository(
   token: string,
   owner: string,

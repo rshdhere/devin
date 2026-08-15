@@ -1,8 +1,7 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { Loader2 } from "lucide-react";
-import { motion } from "motion/react";
 import {
   Confirmation,
   ConfirmationAction,
@@ -11,7 +10,10 @@ import {
   ConfirmationTitle,
 } from "@/components/ai-elements/confirmation";
 import { MotionButton } from "@/components/dashboard/motion-button";
+import { workspaceShellClassName } from "@/components/dashboard/prompt-composer-constants";
 import { useSessions } from "@/components/dashboard/sessions-context";
+import { useChatSlotMorphHandoff } from "@/components/dashboard/use-chat-slot-morph-handoff";
+import { Diamond } from "@/components/loading-ui/diamond";
 import type {
   InfraDiagnostics,
   Task,
@@ -37,12 +39,10 @@ import {
 } from "@/components/dashboard/session-chat-column";
 import { SessionCodeColumn } from "@/components/dashboard/session-code-column";
 import { sumLineCounts, mergeTaskEvents } from "@/lib/sessions/agent-activity";
-import { canUseDevbox } from "@/lib/sessions/devbox";
+import { cn } from "@/lib/utils";
 import { useSessionDetailEffects } from "./session-detail-effects";
 import { useElapsedTime } from "./session-detail-utils";
 import { DiagnosticsPanel } from "./session-detail-diagnostics";
-
-const panelEase = [0.22, 1, 0.36, 1] as const;
 
 interface SessionDetailProps {
   task: Task;
@@ -53,7 +53,9 @@ export function SessionDetail({
   task: initialTask,
   onBack,
 }: SessionDetailProps) {
-  const { refreshTasks } = useSessions();
+  const { refreshTasks, isLaunchMorphing, isLaunchMorphFading } = useSessions();
+  const chatSlotRef = useRef<HTMLDivElement>(null);
+  useChatSlotMorphHandoff(chatSlotRef);
   const [task, setTask] = useState(initialTask);
   const [events, setEvents] = useState<TaskEvent[]>([]);
   const [streamError, setStreamError] = useState<string | null>(null);
@@ -72,7 +74,7 @@ export function SessionDetail({
   const [terminatingSession, setTerminatingSession] = useState(false);
   const [workspaceTab, setWorkspaceTab] = useState<
     "progress" | "changes" | "desktop"
-  >(() => (canUseDevbox(initialTask) ? "desktop" : "changes"));
+  >("progress");
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
   const [fileLineCounts, setFileLineCounts] = useState<Record<string, number>>(
     {},
@@ -335,64 +337,91 @@ export function SessionDetail({
     loadDiagnostics,
   });
 
+  const chatColumn = (
+    <SessionChatColumn
+      task={task}
+      events={events}
+      elapsedTime={elapsedTime}
+      isActive={isActive}
+      onBack={onBack}
+      followUpPrompt={followUpPrompt}
+      onFollowUpChange={setFollowUpPrompt}
+      onSendFollowUp={() => void handleContinueSession()}
+      continuingSession={continuingSession}
+      sessionActive={sessionActive}
+      banner={actionBanner}
+      composerDisabled={
+        !sessionActive && !isActive && task.status !== "awaiting_review"
+      }
+      addedLineCount={sumLineCounts(fileLineCounts)}
+      onOpenDesktop={() => setWorkspaceTab("desktop")}
+    />
+  );
+
+  // Chat stays covered by the morph overlay. Workspace shows the diamond on
+  // top while real panels stay mounted underneath (avoids remount hitch at fade).
+  const coveredByMorph = isLaunchMorphing && !isLaunchMorphFading;
+
   return (
-    <div className="flex min-h-0 w-full flex-1 flex-col overflow-hidden bg-[#0a0a0a]">
-      <div className="flex min-h-0 flex-1 overflow-hidden lg:flex-row">
-        <motion.div
-          className="flex min-h-0 min-w-0 flex-1 flex-col lg:w-[395px] lg:max-w-[395px] lg:flex-none"
-          initial={{ opacity: 0, x: -28 }}
-          animate={{ opacity: 1, x: 0 }}
-          transition={{ duration: 0.48, ease: panelEase, delay: 0.04 }}
+    <div className="relative flex min-h-0 w-full flex-1 overflow-hidden">
+      <div className="flex min-h-0 flex-1 overflow-hidden lg:flex-row lg:gap-3">
+        <div
+          ref={chatSlotRef}
+          data-chat-slot=""
+          className={cn(
+            workspaceShellClassName,
+            "flex min-h-0 min-w-0 flex-1 flex-col lg:w-[395px] lg:max-w-[395px] lg:flex-none",
+            coveredByMorph && "invisible",
+          )}
         >
-          <SessionChatColumn
-            task={task}
-            events={events}
-            elapsedTime={elapsedTime}
-            isActive={isActive}
-            onBack={onBack}
-            followUpPrompt={followUpPrompt}
-            onFollowUpChange={setFollowUpPrompt}
-            onSendFollowUp={() => void handleContinueSession()}
-            continuingSession={continuingSession}
-            sessionActive={sessionActive}
-            banner={actionBanner}
-            composerDisabled={
-              !sessionActive && !isActive && task.status !== "awaiting_review"
-            }
-            addedLineCount={sumLineCounts(fileLineCounts)}
-            onOpenDesktop={() => setWorkspaceTab("desktop")}
-          />
-        </motion.div>
-        <motion.div
-          className="flex min-h-0 min-w-0 flex-1 flex-col"
-          initial={{ opacity: 0, x: 28 }}
-          animate={{ opacity: 1, x: 0 }}
-          transition={{ duration: 0.5, ease: panelEase, delay: 0.12 }}
+          {chatColumn}
+        </div>
+        <div
+          className={cn(
+            workspaceShellClassName,
+            "relative flex min-h-0 min-w-0 flex-1 flex-col",
+          )}
         >
-          <SessionCodeColumn
-            task={task}
-            events={events}
-            isActive={isActive}
-            elapsedTime={elapsedTime}
-            onTaskChange={setTask}
-            workspaceTab={workspaceTab}
-            onWorkspaceTabChange={setWorkspaceTab}
-            selectedPath={selectedPath}
-            onSelectedPathChange={setSelectedPath}
-            onFileLineCount={(path, lineCount) =>
-              setFileLineCounts((prev) => ({ ...prev, [path]: lineCount }))
-            }
-          />
-        </motion.div>
+          <div
+            className={cn(
+              "flex min-h-0 flex-1 flex-col",
+              coveredByMorph && "invisible",
+            )}
+          >
+            <SessionCodeColumn
+              task={task}
+              events={events}
+              isActive={isActive}
+              elapsedTime={elapsedTime}
+              onTaskChange={setTask}
+              workspaceTab={workspaceTab}
+              onWorkspaceTabChange={setWorkspaceTab}
+              selectedPath={selectedPath}
+              onSelectedPathChange={setSelectedPath}
+              onFileLineCount={(path, lineCount) =>
+                setFileLineCounts((prev) => ({ ...prev, [path]: lineCount }))
+              }
+            />
+          </div>
+          {isLaunchMorphing ? (
+            <div
+              className={cn(
+                "absolute inset-0 z-10 flex flex-col items-center justify-center bg-[#1c1c1c] text-zinc-300 transition-opacity duration-200 ease-out",
+                isLaunchMorphFading && "opacity-0",
+              )}
+              role="status"
+              aria-label="Loading workspace"
+            >
+              <Diamond className="size-10 text-zinc-300" />
+            </div>
+          ) : null}
+        </div>
       </div>
 
       {showDiagnostics && task.status === "failed" ? (
-        <motion.details
-          className="shrink-0 border-t border-white/[0.06] bg-[#0a0a0a] px-4 py-2"
+        <details
+          className="absolute right-0 bottom-0 left-0 z-20 mx-3 mb-3 shrink-0 rounded-xl border border-white/[0.08] bg-[#141414]/95 px-4 py-2 backdrop-blur-md"
           open
-          initial={{ opacity: 0, y: 12 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.35, ease: panelEase, delay: 0.2 }}
         >
           <summary className="cursor-pointer text-[11px] text-zinc-500 hover:text-zinc-300">
             Diagnostics
@@ -408,7 +437,7 @@ export function SessionDetail({
               defaultExpanded
             />
           </div>
-        </motion.details>
+        </details>
       ) : null}
     </div>
   );

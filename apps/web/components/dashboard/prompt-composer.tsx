@@ -1,33 +1,31 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { motion } from "motion/react";
+import { useEffect, useRef, useState } from "react";
 import { DashboardLogo } from "@/components/dashboard/dashboard-logo";
 import { PromptMetadataBar } from "@/components/dashboard/prompt-metadata-bar";
 import {
   MIN_TEXTAREA_HEIGHT,
-  textareaSpring,
   type AgentId,
 } from "@/components/dashboard/prompt-composer-constants";
 import { PromptComposerToolbar } from "@/components/dashboard/prompt-composer-toolbar";
 import { useSessions } from "@/components/dashboard/sessions-context";
-import {
-  DEFAULT_CURSOR_AGENT_MODEL,
-  resolveRuntimeForTask,
-  runtimeLabel,
-} from "@devin/types";
+import { DEFAULT_CURSOR_AGENT_MODEL } from "@devin/types";
 import { cn } from "@/lib/utils";
 
 interface PromptComposerProps {
   selectedRepository?: string | null;
+  isLaunching?: boolean;
+  shellClassName?: string;
 }
 
-export function PromptComposer({ selectedRepository }: PromptComposerProps) {
+export function PromptComposer({
+  selectedRepository,
+  isLaunching = false,
+  shellClassName,
+}: PromptComposerProps) {
   const { startSession } = useSessions();
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
   const agentMenuRef = useRef<HTMLDivElement>(null);
   const [prompt, setPrompt] = useState("");
-  const [textareaHeight, setTextareaHeight] = useState(MIN_TEXTAREA_HEIGHT);
   const [agent, setAgent] = useState<AgentId>("cursor");
   const [showAgentMenu, setShowAgentMenu] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -48,18 +46,9 @@ export function PromptComposer({ selectedRepository }: PromptComposerProps) {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  useLayoutEffect(() => {
-    const textarea = textareaRef.current;
-    if (!textarea) return;
-
-    textarea.style.height = "0px";
-    const nextHeight = Math.max(MIN_TEXTAREA_HEIGHT, textarea.scrollHeight);
-    setTextareaHeight(nextHeight);
-  }, [prompt]);
-
   async function handleSubmit() {
     const trimmed = prompt.trim();
-    if (!trimmed || isSubmitting) {
+    if (!trimmed || isSubmitting || isLaunching) {
       return;
     }
 
@@ -94,11 +83,16 @@ export function PromptComposer({ selectedRepository }: PromptComposerProps) {
     }
   }
 
-  const resolvedRuntime = resolveRuntimeForTask(agent, prompt);
+  const busy = isSubmitting || isLaunching;
 
   return (
     <div className="flex w-full flex-col items-center overflow-visible">
-      <div className="mb-3 flex w-full items-center justify-between px-0.5">
+      <div
+        className={cn(
+          "mb-3 flex w-full items-center justify-between px-0.5",
+          isLaunching && "pointer-events-none opacity-0",
+        )}
+      >
         <div className="flex items-center gap-2.5 text-[22px] font-semibold tracking-tight text-white">
           <DashboardLogo size={26} className="text-white" />
           <span>Devin</span>
@@ -133,14 +127,14 @@ export function PromptComposer({ selectedRepository }: PromptComposerProps) {
       </div>
 
       <div
+        data-composer-shell=""
         className={cn(
-          "relative w-full overflow-hidden rounded-2xl",
-          "border border-white/15 bg-[#1c1c1c]/75 backdrop-blur-xl",
-          "shadow-[inset_0_1px_0_0_rgba(255,255,255,0.12),0_0_0_1px_rgba(255,255,255,0.04),0_16px_48px_rgba(0,0,0,0.45)]",
+          shellClassName,
+          "relative w-full",
+          isLaunching && "opacity-0",
         )}
       >
-        <motion.textarea
-          ref={textareaRef}
+        <textarea
           value={prompt}
           onChange={(event) => setPrompt(event.target.value)}
           onKeyDown={handleKeyDown}
@@ -149,54 +143,45 @@ export function PromptComposer({ selectedRepository }: PromptComposerProps) {
               ? "Ask Devin anything about your code"
               : "Ask Devin to build features, fix bugs, or work on your code"
           }
-          rows={1}
-          disabled={isSubmitting}
-          initial={false}
-          animate={{ height: textareaHeight }}
-          transition={textareaSpring}
+          rows={3}
+          disabled={busy}
+          style={{ height: MIN_TEXTAREA_HEIGHT }}
           className={cn(
-            "w-full resize-none overflow-hidden bg-transparent px-4 pt-4 pb-2",
+            "w-full resize-none overflow-y-auto bg-transparent px-4 pt-4 pb-2",
             "text-[15px] leading-relaxed text-zinc-100 placeholder:text-zinc-500",
             "selection:bg-white selection:text-[#1c1c1c]",
             "outline-none disabled:opacity-60",
           )}
         />
 
-        <PromptComposerToolbar
-          agent={agent}
-          onAgentChange={(nextAgent) => {
-            setAgent(nextAgent);
-            setShowAgentMenu(false);
-          }}
-          showAgentMenu={showAgentMenu}
-          onToggleAgentMenu={() => {
-            setShowAgentMenu((open) => !open);
-          }}
-          agentMenuRef={agentMenuRef}
-          prompt={prompt}
-          isSubmitting={isSubmitting}
-          onSubmit={() => void handleSubmit()}
-        />
+        <div className={cn(isLaunching && "pointer-events-none opacity-0")}>
+          <PromptComposerToolbar
+            agent={agent}
+            onAgentChange={(nextAgent) => {
+              setAgent(nextAgent);
+              setShowAgentMenu(false);
+            }}
+            showAgentMenu={showAgentMenu}
+            onToggleAgentMenu={() => {
+              setShowAgentMenu((open) => !open);
+            }}
+            agentMenuRef={agentMenuRef}
+            prompt={prompt}
+            isSubmitting={busy}
+            onSubmit={() => void handleSubmit()}
+          />
+        </div>
       </div>
 
-      {error ? (
-        <p className="mt-2 text-center text-[12px] text-red-400">{error}</p>
-      ) : null}
+      <div
+        className={cn("w-full", isLaunching && "pointer-events-none opacity-0")}
+      >
+        {error ? (
+          <p className="mt-2 text-center text-[12px] text-red-400">{error}</p>
+        ) : null}
 
-      {prompt.trim() ? (
-        <p className="mt-2 text-center text-[12px] text-zinc-500">
-          Devbox snapshot:{" "}
-          <span className="font-medium text-indigo-300/90">
-            {runtimeLabel(resolvedRuntime)}
-          </span>
-          <span className="text-zinc-600">
-            {" "}
-            — runtime agents always use the agent image
-          </span>
-        </p>
-      ) : null}
-
-      <PromptMetadataBar />
+        <PromptMetadataBar />
+      </div>
     </div>
   );
 }

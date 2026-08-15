@@ -1,19 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import {
-  ChevronDown,
-  ChevronRight,
-  Code2,
-  Copy,
-  FileCode2,
-  History,
-  MessageCircle,
-  Loader2,
-  Monitor,
-  TerminalSquare,
-  Users,
-} from "lucide-react";
+import { ChevronDown, ChevronRight, Copy, Loader2 } from "lucide-react";
 import {
   changeKindFromType,
   formatPathContext,
@@ -98,16 +86,22 @@ export function TreeStatusBadge({ changeType }: { changeType: string }) {
 export function ProgressPanel({
   lines,
   isActive,
+  elapsedTime,
 }: {
-  lines: string[];
+  lines: Array<{ line: string; timestamp?: string }>;
   isActive: boolean;
+  elapsedTime: string;
 }) {
-  const filtered = lines.filter((line) => !isAgentStreamNoise(line));
+  const filtered = lines.filter((entry) => !isAgentStreamNoise(entry.line));
 
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden px-5 py-4">
       <div className="min-h-0 flex-1 overflow-y-auto">
-        <SessionWorkSteps lines={filtered} isActive={isActive} />
+        <SessionWorkSteps
+          lines={filtered}
+          isActive={isActive}
+          elapsedTime={elapsedTime}
+        />
       </div>
     </div>
   );
@@ -148,44 +142,10 @@ export function ChangesStackPanel({
 
   if (files.length === 0) {
     return (
-      <div className="flex h-full flex-col items-center justify-center px-6 text-left">
-        <div className="w-full max-w-[250px] space-y-3">
-          <WorkspaceHint
-            icon={Monitor}
-            label="Desktop"
-            detail="Watch and control Devin's Desktop"
-          />
-          <WorkspaceHint
-            icon={FileCode2}
-            label="Editor"
-            detail="Full control of Devin's machine"
-          />
-          <WorkspaceHint
-            icon={Code2}
-            label="Changes"
-            detail="See Devin's file edits"
-          />
-          <WorkspaceHint
-            icon={TerminalSquare}
-            label="Shell"
-            detail="View Devin's command history"
-          />
-          <WorkspaceHint
-            icon={History}
-            label="Progress"
-            detail="Understand Devin's history and actions"
-          />
-          <WorkspaceHint
-            icon={Users}
-            label="Agents"
-            detail="Manage this session's child sessions"
-          />
-          <WorkspaceHint
-            icon={MessageCircle}
-            label="Side chat"
-            detail="Ask questions without interrupting your main agent"
-          />
-        </div>
+      <div className="flex h-full items-center justify-center px-6">
+        <p className="text-[12px] text-zinc-600">
+          Files appear as the agent edits the repo.
+        </p>
       </div>
     );
   }
@@ -329,26 +289,6 @@ export function ChangesStackPanel({
             </section>
           );
         })}
-      </div>
-    </div>
-  );
-}
-
-function WorkspaceHint({
-  icon: Icon,
-  label,
-  detail,
-}: {
-  icon: typeof Monitor;
-  label: string;
-  detail: string;
-}) {
-  return (
-    <div className="flex items-start gap-2 text-zinc-500">
-      <Icon className="mt-0.5 size-3.5 shrink-0 text-zinc-500" />
-      <div>
-        <p className="text-[12px] text-zinc-300">{label}</p>
-        <p className="text-[10px] text-zinc-600">{detail}</p>
       </div>
     </div>
   );

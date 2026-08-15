@@ -2,22 +2,27 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { motion } from "motion/react";
 import type { Task } from "@devin/types";
 import { SessionDetail } from "@/components/dashboard/session-detail";
+import { workspaceShellClassName } from "@/components/dashboard/prompt-composer-constants";
 import { useSessions } from "@/components/dashboard/sessions-context";
+import { Diamond } from "@/components/loading-ui/diamond";
 import { fetchTask } from "@/lib/api/tasks";
 import { LoadingScreen } from "@/components/loading-screen";
+import { cn } from "@/lib/utils";
 
 interface SessionPageProps {
   sessionId: string;
 }
 
-const enterEase = [0.22, 1, 0.36, 1] as const;
-
 export function SessionPage({ sessionId }: SessionPageProps) {
   const router = useRouter();
-  const { tasks, isLoading: tasksLoading } = useSessions();
+  const {
+    tasks,
+    isLoading: tasksLoading,
+    isLaunchMorphing,
+    isLaunchMorphFading,
+  } = useSessions();
   const fromList = tasks.find((task) => task.id === sessionId) ?? null;
   const [fetchedTask, setFetchedTask] = useState<Task | null>(null);
   const [fetchFailed, setFetchFailed] = useState(false);
@@ -60,21 +65,35 @@ export function SessionPage({ sessionId }: SessionPageProps) {
 
   const task = fromList ?? fetchedTask;
 
+  function handleBack() {
+    router.push("/s");
+  }
+
   if (!task && (tasksLoading || isFetching) && !fetchFailed) {
-    // Fresh navigation from composer already has the task in context —
-    // only show the heavy loader for cold deep-links.
     if (tasksLoading && tasks.length === 0) {
       return <LoadingScreen />;
     }
     return (
-      <motion.div
-        className="flex min-h-0 w-full flex-1 items-center justify-center bg-[#0a0a0a]"
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        transition={{ duration: 0.25 }}
-      >
-        <div className="h-8 w-8 animate-pulse rounded-full bg-white/10" />
-      </motion.div>
+      <div className="flex min-h-0 w-full flex-1 overflow-hidden lg:gap-3">
+        <div
+          data-chat-slot=""
+          className={cn(
+            workspaceShellClassName,
+            "flex min-h-0 w-full min-w-0 flex-1 flex-col lg:w-[395px] lg:max-w-[395px] lg:flex-none",
+            isLaunchMorphing && !isLaunchMorphFading && "invisible",
+          )}
+        />
+        <div
+          className={cn(
+            workspaceShellClassName,
+            "hidden min-h-0 flex-1 flex-col items-center justify-center text-zinc-300 lg:flex",
+          )}
+          role="status"
+          aria-label="Loading workspace"
+        >
+          <Diamond className="size-10 text-zinc-300" />
+        </div>
+      </div>
     );
   }
 
@@ -84,7 +103,7 @@ export function SessionPage({ sessionId }: SessionPageProps) {
         <p className="text-[15px] text-gray-300">Session not found</p>
         <button
           type="button"
-          onClick={() => router.push("/s")}
+          onClick={handleBack}
           className="cursor-pointer text-[14px] text-[#5a9fd4] hover:text-[#6aa8ef]"
         >
           Back to composer
@@ -93,18 +112,5 @@ export function SessionPage({ sessionId }: SessionPageProps) {
     );
   }
 
-  return (
-    <motion.div
-      className="flex min-h-0 w-full flex-1 flex-col overflow-hidden"
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      transition={{ duration: 0.35, ease: enterEase }}
-    >
-      <SessionDetail
-        key={task.id}
-        task={task}
-        onBack={() => router.push("/s")}
-      />
-    </motion.div>
-  );
+  return <SessionDetail key={task.id} task={task} onBack={handleBack} />;
 }
