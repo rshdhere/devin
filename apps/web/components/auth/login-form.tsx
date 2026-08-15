@@ -3,6 +3,7 @@
 import { FormEvent, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { AuthDivider } from "@/components/auth/auth-divider";
+import { LocalDevLoginSlot } from "@/components/auth/local-dev-login";
 import { SocialAuthButtons } from "@/components/auth/social-auth-buttons";
 import { authClient } from "@/lib/auth-client";
 import { getCallbackURL } from "@/lib/auth-config";
@@ -79,6 +80,8 @@ export function LoginForm() {
 
   return (
     <>
+      <LocalDevLoginSlot disabled={isSubmitting} />
+
       <SocialAuthButtons />
 
       <AuthDivider />

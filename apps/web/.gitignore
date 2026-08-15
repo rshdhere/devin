@@ -28,6 +28,9 @@ yarn-error.log*
 # env files (can opt-in for committing if needed)
 .env*
 
+# Local-only login button (never ship to staging/prod)
+/components/auth/local-dev-login.local.tsx
+
 # vercel
 .vercel
 

@@ -123,6 +123,10 @@ console.log(
   `[AUTH CONFIG] Expected cookie name: ${useSecureCookies ? "__Secure-better-auth.session_token" : "better-auth.session_token"}`,
 );
 
+const allowLocalDevLogin =
+  process.env.NODE_ENV !== "production" &&
+  process.env.ALLOW_LOCAL_DEV_LOGIN === "true";
+
 export const auth = betterAuth({
   basePath: "/api/v1/auth",
   baseURL: process.env.BETTER_AUTH_URL,
@@ -152,10 +156,10 @@ export const auth = betterAuth({
   },
   emailAndPassword: {
     enabled: true,
-    requireEmailVerification: true,
-    autoSignIn: false,
+    requireEmailVerification: !allowLocalDevLogin,
+    autoSignIn: allowLocalDevLogin,
     onExistingUserSignUp: async ({ user }) => {
-      if (user.emailVerified) {
+      if (allowLocalDevLogin || user.emailVerified) {
         return;
       }
 
@@ -163,7 +167,7 @@ export const auth = betterAuth({
     },
   },
   emailVerification: {
-    sendOnSignUp: true,
+    sendOnSignUp: !allowLocalDevLogin,
     autoSignInAfterVerification: true,
     sendVerificationEmail: async ({ user, url }) => {
       await sendVerificationEmail({ to: user.email, url });
@@ -176,5 +180,11 @@ export const auth = betterAuth({
     schema: schema,
   }),
 });
+
+if (allowLocalDevLogin) {
+  console.log(
+    "[AUTH CONFIG] ALLOW_LOCAL_DEV_LOGIN=true — local email/password sign-in enabled without verification",
+  );
+}
 
 logAuthConfig();
