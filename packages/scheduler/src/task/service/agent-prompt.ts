@@ -77,14 +77,61 @@ export function pythonPromptGuidance(stackRuntime?: StackRuntime): string[] {
   ];
 }
 
+export type BuildAgentPromptOptions = {
+  /** Resume an existing sandbox session with a new user request. */
+  followUp?: boolean;
+  greenfieldRepo?: boolean;
+};
+
+export function buildFollowUpAgentPrompt(
+  prompt: string,
+  repository: string,
+  repoCwd: string,
+  owner?: GitHubUserIdentity,
+): string {
+  const bot = resolveBotAuthor();
+  const ownerLine = owner
+    ? `Repository owner: ${owner.login}. You are committing on their behalf.`
+    : "Repository owner: connected GitHub user.";
+
+  return [
+    `Repository ${repository} is already available at /workspace/${repoCwd}.`,
+    ownerLine,
+    "",
+    "This is a follow-up in an existing session.",
+    "The repository and current files are the source of truth — inspect them before acting.",
+    "Apply ONLY the new user request below. Do not rebuild the product from scratch.",
+    "Do not reinstall dependencies, re-scaffold, or re-run full production builds/smoke loops unless the request requires it.",
+    "Make one or more focused commits for this change only.",
+    "- NEVER use shell heredocs for commits (no `cat <<'EOF'`, no `$(cat <<EOF)`). They hang the sandbox.",
+    `- Commit with two -m flags only, e.g. git commit -m "fix: update background" -m "Co-authored-by: ${bot.name} <${bot.email}>"`,
+    `- Every commit MUST include this trailer via a second -m: Co-authored-by: ${bot.name} <${bot.email}>`,
+    `- ${bot.name} is the ONLY allowed co-author. Never attribute work to Cursor, Claude, an AI, an assistant, or an agent.`,
+    "- If a shell command hangs, stop retrying it and finish remaining file edits.",
+    "- When the requested change is done, STOP IMMEDIATELY.",
+    "",
+    prompt,
+  ].join("\n");
+}
+
 export function buildAgentPrompt(
   prompt: string,
   repository: string,
   repoCwd: string,
   owner?: GitHubUserIdentity,
   stackRuntime?: StackRuntime,
-  greenfieldRepo?: boolean,
+  greenfieldRepoOrOptions?: boolean | BuildAgentPromptOptions,
 ): string {
+  const options: BuildAgentPromptOptions =
+    typeof greenfieldRepoOrOptions === "object" && greenfieldRepoOrOptions
+      ? greenfieldRepoOrOptions
+      : { greenfieldRepo: Boolean(greenfieldRepoOrOptions) };
+
+  if (options.followUp) {
+    return buildFollowUpAgentPrompt(prompt, repository, repoCwd, owner);
+  }
+
+  const greenfieldRepo = options.greenfieldRepo === true;
   const bot = resolveBotAuthor();
   const ownerLine = owner
     ? `Repository owner: ${owner.login}. You are committing on their behalf.`

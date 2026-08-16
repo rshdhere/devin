@@ -46,7 +46,10 @@ export async function runAgentPhase(
     state.repoCwd,
     state.gitOwner,
     resolveStackRuntime(task, job),
-    state.createdNewRepo,
+    {
+      followUp: job.resumeSession === true,
+      greenfieldRepo: state.createdNewRepo,
+    },
   );
   const repoReadyInSandbox = Boolean(state.repository && state.cloneUrl);
 

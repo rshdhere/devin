@@ -183,6 +183,27 @@ export function humanizeToolProgressLine(
   }
 }
 
+export function looksLikeSyntheticFollowUpPrompt(text: string): boolean {
+  return (
+    text.includes("Continue the existing session using the context below") ||
+    text.includes("Previous session context:")
+  );
+}
+
+/** Prefer the real user text when older events stored the wrapped agent prompt. */
+export function normalizeUserFacingPrompt(prompt: string): string | null {
+  const text = prompt.trim();
+  if (!text) {
+    return null;
+  }
+  if (!looksLikeSyntheticFollowUpPrompt(text)) {
+    return text;
+  }
+  const match = text.match(/New user request:\s*([\s\S]+)$/i);
+  const extracted = match?.[1]?.trim();
+  return extracted || null;
+}
+
 export function buildConversationMessages(
   task: Task,
   events: TaskEvent[],
@@ -199,6 +220,20 @@ export function buildConversationMessages(
     }
     seenUserIds.add(id);
     messages.push({ id, role: "user", content: text, timestamp });
+  };
+
+  const pushFollowUpUser = (
+    id: string,
+    rawPrompt: string,
+    timestamp?: string,
+  ) => {
+    const text = normalizeUserFacingPrompt(rawPrompt);
+    if (!text || seenFollowUpPrompts.has(text)) {
+      return false;
+    }
+    seenFollowUpPrompts.add(text);
+    pushUser(id, text, timestamp);
+    return true;
   };
 
   const pushAssistant = (id: string, content: string, timestamp?: string) => {
@@ -222,14 +257,16 @@ export function buildConversationMessages(
       typeof event.data?.prompt === "string" ? event.data.prompt.trim() : "";
 
     if (event.type === "task.created" && eventPrompt) {
-      pushUser(event.id, eventPrompt, event.timestamp);
+      const text = normalizeUserFacingPrompt(eventPrompt) ?? eventPrompt;
+      pushUser(event.id, text, event.timestamp);
       hasUserFromEvents = true;
       continue;
     }
     if (event.type === "task.scheduled" && event.data?.followUp === true) {
-      if (eventPrompt && !seenFollowUpPrompts.has(eventPrompt)) {
-        seenFollowUpPrompts.add(eventPrompt);
-        pushUser(event.id, eventPrompt, event.timestamp);
+      if (
+        eventPrompt &&
+        pushFollowUpUser(event.id, eventPrompt, event.timestamp)
+      ) {
         hasUserFromEvents = true;
       }
       continue;
@@ -237,23 +274,23 @@ export function buildConversationMessages(
     if (
       event.type === "task.phase_changed" &&
       event.data?.followUp === true &&
-      eventPrompt &&
-      !seenFollowUpPrompts.has(eventPrompt)
+      eventPrompt
     ) {
-      seenFollowUpPrompts.add(eventPrompt);
-      pushUser(event.id, eventPrompt, event.timestamp);
-      hasUserFromEvents = true;
+      if (pushFollowUpUser(event.id, eventPrompt, event.timestamp)) {
+        hasUserFromEvents = true;
+      }
       continue;
     }
     if (event.type === "execution.started" && eventPrompt) {
       if (event.data?.followUp === true) {
-        if (!seenFollowUpPrompts.has(eventPrompt)) {
-          seenFollowUpPrompts.add(eventPrompt);
-          pushUser(`exec-${event.id}`, eventPrompt, event.timestamp);
+        if (
+          pushFollowUpUser(`exec-${event.id}`, eventPrompt, event.timestamp)
+        ) {
           hasUserFromEvents = true;
         }
       } else if (!hasUserFromEvents) {
-        pushUser(`exec-${event.id}`, eventPrompt, event.timestamp);
+        const text = normalizeUserFacingPrompt(eventPrompt) ?? eventPrompt;
+        pushUser(`exec-${event.id}`, text, event.timestamp);
         hasUserFromEvents = true;
       }
       continue;

@@ -142,6 +142,50 @@ describe("buildConversationMessages", () => {
     ]);
   });
 
+  it("collapses synthetic wrapped follow-up prompts into the user request", () => {
+    const wrapped = [
+      "Continue the existing session using the context below.",
+      "The repository and current files are the source of truth; verify them before acting.",
+      "",
+      "Previous session context:",
+      "1. make me a tic-tac-toe app using nextjs",
+      "2. I'll inspect the Next.js scaffold first",
+      "",
+      "New user request: make the background black",
+    ].join("\n");
+
+    const messages = buildConversationMessages(
+      task({ prompt: "make the background black" }),
+      [
+        event({
+          id: "created",
+          type: "task.created",
+          message: "Task accepted",
+          data: { prompt: "make me a tic-tac-toe app using nextjs" },
+        }),
+        event({
+          id: "follow-scheduled",
+          type: "task.scheduled",
+          message: "Follow-up prompt queued",
+          data: { followUp: true, prompt: "make the background black" },
+        }),
+        event({
+          id: "follow-exec",
+          type: "execution.started",
+          message: "Follow-up execution started",
+          data: { followUp: true, prompt: wrapped },
+        }),
+      ],
+    );
+
+    expect(
+      messages.filter((m) => m.role === "user").map((m) => m.content),
+    ).toEqual([
+      "make me a tic-tac-toe app using nextjs",
+      "make the background black",
+    ]);
+  });
+
   it("recovers the initial prompt from execution.started when task.created lacks it", () => {
     const messages = buildConversationMessages(
       task({ prompt: "use fan-in fan-out pattern" }),

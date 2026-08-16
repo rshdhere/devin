@@ -204,7 +204,12 @@ export async function fetchDesktopScreenshot(
 }
 
 export async function fetchDesktopVNC(id: string): Promise<Response> {
-  return proxyScheduler(`/api/v1/tasks/${encodeURIComponent(id)}/desktop-vnc`);
+  // Wake/rehydrate can exceed the default scheduler timeout (same as preview/screenshot).
+  return proxyScheduler(
+    `/api/v1/tasks/${encodeURIComponent(id)}/desktop-vnc`,
+    undefined,
+    { timeoutMs: null },
+  );
 }
 
 export { schedulerBaseUrl };
