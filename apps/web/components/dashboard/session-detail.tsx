@@ -85,7 +85,7 @@ export function SessionDetail({
     task.status !== "failed" &&
     task.status !== "cancelled";
 
-  const elapsedTime = useElapsedTime(task.createdAt, isActive);
+  const elapsedTime = useElapsedTime(task.createdAt, isActive, events);
 
   const awaitingSandboxApproval =
     task.status === "draft_ready" &&

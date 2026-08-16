@@ -14,10 +14,45 @@ import {
 } from "lucide-react";
 import type { TaskEvent } from "@devin/types";
 
-export function formatElapsedTime(startTime: string): string {
-  const start = new Date(startTime).getTime();
-  const now = Date.now();
-  const elapsed = Math.floor((now - start) / 1000);
+export function formatElapsedTime(
+  startTime: string,
+  isActive = false,
+  events: TaskEvent[] = [],
+): string {
+  const fallbackStart = new Date(startTime).getTime();
+  const orderedEvents = [...events].sort(
+    (a, b) => Date.parse(a.timestamp) - Date.parse(b.timestamp),
+  );
+  const terminalTypes = new Set(["task.completed", "task.failed"]);
+  let activeStart: number | null = null;
+  let elapsedMs = 0;
+
+  for (const event of orderedEvents) {
+    const timestamp = Date.parse(event.timestamp);
+    if (!Number.isFinite(timestamp)) {
+      continue;
+    }
+    if (event.type === "execution.started") {
+      activeStart ??= timestamp;
+    } else if (terminalTypes.has(event.type) && activeStart !== null) {
+      elapsedMs += Math.max(0, timestamp - activeStart);
+      activeStart = null;
+    }
+  }
+
+  if (activeStart !== null) {
+    elapsedMs += Math.max(0, Date.now() - activeStart);
+  } else if (elapsedMs === 0) {
+    const terminal = orderedEvents.find((event) =>
+      terminalTypes.has(event.type),
+    );
+    const end = terminal ? Date.parse(terminal.timestamp) : Date.now();
+    elapsedMs = Math.max(0, end - fallbackStart);
+  } else if (isActive) {
+    elapsedMs = Math.max(0, Date.now() - fallbackStart);
+  }
+
+  const elapsed = Math.floor(elapsedMs / 1000);
 
   if (elapsed < 60) {
     return `${elapsed}s`;
@@ -32,21 +67,31 @@ export function formatElapsedTime(startTime: string): string {
   return `${hours}h ${mins}m`;
 }
 
-export function useElapsedTime(startTime: string, isActive: boolean): string {
-  const [elapsed, setElapsed] = useState(() => formatElapsedTime(startTime));
+export function useElapsedTime(
+  startTime: string,
+  isActive: boolean,
+  events: TaskEvent[] = [],
+): string {
+  const [elapsed, setElapsed] = useState(() =>
+    formatElapsedTime(startTime, isActive, events),
+  );
 
   useEffect(() => {
+    const update = () => {
+      setElapsed(formatElapsedTime(startTime, isActive, events));
+    };
+    update();
+
     if (!isActive) {
-      setElapsed(formatElapsedTime(startTime));
       return;
     }
 
     const interval = setInterval(() => {
-      setElapsed(formatElapsedTime(startTime));
+      update();
     }, 1000);
 
     return () => clearInterval(interval);
-  }, [startTime, isActive]);
+  }, [events, isActive, startTime]);
 
   return elapsed;
 }
