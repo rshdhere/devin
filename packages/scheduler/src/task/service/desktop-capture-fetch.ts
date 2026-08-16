@@ -62,7 +62,18 @@ export async function fetchDesktopScreenshot(
     } catch {
       // Worker unreachable after rehydrate attempt.
     }
-    return new Response("No devbox session", { status: 404 });
+    const cached = await loadCachedDesktopSnapshot(svc, taskId);
+    if (cached) {
+      return new Response(cached, {
+        status: 200,
+        headers: {
+          "Content-Type": "image/png",
+          "Cache-Control": "no-store",
+          "X-Desktop-Snapshot-Source": "durable-cache",
+        },
+      });
+    }
+    return new Response("No desktop snapshot available", { status: 404 });
   }
 
   const cached = opts?.fresh

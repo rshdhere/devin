@@ -1,4 +1,5 @@
 import { RuntimeClient } from "@devin/agent-sdk";
+import type { TaskEvent } from "@devin/events";
 import type { ScheduleJob, Task } from "../types.js";
 import type { PersistedSession } from "../store.js";
 import type { TaskService } from "./task-service.js";
@@ -20,6 +21,49 @@ import {
 import { requestWorkerRehydrate } from "./resolve-session-proxy.js";
 import { ensureTaskLoaded } from "./resolve-task.js";
 import { emit, patchTask, updateTask } from "./task-state.js";
+
+function buildFollowUpPrompt(
+  prompt: string,
+  previousEvents: TaskEvent[],
+): string {
+  const context = previousEvents
+    .filter((event) => {
+      if (event.type === "task.created") {
+        return typeof event.data?.prompt === "string";
+      }
+      return (
+        ((event.type === "task.scheduled" ||
+          event.type === "task.phase_changed" ||
+          event.type === "execution.started") &&
+          event.data?.followUp === true &&
+          typeof event.data?.prompt === "string") ||
+        (event.type === "agent.output" && event.message.trim().length >= 30)
+      );
+    })
+    .map((event) => {
+      const value =
+        typeof event.data?.prompt === "string"
+          ? event.data.prompt.trim()
+          : event.message.trim();
+      return value.length > 1200 ? `${value.slice(0, 1200)}…` : value;
+    })
+    .filter(Boolean)
+    .slice(-12);
+
+  if (context.length === 0) {
+    return prompt;
+  }
+
+  return [
+    "Continue the existing session using the context below.",
+    "The repository and current files are the source of truth; verify them before acting.",
+    "",
+    "Previous session context:",
+    ...context.map((entry, index) => `${index + 1}. ${entry}`),
+    "",
+    `New user request: ${prompt}`,
+  ].join("\n");
+}
 
 export async function continueTask(
   svc: TaskService,
@@ -81,9 +125,10 @@ export async function continueTask(
     throw new Error("no active devbox session for this task");
   }
 
+  const previousEvents = await svc.taskStore.loadEvents(taskId);
   const followUpJob: ScheduleJob = {
     ...jobBase,
-    prompt: trimmed,
+    prompt: buildFollowUpPrompt(trimmed, previousEvents),
     taskId,
     skipDraft: true,
     resumeSession: true,
