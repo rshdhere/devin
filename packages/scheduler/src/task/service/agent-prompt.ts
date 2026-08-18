@@ -78,6 +78,28 @@ export function pythonPromptGuidance(stackRuntime?: StackRuntime): string[] {
   ];
 }
 
+export function vercelDeploymentRequested(prompt: string): boolean {
+  return /\b(deploy|publish|ship|host)\b[\s\S]*\bvercel\b/i.test(prompt);
+}
+
+function vercelDeploymentGuidance(prompt: string): string[] {
+  if (!vercelDeploymentRequested(prompt)) {
+    return [];
+  }
+  return [
+    "",
+    "Vercel deployment requested:",
+    "- Deploy this existing repository to Vercel after verifying the app builds.",
+    "- Vercel is not assumed to be installed in the microVM.",
+    "- Bootstrap and verify it in the microVM with `npx --yes vercel --version`.",
+    "- Then deploy with `npx --yes vercel --prod --yes`.",
+    '- If VERCEL_TOKEN is available, pass `--token "$VERCEL_TOKEN"`.',
+    "- Preserve an existing Vercel project link; use VERCEL_ORG_ID and VERCEL_PROJECT_ID when provided.",
+    "- Report the final deployment URL and any missing Vercel credentials clearly.",
+    "",
+  ];
+}
+
 export type BuildAgentPromptOptions = {
   /** Resume an existing sandbox session with a new user request. */
   followUp?: boolean;
@@ -161,6 +183,7 @@ export function buildFollowUpAgentPrompt(
     `- ${bot.name} is the ONLY allowed co-author. Never attribute work to Cursor, Claude, an AI, an assistant, or an agent.`,
     "- If a shell command hangs, stop retrying it and finish remaining file edits.",
     "- When the requested change is done, STOP IMMEDIATELY.",
+    ...vercelDeploymentGuidance(prompt),
     "",
     prompt,
   ].join("\n");
@@ -230,6 +253,7 @@ export function buildAgentPrompt(
     ...nextjsPromptGuidance(stackRuntime),
     ...rustPromptGuidance(stackRuntime),
     ...pythonPromptGuidance(stackRuntime),
+    ...vercelDeploymentGuidance(prompt),
     "",
     "Git / commits:",
     "- Commit incrementally after meaningful steps (API, UI, features, polish)",

@@ -37,6 +37,19 @@ describe("buildFollowUpAgentPrompt", () => {
     expect(prompt).toContain("Added the board");
     expect(prompt).toContain("current files are the source of truth");
   });
+
+  it("adds Vercel deployment instructions only when requested", () => {
+    const prompt = buildFollowUpAgentPrompt(
+      "deploy this to Vercel",
+      "acme/tic-tac-toe",
+      "repo",
+    );
+
+    expect(prompt).toContain("Vercel deployment requested");
+    expect(prompt).toContain("npx --yes vercel --version");
+    expect(prompt).toContain("npx --yes vercel --prod --yes");
+    expect(prompt).toContain("VERCEL_TOKEN");
+  });
 });
 
 describe("buildFollowUpSessionContext", () => {

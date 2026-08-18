@@ -63,11 +63,6 @@ function DesktopSnapshotAwaiting({
             "radial-gradient(ellipse at center, black 20%, transparent 72%)",
         }}
       />
-      <div
-        aria-hidden
-        className="desktop-await-scan pointer-events-none absolute inset-x-[-20%] h-24 bg-gradient-to-b from-transparent via-white/[0.07] to-transparent"
-      />
-
       <div className="relative flex flex-col items-center gap-3">
         <div className="relative rounded-2xl border border-white/[0.1] bg-[#121212]/90 p-3 shadow-[0_0_0_1px_rgba(255,255,255,0.03),0_18px_40px_rgba(0,0,0,0.45)] backdrop-blur-sm">
           <div className="relative flex h-16 w-24 items-center justify-center overflow-hidden rounded-lg border border-white/[0.08] bg-[#0b0b0b]">
@@ -76,7 +71,9 @@ function DesktopSnapshotAwaiting({
               className="relative size-6 text-zinc-500"
               strokeWidth={1.5}
             />
-            <div className="desktop-await-pulse absolute inset-x-3 bottom-2 h-px bg-emerald-400/50" />
+            <div className="absolute inset-x-3 bottom-2 h-px overflow-hidden rounded-full bg-emerald-950/80">
+              <div className="desktop-await-progress h-full w-2/5 rounded-full bg-emerald-400/80 shadow-[0_0_8px_rgba(52,211,153,0.7)]" />
+            </div>
           </div>
           <div className="mx-auto mt-2 h-1 w-8 rounded-full bg-white/[0.08]" />
           <div className="mx-auto mt-1 h-0.5 w-12 rounded-full bg-white/[0.05]" />

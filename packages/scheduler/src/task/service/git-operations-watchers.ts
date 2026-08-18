@@ -404,7 +404,13 @@ export function runtimeSecrets(
   agentModel?: string,
 ): Record<string, string> {
   const secrets: Record<string, string> = {};
-  for (const key of ["CURSOR_API_KEY", "ANTHROPIC_API_KEY"] as const) {
+  for (const key of [
+    "CURSOR_API_KEY",
+    "ANTHROPIC_API_KEY",
+    "VERCEL_TOKEN",
+    "VERCEL_ORG_ID",
+    "VERCEL_PROJECT_ID",
+  ] as const) {
     const value = process.env[key]?.trim();
     if (value) {
       secrets[key] = value;

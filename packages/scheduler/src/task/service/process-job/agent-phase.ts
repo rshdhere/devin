@@ -4,7 +4,10 @@ import { buildPruneWorkspaceDiskScript } from "../../../devbox/preview.js";
 import { isRecoverableAgentInterruption } from "../../../greenfield/git-sync.js";
 import type { ScheduleJob, Task } from "../types.js";
 import type { TaskService } from "../task-service.js";
-import { buildAgentPrompt } from "../agent-prompt.js";
+import {
+  buildAgentPrompt,
+  vercelDeploymentRequested,
+} from "../agent-prompt.js";
 import { resolveAgentMaxWaitMs, resolveStackRuntime } from "../config.js";
 import {
   schedulePostCompletionDesktopCapture,
@@ -196,6 +199,21 @@ export async function runAgentPhase(
       if (task.agent === "cursor" && state.runtime) {
         await ensureBashInSandbox(svc, state.runtime, task.id);
         await ensureCursorAgentInSandbox(svc, state.runtime, task.id);
+      }
+      if (vercelDeploymentRequested(job.prompt)) {
+        const vercelCli = await state.runtime.terminalAllowFailure({
+          taskId: task.id,
+          cwd: state.repoCwd,
+          command: "npx --yes vercel --version",
+        });
+        if (vercelCli.exitCode !== 0) {
+          throw new Error(
+            `Vercel CLI bootstrap failed: ${(vercelCli.stderr || vercelCli.stdout).trim() || "npx could not install or run vercel"}`,
+          );
+        }
+        emit(svc, "agent.log", task.id, "Vercel CLI ready in microVM", {
+          vercelCli: (vercelCli.stdout || vercelCli.stderr).trim(),
+        });
       }
       runResult = await state.runtime.runAndWait(
         {

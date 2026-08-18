@@ -113,41 +113,17 @@
   animation: marquee 30s linear infinite;
 }
 
-@keyframes desktop-await-scan {
+@keyframes desktop-await-progress {
   0% {
-    top: -20%;
-    opacity: 0;
-  }
-  20% {
-    opacity: 1;
-  }
-  80% {
-    opacity: 1;
+    transform: translateX(-150%);
   }
   100% {
-    top: 110%;
-    opacity: 0;
+    transform: translateX(350%);
   }
 }
 
-@keyframes desktop-await-pulse {
-  0%,
-  100% {
-    opacity: 0.25;
-    transform: scaleX(0.7);
-  }
-  50% {
-    opacity: 0.9;
-    transform: scaleX(1);
-  }
-}
-
-.desktop-await-scan {
-  animation: desktop-await-scan 2.8s ease-in-out infinite;
-}
-
-.desktop-await-pulse {
-  animation: desktop-await-pulse 1.8s ease-in-out infinite;
+.desktop-await-progress {
+  animation: desktop-await-progress 1.6s linear infinite;
 }
 
 .dark {
