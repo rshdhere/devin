@@ -453,6 +453,19 @@ export async function runAgentPhase(
   const sessionBeforeComplete =
     svc.activeSessions.get(task.id) ?? svc.reviewSessions.get(task.id);
 
+  // Include the retained runtime session in the same task write as completion.
+  // Persisting `completed` first with sessionActive=false can race the later
+  // patch and make a worker unable to rehydrate the still-running devbox.
+  if (
+    usesRuntimeAgent(task.agent) &&
+    state.runtime &&
+    state.sandboxName &&
+    state.runtimeBaseUrl
+  ) {
+    task.sessionActive = true;
+    task.sessionSleeping = false;
+    task.sandboxName = state.sandboxName;
+  }
   updateTask(svc, task.id, "completed", completionMessage);
   emit(svc, "task.completed", task.id, completionMessage, {
     output: runResult.output,
@@ -482,15 +495,15 @@ export async function runAgentPhase(
       devboxPreviewPort: sessionBeforeComplete?.devboxPreviewPort,
       lastDesktopScreenshot: sessionBeforeComplete?.lastDesktopScreenshot,
     });
-    void persistSession(
+    await persistSession(
       svc,
       task.id,
       svc.activeSessions.get(task.id)!,
       "active",
     );
-    void svc.taskStore.touchSession(task.id);
+    await svc.taskStore.touchSession(task.id);
     task.sessionActive = true;
-    void patchTask(svc, task.id, { sessionActive: true });
+    patchTask(svc, task.id, { sessionActive: true });
     state.retainSandboxForPreview = true;
 
     const shotSession = svc.activeSessions.get(task.id)!;

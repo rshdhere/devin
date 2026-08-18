@@ -56,7 +56,10 @@ export async function hydrateSessionFromOrchestrator(
     svc.tasks.set(taskId, task);
   }
 
-  if (!taskMayHaveLiveSandbox(task)) {
+  const persisted = await svc.taskStore.getSession(taskId);
+  const persistedSessionIsLive =
+    persisted?.state === "active" || persisted?.state === "review";
+  if (!taskMayHaveLiveSandbox(task) && !persistedSessionIsLive) {
     return undefined;
   }
 
@@ -95,7 +98,6 @@ export async function hydrateSessionFromOrchestrator(
     guestHost = undefined;
   }
 
-  const persisted = await svc.taskStore.getSession(taskId);
   const session: ReviewSession = {
     runtime,
     sandboxName,
