@@ -82,6 +82,10 @@ export interface ScheduleJob {
   skipDraft?: boolean;
   /** Resume agent work in an existing sandbox (session follow-up). */
   resumeSession?: boolean;
+  /** Bounded context reconstructed from durable task events for follow-ups. */
+  sessionContext?: string;
+  /** Recreate a missing devbox and restore the repository before continuing. */
+  recoverSession?: boolean;
   runtimeBaseUrl?: string;
   sandboxName?: string;
   requireReviewBeforePush?: boolean;

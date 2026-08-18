@@ -18,8 +18,9 @@ import {
   wakeSandbox,
 } from "./sandbox-lifecycle.js";
 import { requestWorkerRehydrate } from "./resolve-session-proxy.js";
-import { ensureTaskLoaded } from "./resolve-task.js";
+import { ensurePendingJob, ensureTaskLoaded } from "./resolve-task.js";
 import { emit, patchTask, updateTask } from "./task-state.js";
+import { buildFollowUpSessionContext } from "./agent-prompt.js";
 
 export async function continueTask(
   svc: TaskService,
@@ -36,10 +37,24 @@ export async function continueTask(
   if (!task) {
     throw new Error("task not found");
   }
+  if (svc.processingTasks.has(taskId)) {
+    throw new Error("agent is already working on this session");
+  }
+  if (
+    svc.pendingJobs.get(taskId)?.resumeSession === true &&
+    (task.status === "queued" ||
+      task.status === "scheduling" ||
+      task.status === "sandbox_starting" ||
+      task.status === "runtime_ready" ||
+      task.status === "running")
+  ) {
+    throw new Error("a follow-up is already queued for this session");
+  }
 
   let session =
     svc.activeSessions.get(taskId) ?? svc.reviewSessions.get(taskId);
   let persisted = await svc.taskStore.getSession(taskId);
+  let workerRehydrated = false;
 
   if (!session && task.sessionSleeping) {
     if (svc.mode === "brain") {
@@ -69,26 +84,41 @@ export async function continueTask(
   }
 
   if (!session && svc.mode === "brain") {
-    await requestWorkerRehydrate(svc, taskId);
+    workerRehydrated = (await requestWorkerRehydrate(svc, taskId)).ok;
     persisted = await svc.taskStore.getSession(taskId);
   }
 
-  const jobBase = session?.job ?? persisted?.job;
+  const jobBase =
+    session?.job ?? persisted?.job ?? (await ensurePendingJob(svc, taskId));
   const runtimeBaseUrl = session?.runtimeBaseUrl ?? persisted?.runtimeBaseUrl;
   const sandboxName = session?.sandboxName ?? persisted?.sandboxName;
 
-  if (!jobBase || !runtimeBaseUrl || !sandboxName) {
+  if (!jobBase) {
     throw new Error("no active devbox session for this task");
+  }
+  const recoverSession =
+    !runtimeBaseUrl ||
+    !sandboxName ||
+    (svc.mode === "brain" && !session && !workerRehydrated);
+  if (recoverSession && (!jobBase.repository || !jobBase.cloneUrl)) {
+    throw new Error(
+      "devbox is missing and the repository metadata required to restore it is unavailable",
+    );
   }
 
   // Keep job.prompt as the raw user text so chat/events stay clean. Follow-up
   // framing for the agent is applied later in buildAgentPrompt(resumeSession).
+  const storedEvents = await svc.taskStore.loadEvents(taskId);
+  const sessionEvents =
+    storedEvents.length > 0 ? storedEvents : svc.getEventHistory(taskId);
   const followUpJob: ScheduleJob = {
     ...jobBase,
     prompt: trimmed,
     taskId,
     skipDraft: true,
     resumeSession: true,
+    sessionContext: buildFollowUpSessionContext(task.prompt, sessionEvents),
+    recoverSession,
     runtimeBaseUrl,
     sandboxName,
     agentModel: agentModel?.trim() || jobBase.agentModel,
@@ -98,9 +128,17 @@ export async function continueTask(
   task.sessionSleeping = false;
   task.sessionActive = true;
   svc.pendingJobs.set(taskId, followUpJob);
-  updateTask(svc, taskId, "queued", "Follow-up queued for devbox session");
+  updateTask(
+    svc,
+    taskId,
+    "queued",
+    recoverSession
+      ? "Devbox missing — queued repository restoration"
+      : "Follow-up queued for devbox session",
+  );
   emit(svc, "task.scheduled", taskId, "Follow-up prompt queued", {
     followUp: true,
+    recoverSession,
     prompt: trimmed,
     sessionActive: true,
   });

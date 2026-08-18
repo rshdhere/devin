@@ -113,6 +113,43 @@
   animation: marquee 30s linear infinite;
 }
 
+@keyframes desktop-await-scan {
+  0% {
+    top: -20%;
+    opacity: 0;
+  }
+  20% {
+    opacity: 1;
+  }
+  80% {
+    opacity: 1;
+  }
+  100% {
+    top: 110%;
+    opacity: 0;
+  }
+}
+
+@keyframes desktop-await-pulse {
+  0%,
+  100% {
+    opacity: 0.25;
+    transform: scaleX(0.7);
+  }
+  50% {
+    opacity: 0.9;
+    transform: scaleX(1);
+  }
+}
+
+.desktop-await-scan {
+  animation: desktop-await-scan 2.8s ease-in-out infinite;
+}
+
+.desktop-await-pulse {
+  animation: desktop-await-pulse 1.8s ease-in-out infinite;
+}
+
 .dark {
   --background: oklch(0.145 0 0);
   --foreground: oklch(0.985 0 0);

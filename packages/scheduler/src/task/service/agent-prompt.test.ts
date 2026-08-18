@@ -1,5 +1,9 @@
 import { describe, expect, it } from "bun:test";
-import { buildAgentPrompt, buildFollowUpAgentPrompt } from "./agent-prompt.js";
+import {
+  buildAgentPrompt,
+  buildFollowUpAgentPrompt,
+  buildFollowUpSessionContext,
+} from "./agent-prompt.js";
 
 describe("buildFollowUpAgentPrompt", () => {
   it("asks the agent to apply only the new request", () => {
@@ -17,6 +21,40 @@ describe("buildFollowUpAgentPrompt", () => {
     expect(prompt).not.toContain(
       "Continue the existing session using the context below",
     );
+  });
+
+  it("includes the bounded durable context without replacing the repository source of truth", () => {
+    const prompt = buildFollowUpAgentPrompt(
+      "make the background black",
+      "acme/tic-tac-toe",
+      "repo",
+      undefined,
+      "Initial user request: make a chess app\n- git.commit: Added the board",
+    );
+
+    expect(prompt).toContain("same persisted devbox microVM");
+    expect(prompt).toContain("Bounded session context");
+    expect(prompt).toContain("Added the board");
+    expect(prompt).toContain("current files are the source of truth");
+  });
+});
+
+describe("buildFollowUpSessionContext", () => {
+  it("compacts context to a bounded size", () => {
+    const context = buildFollowUpSessionContext(
+      "build an app",
+      Array.from({ length: 30 }, (_, index) => ({
+        id: `event-${index}`,
+        taskId: "task-1",
+        type: "agent.output" as const,
+        message: `output ${index} ${"x".repeat(500)}`,
+        timestamp: new Date().toISOString(),
+      })),
+      1_000,
+    );
+
+    expect(context.length).toBeLessThan(1_200);
+    expect(context).toContain("Earlier context compacted");
   });
 });
 

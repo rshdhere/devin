@@ -40,13 +40,17 @@ export async function runSandboxSetupPhase(
   state: ProcessJobState,
 ): Promise<void> {
   let resumeSession =
-    job.resumeSession === true
+    job.resumeSession === true && job.recoverSession !== true
       ? (svc.activeSessions.get(task.id) ??
         svc.reviewSessions.get(task.id) ??
         (await wakeSession(svc, task.id)))
       : undefined;
 
-  if (job.resumeSession === true && !resumeSession) {
+  if (
+    job.resumeSession === true &&
+    job.recoverSession !== true &&
+    !resumeSession
+  ) {
     const persisted = await svc.taskStore.getSession(task.id);
     if (
       persisted &&
@@ -74,6 +78,7 @@ export async function runSandboxSetupPhase(
     Object.assign(job, resumeSession.job, {
       prompt: job.prompt,
       resumeSession: true,
+      sessionContext: job.sessionContext,
     });
     task.sandboxName = state.sandboxName;
     task.sessionActive = true;
@@ -83,11 +88,17 @@ export async function runSandboxSetupPhase(
       sessionActive: true,
       followUp: true,
       prompt: job.prompt,
+      sandboxName: state.sandboxName,
+      runtimeURL: state.runtimeBaseUrl,
+      repoCwd: state.repoCwd,
     });
     emit(svc, "execution.started", task.id, "Follow-up execution started", {
       phase: "running",
       followUp: true,
       prompt: job.prompt,
+      sandboxName: state.sandboxName,
+      runtimeURL: state.runtimeBaseUrl,
+      repoCwd: state.repoCwd,
     });
   } else if (!job.skipDraft) {
     updateTask(svc, task.id, "scheduling", "Scheduler picked up task");

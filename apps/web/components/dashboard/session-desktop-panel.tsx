@@ -24,6 +24,79 @@ async function blobLooksLikePng(blob: Blob): Promise<boolean> {
   );
 }
 
+function isSnapshotNotReadyYet(error: unknown): boolean {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+  if (error.name === "TimeoutError" || error.name === "AbortError") {
+    return true;
+  }
+  return /^snapshot HTTP (404|503|504)$/.test(error.message);
+}
+
+function DesktopSnapshotAwaiting({
+  compact,
+  isActive,
+}: {
+  compact?: boolean;
+  isActive: boolean;
+}) {
+  return (
+    <div
+      className={cn(
+        "relative flex w-full flex-col items-center justify-center overflow-hidden",
+        compact ? "min-h-[160px] px-4 py-8" : "min-h-[220px] px-6 py-12",
+      )}
+    >
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_center,rgba(255,255,255,0.06),transparent_62%)]"
+      />
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-0 opacity-[0.35]"
+        style={{
+          backgroundImage:
+            "linear-gradient(rgba(255,255,255,0.035) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.035) 1px, transparent 1px)",
+          backgroundSize: "28px 28px",
+          maskImage:
+            "radial-gradient(ellipse at center, black 20%, transparent 72%)",
+        }}
+      />
+      <div
+        aria-hidden
+        className="desktop-await-scan pointer-events-none absolute inset-x-[-20%] h-24 bg-gradient-to-b from-transparent via-white/[0.07] to-transparent"
+      />
+
+      <div className="relative flex flex-col items-center gap-3">
+        <div className="relative rounded-2xl border border-white/[0.1] bg-[#121212]/90 p-3 shadow-[0_0_0_1px_rgba(255,255,255,0.03),0_18px_40px_rgba(0,0,0,0.45)] backdrop-blur-sm">
+          <div className="relative flex h-16 w-24 items-center justify-center overflow-hidden rounded-lg border border-white/[0.08] bg-[#0b0b0b]">
+            <div className="absolute inset-0 bg-[radial-gradient(circle_at_30%_20%,rgba(255,255,255,0.08),transparent_55%)]" />
+            <Monitor
+              className="relative size-6 text-zinc-500"
+              strokeWidth={1.5}
+            />
+            <div className="desktop-await-pulse absolute inset-x-3 bottom-2 h-px bg-emerald-400/50" />
+          </div>
+          <div className="mx-auto mt-2 h-1 w-8 rounded-full bg-white/[0.08]" />
+          <div className="mx-auto mt-1 h-0.5 w-12 rounded-full bg-white/[0.05]" />
+        </div>
+
+        <div className="space-y-1 text-center">
+          <p className="text-[12px] font-medium tracking-wide text-zinc-300">
+            {isActive ? "Preparing desktop" : "Waiting for desktop"}
+          </p>
+          <p className="max-w-[220px] text-[10px] leading-relaxed text-zinc-600">
+            {isActive
+              ? "First snapshot appears once the sandbox boots."
+              : "No frame yet — refresh after the session wakes."}
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function SessionDesktopPanel({
   task,
   layout = "panel",
@@ -98,15 +171,17 @@ export function SessionDesktopPanel({
         setShotError(null);
       } catch (error) {
         if (!shotUrlRef.current) {
-          setShotError(
-            error instanceof Error
-              ? error.message.startsWith("snapshot HTTP 503")
-                ? "Could not capture localhost yet — click Refresh to retry."
-                : error.name === "TimeoutError" || error.name === "AbortError"
-                  ? "Snapshot timed out — try Refresh."
-                  : error.message
-              : "Could not load snapshot",
-          );
+          // Early 404/503/timeouts are expected while the sandbox boots — keep the
+          // calm awaiting UI instead of surfacing raw HTTP errors in chat.
+          if (isSnapshotNotReadyYet(error)) {
+            setShotError(null);
+          } else {
+            setShotError(
+              error instanceof Error
+                ? error.message
+                : "Could not load snapshot",
+            );
+          }
         }
       } finally {
         inFlightRef.current = false;
@@ -171,11 +246,13 @@ export function SessionDesktopPanel({
     if (!canUse || view !== "snapshot" || !isAgentActive) {
       return;
     }
+    // Poll faster until the first frame lands, then settle into the normal cadence.
+    const intervalMs = shotUrl ? 12_000 : 4_000;
     const timer = window.setInterval(() => {
       void loadScreenshot(false);
-    }, 12_000);
+    }, intervalMs);
     return () => window.clearInterval(timer);
-  }, [canUse, isAgentActive, loadScreenshot, view]);
+  }, [canUse, isAgentActive, loadScreenshot, shotUrl, view]);
 
   useEffect(() => {
     if (view === "interactive" && canUse) {
@@ -308,23 +385,20 @@ export function SessionDesktopPanel({
             <img
               src={shotUrl}
               alt="Desktop snapshot"
-              className="max-h-full max-w-full object-contain"
+              className="animate-in fade-in max-h-full max-w-full object-contain duration-500"
             />
-          ) : (
+          ) : shotError ? (
             <div className="flex flex-col items-center gap-2 p-6">
-              <Loader2
-                className={cn(
-                  "size-6 text-zinc-600",
-                  shotLoading && "animate-spin",
-                )}
-              />
+              <Monitor className="size-6 text-zinc-600" strokeWidth={1.5} />
               <p className="max-w-sm text-center text-[12px] text-zinc-500">
-                {shotError ??
-                  (shotLoading
-                    ? "Capturing desktop snapshot…"
-                    : "Waiting for snapshot…")}
+                {shotError}
               </p>
             </div>
+          ) : (
+            <DesktopSnapshotAwaiting
+              compact={isEmbed}
+              isActive={isAgentActive || shotLoading}
+            />
           )
         ) : null}
 

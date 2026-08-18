@@ -46,7 +46,9 @@ export async function processJob(
     return;
   }
 
-  if (svc.processingTasks.has(job.taskId) && !job.resumeSession) {
+  // A runtime owns one agent run per task. Allowing follow-ups through this
+  // guard races two prompts against the same worktree and loses context.
+  if (svc.processingTasks.has(job.taskId)) {
     return;
   }
 

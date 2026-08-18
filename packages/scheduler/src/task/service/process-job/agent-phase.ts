@@ -49,6 +49,8 @@ export async function runAgentPhase(
     {
       followUp: job.resumeSession === true,
       greenfieldRepo: state.createdNewRepo,
+      sessionContext: job.sessionContext,
+      sessionRecovery: job.recoverSession === true,
     },
   );
   const repoReadyInSandbox = Boolean(state.repository && state.cloneUrl);

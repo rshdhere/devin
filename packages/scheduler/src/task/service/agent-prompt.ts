@@ -1,4 +1,5 @@
 import type { StackRuntime } from "@devin/types";
+import type { TaskEvent } from "@devin/events";
 import type { GitHubUserIdentity } from "../../github/client.js";
 import { resolveBotAuthor } from "./config.js";
 
@@ -81,13 +82,53 @@ export type BuildAgentPromptOptions = {
   /** Resume an existing sandbox session with a new user request. */
   followUp?: boolean;
   greenfieldRepo?: boolean;
+  /** Bounded, durable context reconstructed from the task event history. */
+  sessionContext?: string;
+  /** The original devbox was unavailable and has been rebuilt. */
+  sessionRecovery?: boolean;
 };
+
+export function buildFollowUpSessionContext(
+  initialPrompt: string,
+  events: TaskEvent[],
+  maxCharacters = 6_000,
+): string {
+  const meaningful = events
+    .filter((event) => {
+      if (event.type === "agent.log" || event.type === "agent.tool") {
+        return false;
+      }
+      const prompt =
+        typeof event.data?.prompt === "string" ? event.data.prompt.trim() : "";
+      return Boolean(prompt || event.message.trim());
+    })
+    .slice(-24)
+    .map((event) => {
+      const prompt =
+        typeof event.data?.prompt === "string" ? event.data.prompt.trim() : "";
+      const detail = prompt ? ` User request: ${prompt}` : "";
+      return `- ${event.type}: ${event.message.trim()}${detail}`;
+    });
+
+  const lines = [
+    `Initial user request: ${initialPrompt.trim()}`,
+    ...meaningful,
+  ];
+  let context = lines.join("\n");
+  if (context.length > maxCharacters) {
+    context = context.slice(-maxCharacters);
+    context = `[Earlier context compacted; repository files and git history remain authoritative.]\n${context}`;
+  }
+  return context;
+}
 
 export function buildFollowUpAgentPrompt(
   prompt: string,
   repository: string,
   repoCwd: string,
   owner?: GitHubUserIdentity,
+  sessionContext?: string,
+  sessionRecovery = false,
 ): string {
   const bot = resolveBotAuthor();
   const ownerLine = owner
@@ -96,10 +137,21 @@ export function buildFollowUpAgentPrompt(
 
   return [
     `Repository ${repository} is already available at /workspace/${repoCwd}.`,
+    sessionRecovery
+      ? "The previous devbox was unavailable; this is a fresh replacement microVM restored from the repository."
+      : "This is the same persisted devbox microVM as the previous run.",
+    "Do not choose or create another sandbox. Work only in the repository path above.",
     ownerLine,
     "",
     "This is a follow-up in an existing session.",
     "The repository and current files are the source of truth — inspect them before acting.",
+    sessionContext
+      ? [
+          "",
+          "Bounded session context (older details may be compacted):",
+          sessionContext,
+        ].join("\n")
+      : "",
     "Apply ONLY the new user request below. Do not rebuild the product from scratch.",
     "Do not reinstall dependencies, re-scaffold, or re-run full production builds/smoke loops unless the request requires it.",
     "Make one or more focused commits for this change only.",
@@ -128,7 +180,14 @@ export function buildAgentPrompt(
       : { greenfieldRepo: Boolean(greenfieldRepoOrOptions) };
 
   if (options.followUp) {
-    return buildFollowUpAgentPrompt(prompt, repository, repoCwd, owner);
+    return buildFollowUpAgentPrompt(
+      prompt,
+      repository,
+      repoCwd,
+      owner,
+      options.sessionContext,
+      options.sessionRecovery,
+    );
   }
 
   const greenfieldRepo = options.greenfieldRepo === true;
