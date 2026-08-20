@@ -8,6 +8,13 @@ import (
 
 // WritableHomeDir lives on workspace tmpfs — the golden rootfs is read-only at restore.
 const WritableHomeDir = ".home"
+const buildRootDir = ".build"
+
+// SystemRustupHome keeps the preinstalled toolchain on the read-only rootfs.
+// Writable cargo caches/target dirs live under /workspace/.build instead.
+const SystemRustupHome = "/usr/local/rustup"
+const SystemCargoBin = "/usr/local/cargo/bin"
+const SystemGoBin = "/usr/local/go/bin"
 
 func WritableHome(workspaceRoot string) string {
 	if workspaceRoot == "" {
@@ -38,8 +45,9 @@ func DevinProcessEnv(workspaceRoot string) []string {
 		"XDG_CACHE_HOME=" + filepath.Join(buildRoot, "xdg-cache"),
 		"CARGO_HOME=" + filepath.Join(buildRoot, "cargo-home"),
 		"CARGO_TARGET_DIR=" + filepath.Join(buildRoot, "target"),
-		"RUSTUP_HOME=" + filepath.Join(buildRoot, "rustup"),
-		"PATH=/usr/local/bin:/root/.local/bin:" + filepath.Join(home, ".local/bin") +
+		"RUSTUP_HOME=" + SystemRustupHome,
+		"PATH=" + SystemCargoBin + ":" + SystemGoBin +
+			":/usr/local/bin:/root/.local/bin:" + filepath.Join(home, ".local/bin") +
 			":/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin",
 	}
 }

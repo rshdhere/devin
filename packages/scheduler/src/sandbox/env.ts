@@ -20,6 +20,9 @@ export function sandboxProcessEnv(
     XDG_CACHE_HOME: "/workspace/.build/xdg-cache",
     CARGO_HOME: "/workspace/.build/cargo-home",
     CARGO_TARGET_DIR: "/workspace/.build/target",
+    // Toolchain stays on the read-only rootfs; only caches/target are writable.
+    RUSTUP_HOME: "/usr/local/rustup",
+    PATH: "/usr/local/cargo/bin:/usr/local/go/bin:/usr/local/bin:/root/.local/bin:/workspace/.home/.local/bin:/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin",
   };
   if (githubToken) {
     env.GITHUB_TOKEN = githubToken;
@@ -39,5 +42,7 @@ export function shellPrepareWritableHome(): string {
     "export XDG_CACHE_HOME=/workspace/.build/xdg-cache",
     "export CARGO_HOME=/workspace/.build/cargo-home",
     "export CARGO_TARGET_DIR=/workspace/.build/target",
+    "export RUSTUP_HOME=/usr/local/rustup",
+    'export PATH="/usr/local/cargo/bin:/usr/local/go/bin:/usr/local/bin:/root/.local/bin:/workspace/.home/.local/bin:$PATH"',
   ].join(" && ");
 }

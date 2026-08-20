@@ -35,12 +35,24 @@ curl -fsSL -o /var/lib/devin/linux/vmlinux \
 
 | Directory | Image tag | Stack |
 | --- | --- | --- |
-| `nextjs/` | `devin-runtime-nextjs:latest` | Node 22, Bun, Git — Next.js apps |
-| `agent/` | `devin-runtime-agent:latest` | Cursor CLI + Claude Code + supervisor |
-| `go/` | `devin-runtime-go:latest` | Go 1.23, Git |
-| `rust/` | `devin-runtime-rust:latest` | Rust 1.83, OpenSSL/pkg-config |
-| `node/` | `devin-runtime-node:latest` | Node 22 |
-| `python/` | `devin-runtime-python:latest` | Python 3.12 |
+| `nextjs/` | `devin-runtime-nextjs:latest` | Node 22, Bun, Git, Rust/GCC — Next.js apps |
+| `agent/` | `devin-runtime-agent:latest` | Cursor CLI + Claude Code + Rust/GCC + supervisor |
+| `go/` | `devin-runtime-go:latest` | Go 1.23, Git, Rust/GCC |
+| `rust/` | `devin-runtime-rust:latest` | Rust 1.83, OpenSSL/pkg-config, GCC |
+| `node/` | `devin-runtime-node:latest` | Node 22, Rust/GCC |
+| `python/` | `devin-runtime-python:latest` | Python 3.12, Rust/GCC |
+
+Every runtime image installs **Rust/Cargo + GCC/build-essential** via `runtime/scripts/install-build-toolchain.sh`. The toolchain lives under `/usr/local/rustup` and `/usr/local/cargo` on the read-only rootfs. Writable caches use:
+
+```text
+HOME=/workspace/.home
+CARGO_HOME=/workspace/.build/cargo-home
+CARGO_TARGET_DIR=/workspace/.build/target
+RUSTUP_HOME=/usr/local/rustup
+```
+
+Workspace tmpfs defaults to **12G** (`WORKSPACE_TMPFS_SIZE`); rootfs export defaults to **8Gi** (`ROOTFS_SIZE_MB=8192`).
+
 
 ## Build Docker images
 

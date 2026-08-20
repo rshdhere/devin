@@ -13,7 +13,8 @@ RUNTIME="${1:-nextjs}"
 IMAGE="${2:-devin-runtime-${RUNTIME}:latest}"
 OUT_DIR="${FIRECRACKER_SNAPSHOT_DIR:-/var/lib/devin/snapshots}/${RUNTIME}"
 ROOTFS="${OUT_DIR}/rootfs.ext4"
-SIZE_MB="${ROOTFS_SIZE_MB:-4096}"
+# Rust + build-essential need more than the old 4Gi rootfs.
+SIZE_MB="${ROOTFS_SIZE_MB:-8192}"
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
@@ -133,6 +134,27 @@ if [[ "${RUNTIME}" == "agent" ]]; then
   fi
   echo "bash ready for env shebang: /usr/local/bin/bash -> ${BASH_GUEST}"
 fi
+
+echo "verifying Rust/GCC toolchain is present in rootfs..."
+for tool in cargo rustc gcc; do
+  FOUND=""
+  for candidate in \
+    "${MOUNT_DIR}/usr/local/bin/${tool}" \
+    "${MOUNT_DIR}/usr/local/cargo/bin/${tool}" \
+    "${MOUNT_DIR}/usr/bin/${tool}"
+  do
+    if [[ -e "${candidate}" ]]; then
+      FOUND="${candidate}"
+      break
+    fi
+  done
+  if [[ -z "${FOUND}" ]]; then
+    echo "ERROR: ${tool} missing from ${IMAGE}." >&2
+    echo "Every sandbox image must ship Rust/Cargo and GCC via runtime/scripts/install-build-toolchain.sh." >&2
+    exit 1
+  fi
+  echo "${tool} present: ${FOUND#${MOUNT_DIR}}"
+done
 
 if mountpoint -q "${MOUNT_DIR}"; then
   sync

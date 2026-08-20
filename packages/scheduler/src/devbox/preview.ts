@@ -332,9 +332,13 @@ export function buildDesktopScreenshotScript(
 export function buildPruneWorkspaceDiskScript(): string {
   return [
     "set +e",
-    // Grow golden-snapshot tmpfs (4G) without rebuilding Firecracker images.
-    "mount -o remount,size=8G /workspace 2>/dev/null || true",
+    // Grow golden-snapshot tmpfs without rebuilding Firecracker images.
+    "mount -o remount,size=12G /workspace 2>/dev/null || true",
     "mkdir -p /workspace/.build/npm-cache /workspace/.build/xdg-cache /workspace/.build/cargo-home /workspace/.build/target 2>/dev/null || true",
+    "export HOME=/workspace/.home",
+    "export CARGO_HOME=/workspace/.build/cargo-home",
+    "export CARGO_TARGET_DIR=/workspace/.build/target",
+    "export RUSTUP_HOME=/usr/local/rustup",
     "df_line=$(df -P /workspace 2>/dev/null | tail -1)",
     'pct=$(echo "$df_line" | awk "{print $5}" | tr -d "%")',
     'if [ -n "$pct" ] && [ "$pct" -ge 80 ]; then',

@@ -59,7 +59,9 @@ export function rustPromptGuidance(stackRuntime?: StackRuntime): string[] {
     "",
     "Rust / workspace disk:",
     "- Prefer `cargo build` (debug) for smoke tests — avoid `cargo build --release` unless necessary",
-    "- Builds use CARGO_TARGET_DIR=/workspace/.build/target — do not build under /root",
+    "- Rust/Cargo and GCC are preinstalled; do not run rustup/apt install loops",
+    "- Builds use CARGO_HOME=/workspace/.build/cargo-home and CARGO_TARGET_DIR=/workspace/.build/target",
+    "- Keep RUSTUP_HOME=/usr/local/rustup (toolchain on rootfs); do not build under /root",
     "- If you see 'No space left on device', stop cleaning loops; commit sources and finish",
     "- After a successful binary smoke test, remove large `target/debug/deps` if you need space",
   ];

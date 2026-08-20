@@ -13,6 +13,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && test -x /usr/local/bin/bash \
     && PATH="/usr/local/bin:/root/.local/bin" /usr/bin/env bash -c 'echo ok'
 
+COPY runtime/scripts/install-build-toolchain.sh /tmp/install-build-toolchain.sh
+RUN chmod +x /tmp/install-build-toolchain.sh \
+    && /tmp/install-build-toolchain.sh \
+    && rm -f /tmp/install-build-toolchain.sh
+
 RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
       | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg \
     && chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg \
@@ -45,13 +50,18 @@ RUN curl -fsSL https://go.dev/dl/go1.23.6.linux-amd64.tar.gz -o /tmp/go.tgz \
     && rm -f /tmp/go.tgz \
     && /usr/local/go/bin/go version
 
-ENV PATH="/usr/local/go/bin:/root/.local/bin:/usr/local/bin:${PATH}"
+# Toolchain on read-only rootfs; writable caches redirect to /workspace/.build at runtime.
+ENV RUSTUP_HOME=/usr/local/rustup
+ENV CARGO_HOME=/usr/local/cargo
+ENV PATH="/usr/local/cargo/bin:/usr/local/go/bin:/root/.local/bin:/usr/local/bin:${PATH}"
 ENV GOPATH=/go
 ENV CGO_ENABLED=0
 ENV AGENT_PROVIDER=mock
 ENV AGENT_RUN_TIMEOUT_MIN=120
 ENV RUNTIME_PORT=8081
 ENV RUNTIME_WORKSPACE=/workspace
+ENV WORKSPACE_TMPFS_SIZE=12G
+ENV HOME=/workspace/.home
 
 WORKDIR /workspace
 

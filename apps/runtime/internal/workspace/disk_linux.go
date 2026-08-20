@@ -10,8 +10,6 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-const buildRootDir = ".build"
-
 const pruneUsageThresholdPercent = 80
 
 // EnsureBuildDirs creates isolated build/cache dirs on workspace tmpfs.

@@ -20,5 +20,5 @@ orchestrator:
 
 runtime:
   image: devin-runtime:latest
-  workspaceSize: 10Gi
+  workspaceSize: 12Gi
   storageClass: gp3

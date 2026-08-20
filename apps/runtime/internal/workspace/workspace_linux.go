@@ -11,7 +11,7 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-const defaultTmpfsSize = "8G"
+const defaultTmpfsSize = "12G"
 
 func tmpfsMountOptions() string {
 	size := strings.TrimSpace(os.Getenv("WORKSPACE_TMPFS_SIZE"))

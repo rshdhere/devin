@@ -117,7 +117,9 @@ describe("buildDesktopScreenshotScript", () => {
 describe("buildPruneWorkspaceDiskScript", () => {
   it("prunes pip and npm caches when tmpfs is at least 80% full", () => {
     const script = buildPruneWorkspaceDiskScript();
-    expect(script).toContain("remount,size=8G");
+    expect(script).toContain("remount,size=12G");
+    expect(script).toContain("CARGO_HOME=/workspace/.build/cargo-home");
+    expect(script).toContain("RUSTUP_HOME=/usr/local/rustup");
     expect(script).toContain('"$pct" -ge 80');
     expect(script).toContain(".cache/pip");
     expect(script).toContain("npm-cache");
