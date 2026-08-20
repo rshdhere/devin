@@ -12,6 +12,7 @@ apt-get install -y --no-install-recommends \
   build-essential \
   ca-certificates \
   curl \
+  git \
   pkg-config \
   libssl-dev \
   cmake \
@@ -43,3 +44,4 @@ fi
 cargo --version
 rustc --version
 gcc --version | head -1
+git --version
