@@ -37,6 +37,12 @@ func Deploy(ctx context.Context) error {
 			return err
 		}
 	}
+	if _, err := os.Stat("/var/lib/devin/.snapshots-bootstrapped-v2"); err != nil {
+		log.Printf("versioned snapshot marker missing; rebuilding runtime snapshots before deploy")
+		if err := BootstrapSnapshotsLocal(ctx); err != nil {
+			return fmt.Errorf("bootstrap runtime snapshots: %w", err)
+		}
+	}
 	_ = os.RemoveAll("/var/lib/cni/networks/fcnet")
 	if entries, err := os.ReadDir("/var/run/netns"); err == nil {
 		for _, e := range entries {
