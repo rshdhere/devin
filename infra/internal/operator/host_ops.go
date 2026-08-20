@@ -83,7 +83,7 @@ func FixGuestFS(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	runtimes := envx.Env("DEVIN_RUNTIMES", "agent nextjs")
+	runtimes := envx.Env("DEVIN_RUNTIMES", "nextjs agent node go rust python")
 	payload := hostpayload.FixGuestFilesystem(
 		runtimes,
 		envx.Env("DEVIN_REPO_REF", "main"),

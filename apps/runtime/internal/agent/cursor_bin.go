@@ -143,7 +143,7 @@ func guestFsCorruptError(detail string) error {
 	return fmt.Errorf(
 		"sandbox guest filesystem is corrupt (Structure needs cleaning on the cursor agent binary). "+
 			"On the execution host rebuild snapshots: "+
-			"DEVIN_FORCE_SNAPSHOT_REBUILD=true DEVIN_RUNTIMES='agent nextjs' devin-infra bootstrap-snapshots <instance-id>. detail=%s",
+			"DEVIN_FORCE_SNAPSHOT_REBUILD=true DEVIN_RUNTIMES='nextjs agent node go rust python' devin-infra bootstrap-snapshots <instance-id>. detail=%s",
 		detail,
 	)
 }

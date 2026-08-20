@@ -156,6 +156,25 @@ for tool in cargo rustc gcc; do
   echo "${tool} present: ${FOUND#${MOUNT_DIR}}"
 done
 
+echo "verifying git is present in rootfs..."
+GIT_BIN=""
+for candidate in \
+  "${MOUNT_DIR}/usr/local/bin/git" \
+  "${MOUNT_DIR}/usr/bin/git" \
+  "${MOUNT_DIR}/bin/git"
+do
+  if [[ -e "${candidate}" ]]; then
+    GIT_BIN="${candidate}"
+    break
+  fi
+done
+if [[ -z "${GIT_BIN}" ]]; then
+  echo "ERROR: git missing from ${IMAGE}." >&2
+  echo "Every sandbox image must install git before its rootfs is published." >&2
+  exit 1
+fi
+echo "git present: ${GIT_BIN#${MOUNT_DIR}}"
+
 if [[ "${RUNTIME}" != "agent" ]]; then
   echo "verifying agent CLIs are present in stack rootfs..."
   for tool in agent claude; do

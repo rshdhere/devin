@@ -12,5 +12,5 @@ export function isGuestFilesystemCorrupt(detail: string): boolean {
 
 export const GUEST_FS_REBUILD_HINT =
   "On the execution host run: sudo devin-infra fix-guest-fs --discover " +
-  "(or DEVIN_FORCE_SNAPSHOT_REBUILD=true DEVIN_RUNTIMES='agent nextjs' " +
+  "(or DEVIN_FORCE_SNAPSHOT_REBUILD=true DEVIN_RUNTIMES='nextjs agent node go rust python' " +
   "devin-infra bootstrap-snapshots <instance-id>), then retry the task.";

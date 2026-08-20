@@ -19,7 +19,11 @@ func BootstrapSnapshotsLocal(ctx context.Context) error {
 		return err
 	}
 	force := envx.Env("DEVIN_FORCE_SNAPSHOT_REBUILD", "false") == "true"
-	marker := "/var/lib/devin/.snapshots-bootstrapped"
+	writeMarker := false
+	// Bump this marker when runtime image contents or snapshot selection
+	// semantics change. Existing hosts must rebuild their golden snapshots
+	// before prompt-selected stack runtimes are served.
+	marker := "/var/lib/devin/.snapshots-bootstrapped-v2"
 	if !force {
 		if _, err := os.Stat(marker); err == nil {
 			log.Printf("snapshots already bootstrapped (%s)", marker)
@@ -27,6 +31,10 @@ func BootstrapSnapshotsLocal(ctx context.Context) error {
 			_ = sysutil.Systemctl(ctx, "enable", "--now", "devin-scheduler.service")
 			return nil
 		}
+		// A missing versioned marker means existing snapshot metadata may
+		// describe an older image. Rebuild instead of trusting those entries.
+		force = true
+		writeMarker = true
 	}
 	if err := requireKVM(ctx); err != nil {
 		return err
@@ -67,7 +75,7 @@ func BootstrapSnapshotsLocal(ctx context.Context) error {
 			return err
 		}
 	}
-	if !force {
+	if writeMarker {
 		_ = os.WriteFile(marker, []byte(time.Now().UTC().Format(time.RFC3339)+"\n"), 0644)
 	}
 	_ = SyncPlatformConfig(ctx)

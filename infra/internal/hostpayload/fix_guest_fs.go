@@ -6,10 +6,10 @@ import (
 )
 
 // FixGuestFilesystem stops microVMs, removes stale overlays and corrupt golden
-// snapshots, then rebuilds agent/nextjs rootfs images via bootstrap-snapshots-local.
+// snapshots, then rebuilds every runtime rootfs via bootstrap-snapshots-local.
 func FixGuestFilesystem(runtimes, repoRef, imageTag, registry string) string {
 	if runtimes == "" {
-		runtimes = "agent nextjs"
+		runtimes = "nextjs agent node go rust python"
 	}
 	if repoRef == "" {
 		repoRef = "main"
@@ -47,7 +47,7 @@ for rt in %s; do
   chattr -i "/var/lib/devin/snapshots/${rt}/rootfs.ext4" 2>/dev/null || true
   rm -rf "/var/lib/devin/snapshots/${rt}"
 done
-rm -f /var/lib/devin/.snapshots-bootstrapped
+rm -f /var/lib/devin/.snapshots-bootstrapped /var/lib/devin/.snapshots-bootstrapped-v2
 echo %q | base64 -d >/tmp/devin-fix-guest-fs
 chmod 700 /tmp/devin-fix-guest-fs
 exec /tmp/devin-fix-guest-fs
