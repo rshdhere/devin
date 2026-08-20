@@ -40,6 +40,9 @@ func Deploy(ctx context.Context) error {
 	if _, err := os.Stat("/var/lib/devin/.snapshots-bootstrapped-v2"); err != nil {
 		log.Printf("versioned snapshot marker missing; rebuilding runtime snapshots before deploy")
 		if err := BootstrapSnapshotsLocal(ctx); err != nil {
+			log.Printf("snapshot migration failed; restoring existing services: %v", err)
+			_ = sysutil.Systemctl(ctx, "enable", "--now", "devin-firecracker.service")
+			_ = sysutil.Systemctl(ctx, "enable", "--now", "devin-scheduler.service")
 			return fmt.Errorf("bootstrap runtime snapshots: %w", err)
 		}
 	}
