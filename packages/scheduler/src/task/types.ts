@@ -37,6 +37,8 @@ export interface Task {
   prUrl?: string;
   previewUrl?: string;
   deployStatus?: "building" | "live" | "failed" | "skipped";
+  /** True only after the completed work was successfully pushed to GitHub. */
+  pushedToGitHub?: boolean;
   /** Sandbox kept alive for follow-up prompts (Devin session model). */
   sessionActive?: boolean;
   /** Devbox is idle-sleeping; wake on continue or explicit wake. */

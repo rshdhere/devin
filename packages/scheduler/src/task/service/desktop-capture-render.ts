@@ -367,10 +367,8 @@ export function startDevboxPreviewWatcher(
         session.devboxPreviewPort,
       );
     }
-    // Watcher must not spin npm/uvicorn — that races the agent and can hang.
-    void captureDesktopScreenshotWithDevServer(svc, session, taskId, {
-      allowSpin: false,
-    });
+    // Do not capture while the agent is working. The final screenshot is
+    // scheduled only after the completed work has been pushed to GitHub.
   };
 
   const interval = setInterval(() => {

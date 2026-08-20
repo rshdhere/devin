@@ -450,6 +450,7 @@ export async function runAgentPhase(
         : "Work completed — local commits not pushed to GitHub"
       : runResult.message || "Task completed";
 
+  task.pushedToGitHub = pushedToGitHub;
   const sessionBeforeComplete =
     svc.activeSessions.get(task.id) ?? svc.reviewSessions.get(task.id);
 
@@ -506,21 +507,25 @@ export async function runAgentPhase(
     patchTask(svc, task.id, { sessionActive: true });
     state.retainSandboxForPreview = true;
 
-    const shotSession = svc.activeSessions.get(task.id)!;
-    schedulePostCompletionDesktopCapture(
-      svc,
-      shotSession,
-      task,
-      state.repoCwd,
-      runtimeAgentTask,
-    );
+    if (pushedToGitHub) {
+      const shotSession = svc.activeSessions.get(task.id)!;
+      schedulePostCompletionDesktopCapture(
+        svc,
+        shotSession,
+        task,
+        state.repoCwd,
+        runtimeAgentTask,
+      );
+    }
   } else if (sessionBeforeComplete) {
-    schedulePostCompletionDesktopCapture(
-      svc,
-      sessionBeforeComplete,
-      task,
-      state.repoCwd,
-      runtimeAgentTask,
-    );
+    if (pushedToGitHub) {
+      schedulePostCompletionDesktopCapture(
+        svc,
+        sessionBeforeComplete,
+        task,
+        state.repoCwd,
+        runtimeAgentTask,
+      );
+    }
   }
 }

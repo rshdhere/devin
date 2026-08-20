@@ -345,6 +345,7 @@ export async function finalizeReviewedTask(
           : "Changes pushed to GitHub"
         : "Changes committed and pushed to GitHub";
 
+    task.pushedToGitHub = pushedToGitHub;
     updateTask(svc, task.id, "completed", completionMessage);
     emit(svc, "task.completed", task.id, completionMessage, {
       agent: task.agent,

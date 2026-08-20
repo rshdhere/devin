@@ -10,6 +10,10 @@ export function maybeTriggerDesktopSnapshotFromRuntime(
   message: string,
   data?: Record<string, unknown>,
 ): void {
+  const task = svc.tasks.get(taskId);
+  if (task?.status !== "completed" || task.pushedToGitHub !== true) {
+    return;
+  }
   const detail = typeof data?.detail === "string" ? data.detail : "";
   const text = `${message}\n${detail}`.trim();
   if (!text) {

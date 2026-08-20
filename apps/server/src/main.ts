@@ -1,7 +1,6 @@
 import { app, resolveSchedulerBaseUrl } from "@devin/api-v1";
 import { ensureDBConnection } from "@devin/drizzle/health";
 import { runMigrations } from "@devin/drizzle/migrate";
-import { createServer } from "node:http";
 import WebSocket, { WebSocketServer } from "ws";
 
 const PORT = process.env.PORT || 8080;
@@ -28,8 +27,11 @@ export const main = async () => {
   await ensureDBConnection();
   await runMigrations();
 
-  const server = createServer(app);
   const wss = new WebSocketServer({ noServer: true });
+  const server = app.listen(PORT, () => {
+    console.log(`server is live @ http://localhost:${PORT}`);
+    console.log(`scheduler proxy: ${resolveSchedulerBaseUrl()}`);
+  });
 
   server.on("upgrade", (req, socket, head) => {
     const url = req.url ?? "";
@@ -47,10 +49,5 @@ export const main = async () => {
         clientWs.close(1011, "scheduler websocket failed"),
       );
     });
-  });
-
-  server.listen(PORT, () => {
-    console.log(`server is live @ http://localhost:${PORT}`);
-    console.log(`scheduler proxy: ${resolveSchedulerBaseUrl()}`);
   });
 };
