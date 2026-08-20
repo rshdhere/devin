@@ -9,6 +9,11 @@ RUN chmod +x /tmp/install-build-toolchain.sh \
       git chromium \
     && rm -rf /var/lib/apt/lists/*
 
+COPY runtime/scripts/install-agent-tools.sh /tmp/install-agent-tools.sh
+RUN chmod +x /tmp/install-agent-tools.sh \
+    && /tmp/install-agent-tools.sh \
+    && rm -f /tmp/install-agent-tools.sh
+
 ENV RUST_BACKTRACE=1
 ENV RUSTUP_HOME=/usr/local/rustup
 ENV CARGO_HOME=/usr/local/cargo

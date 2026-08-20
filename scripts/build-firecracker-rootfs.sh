@@ -156,6 +156,17 @@ for tool in cargo rustc gcc; do
   echo "${tool} present: ${FOUND#${MOUNT_DIR}}"
 done
 
+if [[ "${RUNTIME}" != "agent" ]]; then
+  echo "verifying agent CLIs are present in stack rootfs..."
+  for tool in agent claude; do
+    if [[ ! -e "${MOUNT_DIR}/usr/local/bin/${tool}" ]]; then
+      echo "ERROR: ${tool} missing from ${IMAGE}." >&2
+      echo "Stack-specific snapshots must include runtime/scripts/install-agent-tools.sh." >&2
+      exit 1
+    fi
+  done
+fi
+
 if mountpoint -q "${MOUNT_DIR}"; then
   sync
   umount "${MOUNT_DIR}"

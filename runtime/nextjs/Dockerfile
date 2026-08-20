@@ -13,6 +13,11 @@ RUN curl -fsSL https://bun.sh/install | bash \
 
 RUN npm install -g playwright-core@1.60.0 || true
 
+COPY runtime/scripts/install-agent-tools.sh /tmp/install-agent-tools.sh
+RUN chmod +x /tmp/install-agent-tools.sh \
+    && /tmp/install-agent-tools.sh \
+    && rm -f /tmp/install-agent-tools.sh
+
 ENV RUSTUP_HOME=/usr/local/rustup
 ENV CARGO_HOME=/usr/local/cargo
 ENV PATH="/usr/local/cargo/bin:/root/.bun/bin:${PATH}"

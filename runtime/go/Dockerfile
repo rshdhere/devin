@@ -8,6 +8,11 @@ RUN chmod +x /tmp/install-build-toolchain.sh \
       git chromium \
     && rm -rf /var/lib/apt/lists/*
 
+COPY runtime/scripts/install-agent-tools.sh /tmp/install-agent-tools.sh
+RUN chmod +x /tmp/install-agent-tools.sh \
+    && /tmp/install-agent-tools.sh \
+    && rm -f /tmp/install-agent-tools.sh
+
 ENV CGO_ENABLED=0
 ENV GOPATH=/go
 ENV RUSTUP_HOME=/usr/local/rustup

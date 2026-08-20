@@ -76,17 +76,17 @@ export function resolveRuntimeForTask(
   explicit?: SandboxRuntime,
 ): SandboxRuntime {
   if (explicit && isSandboxRuntime(explicit)) {
-    if (usesRuntimeAgent(agent) && explicit !== "agent") {
-      return "agent";
-    }
     if (!usesRuntimeAgent(agent) && explicit === "agent") {
       return inferStackFromPrompt(prompt);
     }
     return explicit;
   }
 
+  // Runtime agents use the stack-specific snapshot too. Every snapshot is
+  // built with the agent tooling, so the prompt's stack gets the right
+  // compiler/package manager without losing Cursor/Claude execution.
   if (usesRuntimeAgent(agent)) {
-    return "agent";
+    return inferStackFromPrompt(prompt);
   }
 
   return inferStackFromPrompt(prompt);

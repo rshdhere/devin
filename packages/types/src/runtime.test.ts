@@ -36,8 +36,20 @@ describe("inferStackFromPrompt", () => {
 });
 
 describe("resolveRuntimeForTask", () => {
-  test("cursor always uses agent snapshot", () => {
-    expect(resolveRuntimeForTask("cursor", "python django app")).toBe("agent");
+  test("cursor uses the prompt stack snapshot", () => {
+    expect(resolveRuntimeForTask("cursor", "python django app")).toBe("python");
+  });
+
+  test("claude uses the prompt stack snapshot", () => {
+    expect(resolveRuntimeForTask("claude", "build a rust cli with cargo")).toBe(
+      "rust",
+    );
+  });
+
+  test("explicit runtime overrides prompt inference", () => {
+    expect(
+      resolveRuntimeForTask("cursor", "make a chess app using nextjs", "node"),
+    ).toBe("node");
   });
 
   test("mock uses prompt stack", () => {

@@ -54,11 +54,11 @@ flowchart TB
 
 Tasks choose an **agent provider** that runs inside the sandbox microVM:
 
-| Agent | CLI | Auth env | Runtime image |
-| --- | --- | --- | --- |
+| Agent             | CLI                                     | Auth env                          | Runtime image                 |
+| ----------------- | --------------------------------------- | --------------------------------- | ----------------------------- |
 | `mock` (Template) | control-plane scaffold + sandbox verify | `OPENAI_API_KEY` (draft planning) | `nextjs` (greenfield default) |
-| `cursor` | `agent -p --force --trust` | `CURSOR_API_KEY` | `agent` |
-| `claude` | `claude -p --bare` | `ANTHROPIC_API_KEY` | `agent` |
+| `cursor`          | `agent -p --force --trust`              | `CURSOR_API_KEY`                  | `agent`                       |
+| `claude`          | `claude -p --bare`                      | `ANTHROPIC_API_KEY`               | `agent`                       |
 
 Greenfield tasks default to the **Template** agent: OpenAI generates a draft plan on the scheduler, [`scaffold-from-draft`](packages/scheduler/src/scaffold-from-draft.ts) materializes the repo, and the `nextjs` microVM runs `npm install` plus a smoke check before push. No Cursor CLI or `api2.cursor.sh` egress is required.
 
@@ -66,7 +66,7 @@ The scheduler never shells into the host. It only talks HTTP to the runtime supe
 
 ```text
 POST /tasks
-  → Sandbox CRD (runtime=nextjs for template, runtime=agent for cursor/claude)
+  → Sandbox CRD (runtime selected from the prompt's stack)
   → Firecracker microVM
   → POST /run { taskId, prompt, agent }  (skipped for template greenfield)
   → GET /events?taskId=...  (agent.log, git.*)
@@ -110,39 +110,39 @@ devin/
 
 ### Kubernetes namespaces
 
-| Namespace | Workloads |
-| --- | --- |
-| `devin-app` | web, server |
-| `devin-system` | orchestrator |
-| `devin-sandboxes` | Sandbox + FirecrackerMachine CRs |
+| Namespace           | Workloads                                                       |
+| ------------------- | --------------------------------------------------------------- |
+| `devin-app`         | web, server                                                     |
+| `devin-system`      | orchestrator                                                    |
+| `devin-sandboxes`   | Sandbox + FirecrackerMachine CRs                                |
 | `devin-firecracker` | firecracker DaemonSet, scheduler DaemonSet, FirecrackerHost CRs |
 
 ### Runtime supervisor API
 
 Every microVM runs the same runtime supervisor:
 
-| Method | Path | Purpose |
-| --- | --- | --- |
-| POST | `/run` | Execute agent task |
-| POST | `/terminal` | Shell commands |
-| POST | `/git/clone` | Clone repository |
-| POST | `/git/commit` | Commit changes |
-| POST | `/files/write` | Write workspace files |
-| POST | `/browser/open` | Browser automation |
-| GET | `/health` | Liveness |
-| GET | `/logs` | Supervisor logs |
-| GET | `/events` | Runtime event stream |
+| Method | Path            | Purpose               |
+| ------ | --------------- | --------------------- |
+| POST   | `/run`          | Execute agent task    |
+| POST   | `/terminal`     | Shell commands        |
+| POST   | `/git/clone`    | Clone repository      |
+| POST   | `/git/commit`   | Commit changes        |
+| POST   | `/files/write`  | Write workspace files |
+| POST   | `/browser/open` | Browser automation    |
+| GET    | `/health`       | Liveness              |
+| GET    | `/logs`         | Supervisor logs       |
+| GET    | `/events`       | Runtime event stream  |
 
 The orchestrator **never** executes shell commands — it only provisions infrastructure and talks to the runtime over HTTP.
 
 ### CRDs
 
-| Kind | Purpose |
-| --- | --- |
-| `Sandbox` | Task-facing sandbox intent (`taskId`, `runtime`, `cpu`, `memory`) |
-| `FirecrackerMachine` | Controller-managed microVM for a sandbox |
-| `FirecrackerHost` | Node capacity + firecracker API address |
-| `Snapshot` | Golden snapshot metadata per runtime image |
+| Kind                 | Purpose                                                           |
+| -------------------- | ----------------------------------------------------------------- |
+| `Sandbox`            | Task-facing sandbox intent (`taskId`, `runtime`, `cpu`, `memory`) |
+| `FirecrackerMachine` | Controller-managed microVM for a sandbox                          |
+| `FirecrackerHost`    | Node capacity + firecracker API address                           |
+| `Snapshot`           | Golden snapshot metadata per runtime image                        |
 
 ### Warm snapshots
 
@@ -222,9 +222,9 @@ Staging and production URLs are set via `NEXT_PUBLIC_API_URL` and `NEXT_PUBLIC_W
 
 ## Scripts
 
-| Command | Description |
-| --- | --- |
-| `bun run dev` | Start all apps |
-| `bun run build` | Build all apps and packages |
-| `bun run lint` | Lint the monorepo |
-| `bun run check-types` | TypeScript type checking |
+| Command               | Description                 |
+| --------------------- | --------------------------- |
+| `bun run dev`         | Start all apps              |
+| `bun run build`       | Build all apps and packages |
+| `bun run lint`        | Lint the monorepo           |
+| `bun run check-types` | TypeScript type checking    |
