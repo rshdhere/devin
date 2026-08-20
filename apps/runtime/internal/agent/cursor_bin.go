@@ -109,7 +109,9 @@ for candidate in \
   "$HOME/.local/bin/agent" \
   $(command -v agent 2>/dev/null) \
   $(ls -1 /root/.local/share/cursor-agent/versions/*/cursor-agent 2>/dev/null | sort | tail -1) \
-  $(ls -1 "$HOME/.local/share/cursor-agent/versions/"*/cursor-agent 2>/dev/null | sort | tail -1)
+  $(ls -1 "$HOME/.local/share/cursor-agent/versions/"*/cursor-agent 2>/dev/null | sort | tail -1) \
+  $(find /root/.local/share/cursor-agent "$HOME/.local/share/cursor-agent" \
+      -type f -name cursor-agent 2>/dev/null | sort | tail -1)
 do
   [ -n "$candidate" ] || continue
   [ -e "$candidate" ] || continue
