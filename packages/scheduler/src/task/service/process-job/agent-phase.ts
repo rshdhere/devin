@@ -227,10 +227,13 @@ export async function runAgentPhase(
             state.githubToken,
             task.agent,
             job.agentModel,
+            { followUp: job.resumeSession === true },
           ),
         },
         {
-          maxWaitMs: resolveAgentMaxWaitMs(),
+          maxWaitMs: resolveAgentMaxWaitMs({
+            followUp: job.resumeSession === true,
+          }),
           getAbortReason: () => greenfieldSoftAbort.reason,
         },
       );
@@ -240,12 +243,14 @@ export async function runAgentPhase(
     if (isRecoverableAgentInterruption(message)) {
       emit(svc, "agent.failed", task.id, message, {
         timeout:
-          /timed out|did not finish within|idle-stalled|commit-plateau/i.test(
+          /timed out|did not finish within|idle-stalled|commit-plateau|shell-hung/i.test(
             message,
           ),
         resourceExhausted:
           /resource_exhausted|RetriableError|rate.?limit|quota/i.test(message),
-        maxWaitMs: resolveAgentMaxWaitMs(),
+        maxWaitMs: resolveAgentMaxWaitMs({
+          followUp: job.resumeSession === true,
+        }),
       });
       if (
         state.createdNewRepo &&
@@ -300,7 +305,7 @@ export async function runAgentPhase(
     ) {
       emit(svc, "agent.failed", task.id, failMessage, {
         timeout:
-          /timed out|did not finish within|idle-stalled|commit-plateau/i.test(
+          /timed out|did not finish within|idle-stalled|commit-plateau|shell-hung/i.test(
             failMessage,
           ),
         idleStalled: /idle-stalled/i.test(failMessage),
@@ -308,7 +313,9 @@ export async function runAgentPhase(
           /resource_exhausted|RetriableError|rate.?limit|quota/i.test(
             failMessage,
           ),
-        maxWaitMs: resolveAgentMaxWaitMs(),
+        maxWaitMs: resolveAgentMaxWaitMs({
+          followUp: job.resumeSession === true,
+        }),
       });
       const recovered = await recoverGreenfieldAfterAgentInterruption(
         svc,

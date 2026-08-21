@@ -228,6 +228,33 @@ func (e cursorStreamEvent) toolInput() json.RawMessage {
 	return nil
 }
 
+func toolCallID(evt cursorStreamEvent) string {
+	if len(evt.ToolCall) == 0 {
+		return ""
+	}
+	var nested map[string]any
+	if json.Unmarshal(evt.ToolCall, &nested) != nil {
+		return ""
+	}
+	for _, key := range []string{"toolCallId", "tool_call_id", "id"} {
+		if value, ok := nested[key]; ok {
+			if text, ok := value.(string); ok && strings.TrimSpace(text) != "" {
+				return strings.TrimSpace(text)
+			}
+		}
+	}
+	return ""
+}
+
+func isShellToolLabel(label string) bool {
+	switch strings.ToLower(strings.TrimSpace(label)) {
+	case "bash", "shell", "awaitshell", "run_terminal_cmd", "run_terminal_command", "terminal":
+		return true
+	default:
+		return false
+	}
+}
+
 // summarizeCursorEvent converts a parsed stream event into readable events.
 // Returning an empty slice means the event carries no user-facing information.
 func summarizeCursorEvent(evt cursorStreamEvent) []publishedEvent {

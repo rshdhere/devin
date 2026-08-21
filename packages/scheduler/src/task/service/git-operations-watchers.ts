@@ -402,6 +402,7 @@ export function runtimeSecrets(
   githubToken?: string,
   agent?: AgentProvider,
   agentModel?: string,
+  options?: { followUp?: boolean },
 ): Record<string, string> {
   const secrets: Record<string, string> = {};
   for (const key of [
@@ -416,8 +417,17 @@ export function runtimeSecrets(
       secrets[key] = value;
     }
   }
-  const agentTimeout = String(resolveAgentTimeoutMinutes());
+  const agentTimeout = String(
+    resolveAgentTimeoutMinutes({ followUp: options?.followUp }),
+  );
   secrets.AGENT_RUN_TIMEOUT_MIN = agentTimeout;
+  if (options?.followUp) {
+    // Tighter idle stall so hung curl/start loops don't sit for 15m+.
+    secrets.AGENT_IDLE_STALL_MIN =
+      process.env.AGENT_FOLLOWUP_IDLE_STALL_MIN?.trim() || "2";
+    secrets.AGENT_SHELL_HANG_MIN =
+      process.env.AGENT_FOLLOWUP_SHELL_HANG_MIN?.trim() || "4";
+  }
   const resolvedAgent = agent ?? "cursor";
   if (resolvedAgent === "cursor") {
     secrets.AGENT_MODEL = resolveCursorAgentModel(

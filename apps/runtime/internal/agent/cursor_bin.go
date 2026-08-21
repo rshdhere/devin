@@ -248,6 +248,21 @@ func cursorIdleStallLimitFromEnv(req RunRequest) time.Duration {
 	return time.Duration(minutes) * time.Minute
 }
 
+func cursorShellHangLimitFromEnv(req RunRequest) time.Duration {
+	raw := strings.TrimSpace(envValue(req, "AGENT_SHELL_HANG_MIN"))
+	if raw == "" {
+		return cursorShellHangLimit
+	}
+	minutes, err := strconv.Atoi(raw)
+	if err != nil || minutes < 0 {
+		return cursorShellHangLimit
+	}
+	if minutes == 0 {
+		return 0
+	}
+	return time.Duration(minutes) * time.Minute
+}
+
 func whichCursorBin(ctx context.Context, workDir, bin string, env []string) (string, error) {
 	script := `set +e
 export HOME="/workspace/.home"

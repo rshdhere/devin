@@ -45,10 +45,12 @@ describe("buildFollowUpAgentPrompt", () => {
       "repo",
     );
 
-    expect(prompt).toContain("Vercel deployment requested");
-    expect(prompt).toContain("npx --yes vercel --version");
+    expect(prompt).toContain("Vercel deployment requested (follow-up)");
     expect(prompt).toContain("npx --yes vercel --prod --yes");
     expect(prompt).toContain("VERCEL_TOKEN");
+    expect(prompt).toContain("Do NOT run local production servers");
+    expect(prompt).toContain("curl --max-time 5");
+    expect(prompt).not.toContain("npx --yes vercel --version");
   });
 });
 

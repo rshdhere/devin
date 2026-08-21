@@ -29,3 +29,28 @@ func TestCursorIdleStallLimitDisabled(t *testing.T) {
 		t.Fatalf("idle stall = %v, want 0 (disabled)", got)
 	}
 }
+
+func TestCursorShellHangLimitDefault(t *testing.T) {
+	got := cursorShellHangLimitFromEnv(RunRequest{})
+	if got != cursorShellHangLimit {
+		t.Fatalf("default shell hang = %v, want %v", got, cursorShellHangLimit)
+	}
+}
+
+func TestCursorShellHangLimitFromEnv(t *testing.T) {
+	got := cursorShellHangLimitFromEnv(RunRequest{
+		Env: map[string]string{"AGENT_SHELL_HANG_MIN": "6"},
+	})
+	if got != 6*time.Minute {
+		t.Fatalf("shell hang from env = %v, want 6m", got)
+	}
+}
+
+func TestIsShellToolLabel(t *testing.T) {
+	if !isShellToolLabel("Bash") || !isShellToolLabel("Shell") {
+		t.Fatal("expected Bash/Shell to count as shell tools")
+	}
+	if isShellToolLabel("Read") {
+		t.Fatal("Read must not count as a shell tool")
+	}
+}

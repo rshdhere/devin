@@ -24,6 +24,10 @@ const (
 	cursorWatchdogTick      = 10 * time.Second
 	cursorStartupStallLimit = 5 * time.Minute
 	cursorIdleStallLimit    = 3 * time.Minute
+	// Long-running Shell/Bash tools (curl without --max-time, foreground
+	// `bun run start`) previously kept follow-ups spinning for 15m+ because
+	// stream noise reset the idle watchdog. Cap a single shell tool instead.
+	cursorShellHangLimit = 4 * time.Minute
 )
 
 type CursorRunner struct {
@@ -101,10 +105,51 @@ func (r *CursorRunner) Run(
 	var sawOutput atomic.Bool
 	var stalled atomic.Bool
 	var idleStalled atomic.Bool
+	var shellHung atomic.Bool
+	var shellStartedNano atomic.Int64
+	var lastToolKey atomic.Value // string
 	lastOutputNano.Store(time.Now().UnixNano())
+	lastToolKey.Store("")
+
+	markProgress := func() {
+		lastOutputNano.Store(time.Now().UnixNano())
+		sawOutput.Store(true)
+	}
+	clearShellHang := func() {
+		shellStartedNano.Store(0)
+	}
+	noteToolProgress := func(evt cursorStreamEvent) {
+		label := evt.toolLabel()
+		if label == "" {
+			n, _ := nestedToolFromToolCall(evt.ToolCall)
+			label = n
+		}
+		id := toolCallID(evt)
+		key := id
+		if key == "" {
+			key = label + "|" + toolDetail(evt.toolInput())
+		}
+		sub := strings.TrimSpace(evt.Subtype)
+		if sub == "completed" {
+			clearShellHang()
+			markProgress()
+			return
+		}
+		prev, _ := lastToolKey.Load().(string)
+		if key != "" && key != prev {
+			lastToolKey.Store(key)
+			markProgress()
+			if isShellToolLabel(label) {
+				shellStartedNano.Store(time.Now().UnixNano())
+			} else {
+				clearShellHang()
+			}
+		}
+	}
 
 	stallLimit := cursorStallLimit(req)
 	idleLimit := cursorIdleStallLimitFromEnv(req)
+	shellLimit := cursorShellHangLimitFromEnv(req)
 	go func() {
 		ticker := time.NewTicker(cursorWatchdogTick)
 		defer ticker.Stop()
@@ -114,6 +159,13 @@ func (r *CursorRunner) Run(
 			case <-runCtx.Done():
 				return
 			case now := <-ticker.C:
+				if started := shellStartedNano.Load(); started > 0 && shellLimit > 0 {
+					if now.Sub(time.Unix(0, started)) >= shellLimit {
+						shellHung.Store(true)
+						cancelRun()
+						return
+					}
+				}
 				idle := now.Sub(time.Unix(0, lastOutputNano.Load()))
 				if !sawOutput.Load() && stallLimit > 0 && idle >= stallLimit {
 					stalled.Store(true)
@@ -142,13 +194,12 @@ func (r *CursorRunner) Run(
 	}()
 
 	result, runErr := executil.RunStreamingUntilGuest(runCtx, workDir, command, workspace.DevinProcessEnv(r.cfg.Workspace), envMapToSlice(req.Env), func(line executil.OutputLine) (bool, error) {
-		lastOutputNano.Store(time.Now().UnixNano())
-		sawOutput.Store(true)
-
 		chunks := iterCursorJSONObjects(line.Line)
 		for _, chunk := range chunks {
 			evt, isStreamEvent := parseCursorEvent(chunk)
 			if !isStreamEvent {
+				// Forward raw CLI text for the UI, but do not treat it as
+				// watchdog progress — hung curl/start servers spam stdout.
 				if text := truncateMessage(chunk); text != "" {
 					publish("agent.output", text, map[string]any{
 						"stream": line.Stream,
@@ -161,31 +212,36 @@ func (r *CursorRunner) Run(
 				publish(published.Type, published.Message, published.Data)
 			}
 
-			if evt.Type == "tool_call" || evt.Type == "tool_use" {
+			switch evt.Type {
+			case "tool_call", "tool_use":
 				sawToolCall = true
-				continue
-			}
-			for _, part := range evt.contentParts() {
-				if part.Type == "tool_use" {
-					sawToolCall = true
+				noteToolProgress(evt)
+			case "assistant", "message":
+				for _, part := range evt.contentParts() {
+					if part.Type == "tool_use" {
+						sawToolCall = true
+					}
+					if part.Type == "text" || part.Type == "" {
+						if strings.TrimSpace(part.Text) != "" {
+							markProgress()
+						}
+					}
 				}
-			}
-
-			if evt.Type != "result" {
-				continue
-			}
-
-			resultText = strings.TrimSpace(evt.Result)
-			gotResult = true
-			durationMs = evt.Duration
-			if evt.IsError {
-				message := resultText
-				if message == "" {
-					message = "cursor agent returned an error result"
+			case "result":
+				markProgress()
+				clearShellHang()
+				resultText = strings.TrimSpace(evt.Result)
+				gotResult = true
+				durationMs = evt.Duration
+				if evt.IsError {
+					message := resultText
+					if message == "" {
+						message = "cursor agent returned an error result"
+					}
+					return true, fmt.Errorf("%s", message)
 				}
-				return true, fmt.Errorf("%s", message)
+				return true, nil
 			}
-			return true, nil
 		}
 		return false, nil
 	})
@@ -196,6 +252,17 @@ func (r *CursorRunner) Run(
 				"cursor agent produced no output for %s after starting — the CLI never came up in the sandbox. "+
 					"Rebuild the agent Firecracker snapshot (runtime/agent/Dockerfile) and verify /proc is mounted in the guest.",
 				stallLimit,
+			),
+			Agent: r.Name(),
+		}, nil
+	}
+	if shellHung.Load() {
+		return &RunResult{
+			Status: "failed",
+			Message: fmt.Sprintf(
+				"cursor agent shell-hung after %s — likely stuck on curl/start without a timeout. "+
+					"Control plane will finalize any commits already on disk.",
+				shellLimit,
 			),
 			Agent: r.Name(),
 		}, nil

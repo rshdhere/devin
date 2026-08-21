@@ -42,7 +42,7 @@ export function nextjsPromptGuidance(stackRuntime?: StackRuntime): string[] {
     "- Verify `bun run build` succeeds before finishing",
     "- Run local CLIs with `bun x <tool>` (not `bunx`); if Bun is unavailable, use `npx --yes <tool>`.",
     "- For smoke tests: if `npm run start` fails with EADDRINUSE on port 3000, " +
-      "the app may already be running — curl `http://127.0.0.1:3000/` instead of " +
+      "the app may already be running — curl --max-time 5 `http://127.0.0.1:3000/` instead of " +
       "starting a second server (or use `PORT=3001 npm run start`)",
     "",
     "Work efficiently — the run has a hard timeout:",
@@ -85,9 +85,23 @@ export function vercelDeploymentRequested(prompt: string): boolean {
   return /\b(deploy|publish|ship|host)\b[\s\S]*\bvercel\b/i.test(prompt);
 }
 
-function vercelDeploymentGuidance(prompt: string): string[] {
+function vercelDeploymentGuidance(prompt: string, followUp = false): string[] {
   if (!vercelDeploymentRequested(prompt)) {
     return [];
+  }
+  if (followUp) {
+    return [
+      "",
+      "Vercel deployment requested (follow-up):",
+      "- Deploy this existing repository with `npx --yes vercel --prod --yes`.",
+      '- If VERCEL_TOKEN is available, pass `--token "$VERCEL_TOKEN"`.',
+      "- Preserve an existing Vercel project link; use VERCEL_ORG_ID and VERCEL_PROJECT_ID when provided.",
+      "- Do NOT run local production servers (`bun run start` / `npm start`) or localhost curl/smoke loops — Vercel builds in the cloud.",
+      "- At most one quick `bun run build` if you need a compile check; skip it when a recent build already succeeded.",
+      "- After the production deploy URL is printed, STOP IMMEDIATELY — do not re-smoke, re-curl, or wait on local ports.",
+      "- Report the final deployment URL and any missing Vercel credentials clearly.",
+      "",
+    ];
   }
   return [
     "",
@@ -185,8 +199,11 @@ export function buildFollowUpAgentPrompt(
     `- Every commit MUST include this trailer via a second -m: Co-authored-by: ${bot.name} <${bot.email}>`,
     `- ${bot.name} is the ONLY allowed co-author. Never attribute work to Cursor, Claude, an AI, an assistant, or an agent.`,
     "- If a shell command hangs, stop retrying it and finish remaining file edits.",
+    "- Never run unbounded HTTP probes: use `curl --max-time 5` or `timeout 10 curl ...`.",
+    "- Do not leave `bun run start` / `npm start` running in the foreground on follow-ups.",
+    "- If port 3000 is already serving (EADDRINUSE), skip further smoke curls — treat as verified.",
     "- When the requested change is done, STOP IMMEDIATELY.",
-    ...vercelDeploymentGuidance(prompt),
+    ...vercelDeploymentGuidance(prompt, true),
     "",
     prompt,
   ].join("\n");

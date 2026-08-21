@@ -9,7 +9,8 @@ export function isAgentTimeoutMessage(message: string): boolean {
     /context canceled/i.test(message) ||
     /exited with code -1/i.test(message) ||
     /idle-stalled/i.test(message) ||
-    /commit-plateau/i.test(message)
+    /commit-plateau/i.test(message) ||
+    /shell-hung/i.test(message)
   );
 }
 

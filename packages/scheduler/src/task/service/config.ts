@@ -85,7 +85,19 @@ export function escapeShell(value: string): string {
   return value.replace(/'/g, `'\"'\"'`);
 }
 
-export function resolveAgentTimeoutMinutes(): number {
+export function resolveAgentTimeoutMinutes(options?: {
+  followUp?: boolean;
+}): number {
+  if (options?.followUp) {
+    const followUpRaw = process.env.AGENT_FOLLOWUP_TIMEOUT_MIN?.trim();
+    if (followUpRaw) {
+      const minutes = Number(followUpRaw);
+      if (Number.isFinite(minutes) && minutes > 0) {
+        return minutes;
+      }
+    }
+    return 20;
+  }
   const raw = process.env.AGENT_RUN_TIMEOUT_MIN?.trim();
   const defaultMinutes = 60;
   if (!raw) {
@@ -98,8 +110,10 @@ export function resolveAgentTimeoutMinutes(): number {
   return minutes;
 }
 
-export function resolveAgentMaxWaitMs(): number {
-  return resolveAgentTimeoutMinutes() * 60 * 1000;
+export function resolveAgentMaxWaitMs(options?: {
+  followUp?: boolean;
+}): number {
+  return resolveAgentTimeoutMinutes(options) * 60 * 1000;
 }
 
 export function resolveTimeoutMs(
