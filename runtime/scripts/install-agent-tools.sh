@@ -32,7 +32,9 @@ printf '%s\n' '{"version":1,"attribution":{"attributeCommitsToAgent":false,"attr
   > /root/.cursor/cli-config.json
 
 npm install -g @anthropic-ai/claude-code@latest
-ln -sf "$(npm root -g)/@anthropic-ai/claude-code/cli.js" /usr/local/bin/claude
+claude_bin="$(npm prefix -g)/bin/claude"
+test -x "${claude_bin}"
+ln -sf "${claude_bin}" /usr/local/bin/claude
 
 /usr/local/bin/agent --version
 /usr/local/bin/claude --version
