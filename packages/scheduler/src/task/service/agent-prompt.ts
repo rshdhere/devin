@@ -40,6 +40,7 @@ export function nextjsPromptGuidance(stackRuntime?: StackRuntime): string[] {
       "contrast, responsive behaviour, and hover/focus states",
     ...agentSkillGuidance(),
     "- Verify `bun run build` succeeds before finishing",
+    "- Run local CLIs with `bun x <tool>` (not `bunx`); if Bun is unavailable, use `npx --yes <tool>`.",
     "- For smoke tests: if `npm run start` fails with EADDRINUSE on port 3000, " +
       "the app may already be running — curl `http://127.0.0.1:3000/` instead of " +
       "starting a second server (or use `PORT=3001 npm run start`)",

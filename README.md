@@ -2,6 +2,8 @@
 
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/rshdhere/devin)
 
+[![Watch the Devin demo](https://img.youtube.com/vi/CLgbkPEXK9k/maxresdefault.jpg)](https://youtu.be/CLgbkPEXK9k)
+
 ![Argo CD: devin application resource graph](docs/devin-infra.gif)
 
 ![Argo CD: GitOps applications (devin, devin-staging, external-secrets)](docs/gitops-applications.png)

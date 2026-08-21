@@ -9,7 +9,8 @@ RUN chmod +x /tmp/install-build-toolchain.sh \
     && rm -rf /var/lib/apt/lists/*
 
 RUN curl -fsSL https://bun.sh/install | bash \
-    && ln -sf /root/.bun/bin/bun /usr/local/bin/bun
+    && ln -sf /root/.bun/bin/bun /usr/local/bin/bun \
+    && ln -sf /root/.bun/bin/bun /usr/local/bin/bunx
 
 RUN npm install -g playwright-core@1.60.0 || true
 

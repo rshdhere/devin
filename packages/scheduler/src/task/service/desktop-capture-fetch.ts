@@ -7,6 +7,7 @@ import {
   buildWaitForDevServerScript,
   buildSnapshotSmokeStartScript,
   buildWaitForPortScript,
+  DEVIN_SNAPSHOT_SERVER_PORT,
   snapshotWaitSecondsForStartCommand,
 } from "../../devbox/preview.js";
 import {
@@ -293,7 +294,9 @@ export async function captureDevboxPreviewAfterAgent(
     const startCommand = buildSnapshotSmokeStartScript();
     await smokeAndCaptureDevboxPreview(svc, session.runtime, task, repoCwd, {
       startCommand,
-      port: 3000,
+      // The platform-owned preview server uses a dedicated port so an agent's
+      // own smoke test on 3000 cannot collide with or replace Desktop preview.
+      port: DEVIN_SNAPSHOT_SERVER_PORT,
       waitSeconds: snapshotWaitSecondsForStartCommand(startCommand),
     });
   }
