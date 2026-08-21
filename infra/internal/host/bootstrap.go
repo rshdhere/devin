@@ -22,8 +22,9 @@ func BootstrapSnapshotsLocal(ctx context.Context) error {
 	writeMarker := false
 	// Bump this marker when runtime image contents or snapshot selection
 	// semantics change. Existing hosts must rebuild their golden snapshots
-	// before prompt-selected stack runtimes are served.
-	marker := "/var/lib/devin/.snapshots-bootstrapped-v2"
+	// before prompt-selected stack runtimes are served. v3 includes the
+	// shared Git/toolchain and agent CLI changes used by stack runtimes.
+	marker := "/var/lib/devin/.snapshots-bootstrapped-v3"
 	if !force {
 		if _, err := os.Stat(marker); err == nil {
 			log.Printf("snapshots already bootstrapped (%s)", marker)

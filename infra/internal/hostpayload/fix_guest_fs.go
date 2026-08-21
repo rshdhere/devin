@@ -47,7 +47,7 @@ for rt in %s; do
   chattr -i "/var/lib/devin/snapshots/${rt}/rootfs.ext4" 2>/dev/null || true
   rm -rf "/var/lib/devin/snapshots/${rt}"
 done
-rm -f /var/lib/devin/.snapshots-bootstrapped /var/lib/devin/.snapshots-bootstrapped-v2
+rm -f /var/lib/devin/.snapshots-bootstrapped /var/lib/devin/.snapshots-bootstrapped-v2 /var/lib/devin/.snapshots-bootstrapped-v3
 echo %q | base64 -d >/tmp/devin-fix-guest-fs
 chmod 700 /tmp/devin-fix-guest-fs
 exec /tmp/devin-fix-guest-fs
