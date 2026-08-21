@@ -151,12 +151,18 @@ func (l *Launcher) Restore(ctx context.Context, vmID, name, runtime string, cpu 
 	}
 	var linkErr error
 	for attempt := 0; attempt < 10; attempt++ {
-		// HostDevName is the tap device Firecracker attaches to from the
-		// host namespace. It is not present in the guest netns; bringing it
-		// up with `ip netns exec` silently left the runtime unreachable.
+		// CNI implementations place HostDevName differently: the bundled
+		// tc-redirect-tap plugin may create it in the VM netns, while other
+		// versions expose it in the host namespace. Support both layouts.
 		linkErr = cnihelper.SetLinkUp(tapDevice)
 		if linkErr == nil {
 			break
+		}
+		if netnsErr := cnihelper.SetLinkUpInNetNS(vmID, tapDevice); netnsErr == nil {
+			linkErr = nil
+			break
+		} else {
+			linkErr = fmt.Errorf("host namespace: %w; VM namespace: %v", linkErr, netnsErr)
 		}
 		time.Sleep(200 * time.Millisecond)
 	}
