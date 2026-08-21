@@ -4,12 +4,6 @@
 
 [![Watch the Devin demo](https://img.youtube.com/vi/CLgbkPEXK9k/maxresdefault.jpg)](https://youtu.be/CLgbkPEXK9k)
 
-![Argo CD: devin application resource graph](docs/devin-infra.gif)
-
-![Argo CD: GitOps applications (devin, devin-staging, external-secrets)](docs/gitops-applications.png)
-
-![Argo CD: Kubernetes topology (ingress, services, pods)](docs/k8s.gif)
-
 **devin.baby** is a mini Devin focused on the core software-engineering loop: submit work, get an isolated runtime, run the agent, stream progress, and persist results in `/workspace`.
 
 Sandboxes are an internal implementation detail. Users submit **Tasks**.
@@ -18,27 +12,7 @@ Sandboxes are an internal implementation detail. Users submit **Tasks**.
 
 Kubernetes is the **control plane**. Firecracker microVMs are the **execution plane**. The runtime HTTP contract never changes — the agent only knows `POST /run`, `POST /terminal`, `POST /git/*`, and `GET /events`.
 
-```mermaid
-flowchart TB
-  User --> Web
-  Web --> Server
-  Server --> Scheduler
-  Scheduler --> Queue
-  Queue --> Orchestrator
-  Orchestrator --> SandboxCRD["Sandbox CRD"]
-  SandboxController --> SandboxCRD
-  SandboxController --> MachineCRD["FirecrackerMachine CR"]
-  MachineController --> MachineCRD
-  MachineController --> HostSelect["Firecracker Host Selection"]
-  HostSelect --> FCHost["firecracker daemon"]
-  FCHost --> SnapshotPool["Warm Snapshot Pool"]
-  SnapshotPool --> microVM["Firecracker microVM"]
-  microVM --> Runtime["Runtime Supervisor"]
-  Scheduler --> Runtime
-  Runtime --> Agent
-  Scheduler --> Events
-  Events --> Web
-```
+![Devin architecture: orchestrator, Firecracker hosts, microVMs, and SSE event stream](docs/architecture.png)
 
 ### Request flow
 
