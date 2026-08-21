@@ -34,7 +34,10 @@ printf '%s\n' '{"version":1,"attribution":{"attributeCommitsToAgent":false,"attr
 npm install -g @anthropic-ai/claude-code@latest
 claude_bin="$(npm prefix -g)/bin/claude"
 test -x "${claude_bin}"
-ln -sf "${claude_bin}" /usr/local/bin/claude
+if [[ "${claude_bin}" != "/usr/local/bin/claude" ]]; then
+  rm -f /usr/local/bin/claude
+  ln -s "${claude_bin}" /usr/local/bin/claude
+fi
 
 /usr/local/bin/agent --version
 /usr/local/bin/claude --version
