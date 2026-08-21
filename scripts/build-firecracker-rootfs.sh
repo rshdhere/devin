@@ -178,7 +178,9 @@ echo "git present: ${GIT_BIN#${MOUNT_DIR}}"
 if [[ "${RUNTIME}" != "agent" ]]; then
   echo "verifying agent CLIs are present in stack rootfs..."
   for tool in agent claude; do
-    if [[ ! -e "${MOUNT_DIR}/usr/local/bin/${tool}" ]]; then
+    # Absolute symlinks are resolved against the host while the rootfs is
+    # mounted here, so -e incorrectly rejects valid guest executables.
+    if [[ ! -e "${MOUNT_DIR}/usr/local/bin/${tool}" && ! -L "${MOUNT_DIR}/usr/local/bin/${tool}" ]]; then
       echo "ERROR: ${tool} missing from ${IMAGE}." >&2
       echo "Stack-specific snapshots must include runtime/scripts/install-agent-tools.sh." >&2
       exit 1
