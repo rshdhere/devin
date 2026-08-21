@@ -145,13 +145,23 @@ func (l *Launcher) Restore(ctx context.Context, vmID, name, runtime string, cpu 
 		return fail(fmt.Errorf("resume firecracker machine: %w", err))
 	}
 
-	if tapDevice, err := tapDeviceFromMachine(machine); err == nil {
-		for attempt := 0; attempt < 10; attempt++ {
-			if upErr := cnihelper.SetLinkUpInNetNS(vmID, tapDevice); upErr == nil {
-				break
-			}
-			time.Sleep(200 * time.Millisecond)
+	tapDevice, err := tapDeviceFromMachine(machine)
+	if err != nil {
+		return fail(fmt.Errorf("resolve host tap device: %w", err))
+	}
+	var linkErr error
+	for attempt := 0; attempt < 10; attempt++ {
+		// HostDevName is the tap device Firecracker attaches to from the
+		// host namespace. It is not present in the guest netns; bringing it
+		// up with `ip netns exec` silently left the runtime unreachable.
+		linkErr = cnihelper.SetLinkUp(tapDevice)
+		if linkErr == nil {
+			break
 		}
+		time.Sleep(200 * time.Millisecond)
+	}
+	if linkErr != nil {
+		return fail(fmt.Errorf("bring host tap device %q up: %w", tapDevice, linkErr))
 	}
 
 	ip, err := machineIP(machine)
