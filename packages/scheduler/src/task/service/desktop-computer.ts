@@ -7,6 +7,10 @@ import {
   requestWorkerRehydrate,
 } from "./resolve-session-proxy.js";
 import { wakeSession } from "./session-lifecycle.js";
+import {
+  contentTypeForVncAsset,
+  rewriteDesktopVncHtml,
+} from "./desktop-vnc-html.js";
 
 function bridgeWebSockets(client: WebSocket, upstream: WebSocket): void {
   client.on("message", (data, isBinary) => {
@@ -175,10 +179,41 @@ export async function proxyDesktopVNCPageHttp(
   const upstream = await proxyDesktopVNCPage(svc, taskId);
   res.statusCode = upstream.status;
   upstream.headers.forEach((value, key) => {
+    const lower = key.toLowerCase();
+    if (lower === "content-length" || lower === "content-encoding") {
+      return;
+    }
     res.setHeader(key, value);
   });
-  const body = Buffer.from(await upstream.arrayBuffer());
+  res.setHeader("Content-Type", "text/html; charset=utf-8");
+  res.setHeader("Cache-Control", "no-store");
+  let body = Buffer.from(await upstream.arrayBuffer()).toString("utf8");
+  if (upstream.ok) {
+    body = rewriteDesktopVncHtml(body, taskId);
+  }
   res.end(body);
+}
+
+export async function proxyDesktopVNCAssetHttp(
+  svc: TaskService,
+  taskId: string,
+  assetPath: string,
+  res: ServerResponse,
+): Promise<void> {
+  const upstream = await proxyDesktopVNCAsset(svc, taskId, assetPath);
+  res.statusCode = upstream.status;
+  upstream.headers.forEach((value, key) => {
+    const lower = key.toLowerCase();
+    if (lower === "content-length" || lower === "content-encoding") {
+      return;
+    }
+    res.setHeader(key, value);
+  });
+  const forcedType = contentTypeForVncAsset(assetPath);
+  if (forcedType) {
+    res.setHeader("Content-Type", forcedType);
+  }
+  res.end(Buffer.from(await upstream.arrayBuffer()));
 }
 
 export function attachDesktopVNCWebSocketUpgrade(

@@ -28,6 +28,7 @@ import {
   readTaskFile,
 } from "../lib/scheduler.js";
 import { applyCorsHeaders } from "../lib/cors.js";
+import { rewriteDesktopVncPageHtml } from "../lib/desktop-vnc-html.js";
 import { requireAuth } from "../middleware/require-auth.js";
 
 export const tasksRouter = Router();
@@ -349,9 +350,19 @@ tasksRouter.get("/:id/desktop-vnc", async (req, res) => {
     const response = await fetchDesktopVNC(req.params.id);
     res.status(response.status);
     response.headers.forEach((value, key) => {
+      const lower = key.toLowerCase();
+      if (lower === "content-length" || lower === "content-encoding") {
+        return;
+      }
       res.setHeader(key, value);
     });
-    res.send(Buffer.from(await response.arrayBuffer()));
+    res.setHeader("Content-Type", "text/html; charset=utf-8");
+    res.setHeader("Cache-Control", "no-store");
+    let body = Buffer.from(await response.arrayBuffer()).toString("utf8");
+    if (response.ok) {
+      body = rewriteDesktopVncPageHtml(body, req.params.id);
+    }
+    res.send(body);
   } catch (error) {
     respondSchedulerFailure(req, res, error);
   }
@@ -364,7 +375,40 @@ tasksRouter.get("/:id/desktop-vnc/assets/*assetPath", async (req, res) => {
       : req.params.assetPath;
     const response = await fetchDesktopVNCAsset(req.params.id, assetPath);
     res.status(response.status);
-    response.headers.forEach((value, key) => res.setHeader(key, value));
+    response.headers.forEach((value, key) => {
+      const lower = key.toLowerCase();
+      if (lower === "content-length" || lower === "content-encoding") {
+        return;
+      }
+      res.setHeader(key, value);
+    });
+    if (/\.(m?js)$/i.test(assetPath)) {
+      res.setHeader("Content-Type", "text/javascript; charset=utf-8");
+    }
+    res.send(Buffer.from(await response.arrayBuffer()));
+  } catch (error) {
+    respondSchedulerFailure(req, res, error);
+  }
+});
+
+// Compat: older noVNC HTML resolves assets relative to .../tasks/:id/assets/...
+tasksRouter.get("/:id/assets/*assetPath", async (req, res) => {
+  try {
+    const assetPath = Array.isArray(req.params.assetPath)
+      ? req.params.assetPath.join("/")
+      : req.params.assetPath;
+    const response = await fetchDesktopVNCAsset(req.params.id, assetPath);
+    res.status(response.status);
+    response.headers.forEach((value, key) => {
+      const lower = key.toLowerCase();
+      if (lower === "content-length" || lower === "content-encoding") {
+        return;
+      }
+      res.setHeader(key, value);
+    });
+    if (/\.(m?js)$/i.test(assetPath)) {
+      res.setHeader("Content-Type", "text/javascript; charset=utf-8");
+    }
     res.send(Buffer.from(await response.arrayBuffer()));
   } catch (error) {
     respondSchedulerFailure(req, res, error);

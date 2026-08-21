@@ -23,6 +23,7 @@ import {
 import {
   ensureDesktopComputer as ensureDesktopComputerImpl,
   proxyDesktopVNCAsset as proxyDesktopVNCAssetImpl,
+  proxyDesktopVNCAssetHttp as proxyDesktopVNCAssetHttpImpl,
   proxyDesktopVNCPageHttp as proxyDesktopVNCPageHttpImpl,
 } from "./desktop-computer.js";
 import { processJob as processJobImpl } from "./process-job/index.js";
@@ -594,6 +595,14 @@ export class TaskService implements TaskServiceHost {
     assetPath: string,
   ): Promise<Response> {
     return proxyDesktopVNCAssetImpl(this, taskId, assetPath);
+  }
+
+  async proxyDesktopVNCAssetHttp(
+    taskId: string,
+    assetPath: string,
+    res: import("node:http").ServerResponse,
+  ): Promise<void> {
+    return proxyDesktopVNCAssetHttpImpl(this, taskId, assetPath, res);
   }
 
   async persistSession(

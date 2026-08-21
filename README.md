@@ -10,8 +10,6 @@
 ## Approach
 
 kubernetes is the **control plane**.
-
-
 firecracker microVMs are the **execution plane**.
 
-![Devin architecture: orchestrator, Firecracker hosts, microVMs, and SSE event stream](docs/architecture.png)
+![Devin architecture: Firecracker microVMs, Cursor agent loop, SSE events, and desktop preview](docs/architecture.png)

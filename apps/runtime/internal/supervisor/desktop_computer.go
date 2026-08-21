@@ -270,6 +270,10 @@ func (s *Server) ensureDesktopComputer(ctx context.Context) error {
 }
 
 func (s *Server) handleDesktopVNCPage(w http.ResponseWriter, r *http.Request) {
+	// Resolve assets from the pathname explicitly. Using `new URL(rel, href)`
+	// without a trailing slash replaces the final path segment and breaks the
+	// API proxy (`.../desktop-vnc` → `.../assets/...` instead of
+	// `.../desktop-vnc/assets/...`), which returns HTML and blocks the module.
 	page := `<!DOCTYPE html>
 <html><head>
 <meta charset="utf-8">
@@ -278,18 +282,18 @@ func (s *Server) handleDesktopVNCPage(w http.ResponseWriter, r *http.Request) {
 </head><body>
 <div id="screen"></div>
 <script type="module">
-// Load noVNC from this runtime. Keeping the module graph same-origin avoids
-// CDN CORS/MIME failures and works in isolated or offline sandboxes.
+const path = location.pathname.replace(/\/+$/, '');
+const desktopPath = path.endsWith('/desktop-vnc') ? path : path + '/desktop-vnc';
 const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-const wsPath = location.pathname.replace(/\/?$/, '/ws');
-const url = proto + '//' + location.host + wsPath;
-const pageBase = location.href.endsWith('/') ? location.href : location.href + '/';
-import(new URL('assets/core/rfb.js', pageBase).href).then(({ default: RFB }) => {
+const url = proto + '//' + location.host + desktopPath + '/ws';
+import(desktopPath + '/assets/core/rfb.js').then(({ default: RFB }) => {
   const rfb = new RFB(document.getElementById('screen'), url, { scaleViewport: true, resizeSession: false });
   rfb.viewOnly = false;
   rfb.focusOnClick = true;
   rfb.clipViewport = false;
   rfb.scaleViewport = true;
+}).catch((err) => {
+  document.body.innerHTML = '<pre style="color:#f88;padding:16px;font:12px monospace">Failed to load noVNC: ' + String(err) + '</pre>';
 });
 </script>
 </body></html>`
@@ -321,6 +325,16 @@ func (s *Server) handleDesktopVNCAsset(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Cache-Control", "public, max-age=3600")
+	switch strings.ToLower(filepath.Ext(assetPath)) {
+	case ".js", ".mjs":
+		w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
+	case ".css":
+		w.Header().Set("Content-Type", "text/css; charset=utf-8")
+	case ".svg":
+		w.Header().Set("Content-Type", "image/svg+xml")
+	case ".map":
+		w.Header().Set("Content-Type", "application/json")
+	}
 	http.ServeFile(w, r, assetPath)
 }
 

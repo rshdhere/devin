@@ -293,13 +293,19 @@ export function createTaskRouter(tasks: TaskService): Router {
       const assetPath = Array.isArray(req.params.assetPath)
         ? req.params.assetPath.join("/")
         : req.params.assetPath;
-      const upstream = await tasks.proxyDesktopVNCAsset(
-        req.params.id,
-        assetPath,
-      );
-      res.status(upstream.status);
-      upstream.headers.forEach((value, key) => res.setHeader(key, value));
-      res.send(Buffer.from(await upstream.arrayBuffer()));
+      await tasks.proxyDesktopVNCAssetHttp(req.params.id, assetPath, res);
+    } catch (error) {
+      sendError(res, 502, error, "desktop vnc asset failed");
+    }
+  });
+
+  // Compat for older noVNC pages that resolve assets as .../tasks/:id/assets/...
+  router.get("/:id/assets/*assetPath", async (req, res) => {
+    try {
+      const assetPath = Array.isArray(req.params.assetPath)
+        ? req.params.assetPath.join("/")
+        : req.params.assetPath;
+      await tasks.proxyDesktopVNCAssetHttp(req.params.id, assetPath, res);
     } catch (error) {
       sendError(res, 502, error, "desktop vnc asset failed");
     }
