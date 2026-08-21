@@ -162,6 +162,7 @@ export function SessionDetail({
 
   const sessionActive =
     task.sessionActive === true ||
+    task.sessionSleeping === true ||
     task.status === "awaiting_review" ||
     (task.status === "completed" && usesRuntimeAgent(task.agent));
 
@@ -261,6 +262,15 @@ export function SessionDetail({
             {retryingTask ? <Loader2 className="size-3 animate-spin" /> : null}
             Retry
           </MotionButton>
+        </div>
+      ) : null}
+      {task.sessionSleeping &&
+      /Devbox ended — send a follow-up/i.test(task.message ?? "") ? (
+        <div className="mt-3 rounded-xl border border-amber-500/25 bg-amber-500/10 px-3 py-2.5">
+          <p className="text-[12px] text-amber-100">
+            {task.message} Your repo and session context stay available for
+            follow-ups (up to 30 days).
+          </p>
         </div>
       ) : null}
       {awaitingSandboxApproval ? (

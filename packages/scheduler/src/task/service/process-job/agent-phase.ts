@@ -35,6 +35,7 @@ import {
 } from "../greenfield-provision-2.js";
 import { persistSession } from "../persistence.js";
 import { emit, emitRuntime, patchTask, updateTask } from "../task-state.js";
+import { persistTaskContextMemory } from "../../../context/session-context.js";
 import type { ProcessJobState } from "./state.js";
 
 export async function runAgentPhase(
@@ -476,6 +477,11 @@ export async function runAgentPhase(
     pushedToGitHub,
     sessionActive: usesRuntimeAgent(task.agent),
   });
+  void (async () => {
+    const stored = await svc.taskStore.loadEvents(task.id);
+    const events = stored.length > 0 ? stored : svc.getEventHistory(task.id);
+    await persistTaskContextMemory(task, events, completionMessage);
+  })();
 
   if (
     usesRuntimeAgent(task.agent) &&

@@ -99,6 +99,59 @@ async function ingestWorkerEvents(
   }
 }
 
+/**
+ * Prefer recover-on-follow-up over hard failure when the worker forgot the task
+ * and the sandbox CR is gone. Durable job/repo metadata lets continue rebuild.
+ */
+async function markDevboxRecoverable(
+  svc: TaskService,
+  brain: Task,
+  sandboxName: string,
+): Promise<void> {
+  const persisted = await svc.getTaskStore().getSession(brain.id);
+  const pending = svc.pendingJobs.get(brain.id);
+  const job = persisted?.job ?? pending;
+  const canRecover = Boolean(
+    (job?.repository && job?.cloneUrl) ||
+    (brain.repository && job?.cloneUrl) ||
+    (brain.repository && persisted?.job?.cloneUrl),
+  );
+
+  const message = canRecover
+    ? "Devbox ended — send a follow-up to restore the session from GitHub (sessions kept up to 30 days)."
+    : "Execution worker lost task state and the sandbox is no longer running. Start a new session.";
+
+  if (!canRecover) {
+    updateTask(svc, brain.id, "failed", message);
+    svc.tasks.set(brain.id, {
+      ...brain,
+      status: "failed",
+      message,
+      sessionActive: false,
+      sessionSleeping: false,
+    });
+    await svc.taskStore.upsertTask(svc.tasks.get(brain.id)!);
+    return;
+  }
+
+  const nextStatus: Task["status"] =
+    brain.status === "awaiting_review" ? "awaiting_review" : "completed";
+  const next: Task = {
+    ...brain,
+    status: nextStatus,
+    message,
+    sessionActive: false,
+    sessionSleeping: true,
+    sandboxName: brain.sandboxName ?? sandboxName,
+    updatedAt: new Date().toISOString(),
+  };
+  svc.tasks.set(brain.id, next);
+  await svc.taskStore.upsertTask(next);
+  if (persisted) {
+    await svc.taskStore.markSessionSleeping(brain.id);
+  }
+}
+
 /** Mirror execution-worker task state and events into brain when worker is not durable. */
 export async function syncTaskFromWorker(
   svc: TaskService,
@@ -124,16 +177,7 @@ export async function syncTaskFromWorker(
         const sandboxName = brain.sandboxName ?? `sbx-${taskId.slice(0, 8)}`;
         const sandbox = await fetchSandbox(svc, sandboxName);
         if (sandbox?.status?.phase !== "Running") {
-          const message =
-            "Execution worker lost task state and devbox is no longer running. Start a new session.";
-          updateTask(svc, taskId, "failed", message);
-          svc.tasks.set(taskId, {
-            ...brain,
-            status: "failed",
-            message,
-            sessionActive: false,
-          });
-          await svc.taskStore.upsertTask(svc.tasks.get(taskId)!);
+          await markDevboxRecoverable(svc, brain, sandboxName);
         }
       }
     }

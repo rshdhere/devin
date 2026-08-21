@@ -5,7 +5,7 @@ import {
   agentTasks,
 } from "@devin/drizzle/schema";
 import type { TaskEvent } from "@devin/events";
-import { and, desc, eq, gt, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, gt, inArray, lt, sql } from "drizzle-orm";
 import type { ScheduleJob, Task, TaskStatus } from "./types.js";
 
 export type AgentSessionState = "active" | "review" | "sleeping";
@@ -246,6 +246,19 @@ export class TaskStore {
         updatedAt: now,
       })
       .where(eq(agentTasks.id, taskId));
+  }
+
+  /** Drop session rows idle longer than retention (default 30 days). */
+  async deleteExpiredSessions(retentionMs: number): Promise<number> {
+    if (!this.enabled || !Number.isFinite(retentionMs) || retentionMs <= 0) {
+      return 0;
+    }
+    const cutoff = new Date(Date.now() - retentionMs);
+    const deleted = await db
+      .delete(agentSessions)
+      .where(lt(agentSessions.lastActiveAt, cutoff))
+      .returning({ taskId: agentSessions.taskId });
+    return deleted.length;
   }
 
   async listTasks(userId?: string): Promise<Task[]> {

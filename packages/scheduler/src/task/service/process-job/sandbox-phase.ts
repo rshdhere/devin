@@ -60,7 +60,11 @@ export async function runSandboxSetupPhase(
     }
   }
 
-  if (job.resumeSession === true && !resumeSession) {
+  if (
+    job.resumeSession === true &&
+    job.recoverSession !== true &&
+    !resumeSession
+  ) {
     throw new Error("no devbox session available to resume follow-up");
   }
 

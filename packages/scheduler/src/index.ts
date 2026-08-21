@@ -35,6 +35,16 @@ export {
   shouldHandlePreviewHost,
 } from "./preview/proxy.js";
 export {
+  isHydraDbEnabled,
+  ingestSessionMemory,
+  recallSessionMemory,
+} from "./context/hydradb.js";
+export {
+  buildDurableSessionContext,
+  isSessionWithinRetention,
+  resolveSessionRetentionMs,
+} from "./context/session-context.js";
+export {
   collectInfraDiagnostics,
   fetchFirecrackerHostStatus,
   listSandboxes,

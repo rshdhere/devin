@@ -20,7 +20,12 @@ import {
 import { requestWorkerRehydrate } from "./resolve-session-proxy.js";
 import { ensurePendingJob, ensureTaskLoaded } from "./resolve-task.js";
 import { emit, patchTask, updateTask } from "./task-state.js";
-import { buildFollowUpSessionContext } from "./agent-prompt.js";
+import {
+  buildDurableSessionContext,
+  isSessionWithinRetention,
+  persistTaskContextMemory,
+  resolveSessionRetentionMs,
+} from "../../context/session-context.js";
 
 export async function continueTask(
   svc: TaskService,
@@ -56,13 +61,25 @@ export async function continueTask(
   let persisted = await svc.taskStore.getSession(taskId);
   let workerRehydrated = false;
 
+  const retentionAnchor =
+    persisted?.lastActiveAt ?? task.updatedAt ?? task.createdAt;
+  if (!isSessionWithinRetention(retentionAnchor)) {
+    throw new Error(
+      "This session is older than the retention window (default 30 days). Start a new session.",
+    );
+  }
+
   if (!session && task.sessionSleeping) {
     if (svc.mode === "brain") {
-      await delegateRequestToWorker(
-        svc,
-        `/api/v1/tasks/${encodeURIComponent(taskId)}/wake`,
-        { method: "POST" },
-      );
+      try {
+        await delegateRequestToWorker(
+          svc,
+          `/api/v1/tasks/${encodeURIComponent(taskId)}/wake`,
+          { method: "POST" },
+        );
+      } catch {
+        // Wake may fail when the sandbox CR is gone — recoverSession handles that.
+      }
       const refreshed = await svc.taskStore.getTask(taskId);
       if (refreshed) {
         svc.tasks.set(taskId, refreshed);
@@ -99,6 +116,7 @@ export async function continueTask(
   const recoverSession =
     !runtimeBaseUrl ||
     !sandboxName ||
+    /Devbox ended — send a follow-up/i.test(task.message ?? "") ||
     (svc.mode === "brain" && !session && !workerRehydrated);
   if (recoverSession && (!jobBase.repository || !jobBase.cloneUrl)) {
     throw new Error(
@@ -111,16 +129,26 @@ export async function continueTask(
   const storedEvents = await svc.taskStore.loadEvents(taskId);
   const sessionEvents =
     storedEvents.length > 0 ? storedEvents : svc.getEventHistory(taskId);
+  const sessionContext = await buildDurableSessionContext({
+    task,
+    events: sessionEvents,
+    followUpPrompt: trimmed,
+  });
+  void persistTaskContextMemory(
+    task,
+    sessionEvents,
+    `Follow-up queued: ${trimmed.slice(0, 240)}`,
+  );
   const followUpJob: ScheduleJob = {
     ...jobBase,
     prompt: trimmed,
     taskId,
     skipDraft: true,
     resumeSession: true,
-    sessionContext: buildFollowUpSessionContext(task.prompt, sessionEvents),
+    sessionContext,
     recoverSession,
-    runtimeBaseUrl,
-    sandboxName,
+    runtimeBaseUrl: recoverSession ? undefined : runtimeBaseUrl,
+    sandboxName: recoverSession ? undefined : sandboxName,
     agentModel: agentModel?.trim() || jobBase.agentModel,
     enqueuedAt: new Date().toISOString(),
   };
@@ -389,6 +417,12 @@ export async function runIdleWatchdog(svc: TaskService): Promise<void> {
       continue;
     }
     await sleepIdleSession(svc, taskId, session);
+  }
+
+  try {
+    await svc.taskStore.deleteExpiredSessions(resolveSessionRetentionMs());
+  } catch {
+    // Retention prune is best-effort.
   }
 }
 
