@@ -1,5 +1,7 @@
 # Devin (devin.baby)
 
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/rshdhere/devin)
+
 ![Argo CD: devin application resource graph](docs/devin-infra.gif)
 
 ![Argo CD: GitOps applications (devin, devin-staging, external-secrets)](docs/gitops-applications.png)

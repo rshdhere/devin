@@ -8,6 +8,7 @@ import {
   createTask,
   fetchDesktopScreenshot,
   fetchDesktopVNC,
+  fetchDesktopVNCAsset,
   fetchDevboxPreview,
   fetchTaskEventHistory,
   getInfraDiagnostics,
@@ -350,6 +351,20 @@ tasksRouter.get("/:id/desktop-vnc", async (req, res) => {
     response.headers.forEach((value, key) => {
       res.setHeader(key, value);
     });
+    res.send(Buffer.from(await response.arrayBuffer()));
+  } catch (error) {
+    respondSchedulerFailure(req, res, error);
+  }
+});
+
+tasksRouter.get("/:id/desktop-vnc/assets/*assetPath", async (req, res) => {
+  try {
+    const assetPath = Array.isArray(req.params.assetPath)
+      ? req.params.assetPath.join("/")
+      : req.params.assetPath;
+    const response = await fetchDesktopVNCAsset(req.params.id, assetPath);
+    res.status(response.status);
+    response.headers.forEach((value, key) => res.setHeader(key, value));
     res.send(Buffer.from(await response.arrayBuffer()));
   } catch (error) {
     respondSchedulerFailure(req, res, error);

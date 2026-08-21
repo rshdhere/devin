@@ -116,6 +116,32 @@ export async function proxyDesktopVNCPage(
   return fetch(`${session.runtimeBaseUrl}/desktop/vnc`);
 }
 
+export async function proxyDesktopVNCAsset(
+  svc: TaskService,
+  taskId: string,
+  assetPath: string,
+): Promise<Response> {
+  const relative = assetPath.replace(/^\/+/, "");
+  if (!relative || relative.split("/").some((part) => part === "..")) {
+    return new Response("Not found", { status: 404 });
+  }
+
+  if (svc.mode === "brain") {
+    return brainDelegateOrRuntime(
+      svc,
+      taskId,
+      `/api/v1/tasks/${encodeURIComponent(taskId)}/desktop-vnc/assets/${relative}`,
+      `/desktop/vnc/assets/${relative}`,
+    );
+  }
+
+  const session = await resolveLiveSession(svc, taskId);
+  if (!session) {
+    return new Response("No devbox session", { status: 404 });
+  }
+  return fetch(`${session.runtimeBaseUrl}/desktop/vnc/assets/${relative}`);
+}
+
 export async function proxyRuntimeWebSocket(
   svc: TaskService,
   taskId: string,

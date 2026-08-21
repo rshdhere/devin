@@ -280,15 +280,17 @@ func (s *Server) handleDesktopVNCPage(w http.ResponseWriter, r *http.Request) {
 <script type="module">
 // Load noVNC from this runtime. Keeping the module graph same-origin avoids
 // CDN CORS/MIME failures and works in isolated or offline sandboxes.
-import RFB from './assets/core/rfb.js';
 const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
 const wsPath = location.pathname.replace(/\/?$/, '/ws');
 const url = proto + '//' + location.host + wsPath;
-const rfb = new RFB(document.getElementById('screen'), url, { scaleViewport: true, resizeSession: false });
-rfb.viewOnly = false;
-rfb.focusOnClick = true;
-rfb.clipViewport = false;
-rfb.scaleViewport = true;
+const pageBase = location.href.endsWith('/') ? location.href : location.href + '/';
+import(new URL('assets/core/rfb.js', pageBase).href).then(({ default: RFB }) => {
+  const rfb = new RFB(document.getElementById('screen'), url, { scaleViewport: true, resizeSession: false });
+  rfb.viewOnly = false;
+  rfb.focusOnClick = true;
+  rfb.clipViewport = false;
+  rfb.scaleViewport = true;
+});
 </script>
 </body></html>`
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")

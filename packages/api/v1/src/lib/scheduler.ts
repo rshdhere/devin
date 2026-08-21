@@ -212,4 +212,15 @@ export async function fetchDesktopVNC(id: string): Promise<Response> {
   );
 }
 
+export async function fetchDesktopVNCAsset(
+  id: string,
+  assetPath: string,
+): Promise<Response> {
+  return proxyScheduler(
+    `/api/v1/tasks/${encodeURIComponent(id)}/desktop-vnc/assets/${assetPath}`,
+    undefined,
+    { timeoutMs: null },
+  );
+}
+
 export { schedulerBaseUrl };
