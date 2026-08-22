@@ -131,19 +131,50 @@ export async function proxyDesktopVNCAsset(
   }
 
   if (svc.mode === "brain") {
-    return brainDelegateOrRuntime(
-      svc,
-      taskId,
-      `/api/v1/tasks/${encodeURIComponent(taskId)}/desktop-vnc/assets/${relative}`,
-      `/desktop/vnc/assets/${relative}`,
-    );
+    try {
+      return await brainDelegateOrRuntime(
+        svc,
+        taskId,
+        `/api/v1/tasks/${encodeURIComponent(taskId)}/desktop-vnc/assets/${relative}`,
+        `/desktop/vnc/assets/${relative}`,
+      );
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "desktop vnc asset failed";
+      if (message.includes("no devbox session")) {
+        return new Response(JSON.stringify({ error: message }), {
+          status: 404,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      return new Response(JSON.stringify({ error: message }), {
+        status: 503,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
   }
 
-  const session = await resolveLiveSession(svc, taskId);
+  const session =
+    (await resolveLiveSession(svc, taskId)) ?? (await wakeSession(svc, taskId));
   if (!session) {
-    return new Response("No devbox session", { status: 404 });
+    return new Response(JSON.stringify({ error: "no devbox session" }), {
+      status: 404,
+      headers: { "Content-Type": "application/json" },
+    });
   }
-  return fetch(`${session.runtimeBaseUrl}/desktop/vnc/assets/${relative}`);
+  await ensureDesktopComputer(svc, taskId);
+  try {
+    return await fetch(
+      `${session.runtimeBaseUrl}/desktop/vnc/assets/${relative}`,
+    );
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : "runtime unreachable";
+    return new Response(JSON.stringify({ error: message }), {
+      status: 503,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
 }
 
 export async function proxyRuntimeWebSocket(

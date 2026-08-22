@@ -191,6 +191,14 @@ export async function fetchDevboxPreview(
   );
 }
 
+export async function ensureDesktopComputer(id: string): Promise<Response> {
+  return proxyScheduler(
+    `/api/v1/tasks/${encodeURIComponent(id)}/desktop/ensure`,
+    { method: "POST" },
+    { timeoutMs: null },
+  );
+}
+
 export async function fetchDesktopScreenshot(
   id: string,
   opts?: { fresh?: boolean },

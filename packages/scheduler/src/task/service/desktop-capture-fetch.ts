@@ -30,6 +30,7 @@ import {
   WORKER_DELEGATE_SCREENSHOT_TIMEOUT_MS,
 } from "./session-lifecycle.js";
 import { requestWorkerRehydrate } from "./resolve-session-proxy.js";
+import { isLikelyBlankScreenshot } from "./desktop-snapshot-blank.js";
 import { emit, patchTask } from "./task-state.js";
 
 export async function fetchDesktopScreenshot(
@@ -157,6 +158,14 @@ export async function persistDesktopSnapshot(
   session: ReviewSession,
   buffer: Buffer,
 ): Promise<void> {
+  if (isLikelyBlankScreenshot(buffer)) {
+    emit(svc, "agent.log", taskId, "Skipped blank desktop snapshot", {
+      desktop: true,
+      desktopSnapshot: true,
+      blank: true,
+    });
+    return;
+  }
   session.lastDesktopScreenshot = buffer;
   await Promise.all([
     saveTaskDesktopSnapshot(taskId, buffer),

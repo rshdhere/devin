@@ -6,6 +6,7 @@ import { Router } from "express";
 import { authenticatedCloneUrl, getGitHubAccessToken } from "../lib/github.js";
 import {
   createTask,
+  ensureDesktopComputer,
   fetchDesktopScreenshot,
   fetchDesktopVNC,
   fetchDesktopVNCAsset,
@@ -320,6 +321,20 @@ tasksRouter.get("/:id/devbox-preview", async (req, res) => {
       res.write(Buffer.from(value));
     }
     res.end();
+  } catch (error) {
+    respondSchedulerFailure(req, res, error);
+  }
+});
+
+tasksRouter.post("/:id/desktop/ensure", async (req, res) => {
+  try {
+    const response = await ensureDesktopComputer(req.params.id);
+    res.status(response.status);
+    res.setHeader(
+      "Content-Type",
+      response.headers.get("content-type") ?? "application/json",
+    );
+    res.send(await response.text());
   } catch (error) {
     respondSchedulerFailure(req, res, error);
   }

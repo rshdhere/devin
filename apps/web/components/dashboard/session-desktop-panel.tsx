@@ -24,6 +24,44 @@ async function blobLooksLikePng(blob: Blob): Promise<boolean> {
   );
 }
 
+async function blobLooksBlank(blob: Blob): Promise<boolean> {
+  if (typeof document === "undefined") {
+    return false;
+  }
+  try {
+    const bitmap = await createImageBitmap(blob);
+    const canvas = document.createElement("canvas");
+    const sampleW = Math.min(bitmap.width, 64);
+    const sampleH = Math.min(bitmap.height, 64);
+    canvas.width = sampleW;
+    canvas.height = sampleH;
+    const ctx = canvas.getContext("2d", { willReadFrequently: true });
+    if (!ctx) {
+      bitmap.close();
+      return false;
+    }
+    ctx.drawImage(bitmap, 0, 0, sampleW, sampleH);
+    bitmap.close();
+    const { data } = ctx.getImageData(0, 0, sampleW, sampleH);
+    let sum = 0;
+    let sumSq = 0;
+    const pixels = data.length / 4;
+    for (let i = 0; i < data.length; i += 4) {
+      const luminance =
+        0.299 * (data[i] ?? 0) +
+        0.587 * (data[i + 1] ?? 0) +
+        0.114 * (data[i + 2] ?? 0);
+      sum += luminance;
+      sumSq += luminance * luminance;
+    }
+    const mean = sum / pixels;
+    const variance = sumSq / pixels - mean * mean;
+    return mean > 235 && variance < 120;
+  } catch {
+    return false;
+  }
+}
+
 function isSnapshotNotReadyYet(error: unknown): boolean {
   if (!(error instanceof Error)) {
     return false;
@@ -112,8 +150,15 @@ export function SessionDesktopPanel({
   const interactiveSrc = tasksApiUrl(
     `/${encodeURIComponent(task.id)}/desktop-vnc`,
   );
+  const ensureDesktopSrc = tasksApiUrl(
+    `/${encodeURIComponent(task.id)}/desktop/ensure`,
+  );
+  const rfbAssetSrc = tasksApiUrl(
+    `/${encodeURIComponent(task.id)}/desktop-vnc/assets/core/rfb.js`,
+  );
 
   const isAgentActive =
+    task.status === "queued" ||
     task.status === "running" ||
     task.status === "runtime_ready" ||
     task.status === "sandbox_starting" ||
@@ -125,6 +170,7 @@ export function SessionDesktopPanel({
   const [shotUrl, setShotUrl] = useState<string | null>(null);
   const [shotLoading, setShotLoading] = useState(false);
   const [shotError, setShotError] = useState<string | null>(null);
+  const [snapshotUpdating, setSnapshotUpdating] = useState(false);
   const [interactiveLoading, setInteractiveLoading] = useState(false);
   const [interactiveError, setInteractiveError] = useState<string | null>(null);
   const [interactiveReady, setInteractiveReady] = useState(false);
@@ -158,6 +204,10 @@ export function SessionDesktopPanel({
         if (!(await blobLooksLikePng(blob))) {
           throw new Error("snapshot is not an image");
         }
+        if (shotUrlRef.current && (await blobLooksBlank(blob))) {
+          setSnapshotUpdating(true);
+          return;
+        }
         const nextUrl = URL.createObjectURL(blob);
         setShotUrl((prev) => {
           if (prev?.startsWith("blob:")) {
@@ -165,6 +215,7 @@ export function SessionDesktopPanel({
           }
           return nextUrl;
         });
+        setSnapshotUpdating(false);
         setShotError(null);
       } catch (error) {
         if (!shotUrlRef.current) {
@@ -196,21 +247,55 @@ export function SessionDesktopPanel({
     setInteractiveError(null);
     setInteractiveReady(false);
     try {
-      const response = await fetch(interactiveSrc, {
+      const ensureResponse = await fetch(ensureDesktopSrc, {
+        method: "POST",
         credentials: "include",
         signal: AbortSignal.timeout(120_000),
       });
-      if (response.status === 504) {
+      if (ensureResponse.status === 504) {
         setInteractiveError(
           "Devbox is still starting — try again in a moment.",
         );
         return;
       }
-      if (!response.ok) {
-        const body = (await response.text()).slice(0, 200);
+      if (!ensureResponse.ok && ensureResponse.status !== 404) {
+        const body = (await ensureResponse.text()).slice(0, 200);
         setInteractiveError(
           body.trim() ||
-            `Desktop unavailable (HTTP ${response.status}). Wake the devbox or retry.`,
+            `Desktop unavailable (HTTP ${ensureResponse.status}). Wake the devbox or retry.`,
+        );
+        return;
+      }
+
+      const [pageResponse, assetResponse] = await Promise.all([
+        fetch(interactiveSrc, {
+          credentials: "include",
+          signal: AbortSignal.timeout(120_000),
+        }),
+        fetch(rfbAssetSrc, {
+          credentials: "include",
+          signal: AbortSignal.timeout(120_000),
+        }),
+      ]);
+      if (pageResponse.status === 504 || assetResponse.status === 504) {
+        setInteractiveError(
+          "Devbox is still starting — try again in a moment.",
+        );
+        return;
+      }
+      if (!pageResponse.ok) {
+        const body = (await pageResponse.text()).slice(0, 200);
+        setInteractiveError(
+          body.trim() ||
+            `Desktop unavailable (HTTP ${pageResponse.status}). Wake the devbox or retry.`,
+        );
+        return;
+      }
+      if (!assetResponse.ok) {
+        const body = (await assetResponse.text()).slice(0, 200);
+        setInteractiveError(
+          body.trim() ||
+            `Could not load noVNC assets (HTTP ${assetResponse.status}). Retry shortly.`,
         );
         return;
       }
@@ -230,7 +315,7 @@ export function SessionDesktopPanel({
     } finally {
       setInteractiveLoading(false);
     }
-  }, [canUse, interactiveSrc]);
+  }, [canUse, ensureDesktopSrc, interactiveSrc, rfbAssetSrc]);
 
   useEffect(() => {
     if (!canUse || view !== "snapshot") {
@@ -378,12 +463,21 @@ export function SessionDesktopPanel({
       >
         {showSnapshot ? (
           shotUrl ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              src={shotUrl}
-              alt="Desktop snapshot"
-              className="animate-in fade-in max-h-full max-w-full object-contain duration-500"
-            />
+            <div className="relative flex max-h-full max-w-full items-center justify-center">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={shotUrl}
+                alt="Desktop snapshot"
+                className="animate-in fade-in max-h-full max-w-full object-contain duration-500"
+              />
+              {snapshotUpdating ? (
+                <div className="pointer-events-none absolute inset-x-0 bottom-3 flex justify-center">
+                  <span className="rounded-full border border-white/[0.08] bg-[#121212]/90 px-2.5 py-1 text-[10px] text-zinc-400 backdrop-blur-sm">
+                    Updating desktop…
+                  </span>
+                </div>
+              ) : null}
+            </div>
           ) : shotError ? (
             <div className="flex flex-col items-center gap-2 p-6">
               <Monitor className="size-6 text-zinc-600" strokeWidth={1.5} />

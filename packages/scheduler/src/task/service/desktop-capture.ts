@@ -13,6 +13,8 @@ export {
   smokeAndCaptureDevboxPreview,
 } from "./desktop-capture-fetch.js";
 
+export { isLikelyBlankScreenshot } from "./desktop-snapshot-blank.js";
+
 export {
   captureDesktopScreenshotWithDevServer,
   runDesktopScreenshotWithDevServer,

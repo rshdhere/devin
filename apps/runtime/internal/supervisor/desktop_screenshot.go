@@ -46,7 +46,7 @@ const browser = await chromium.launch({
 });
 const page = await browser.newPage({ viewport: { width: 1024, height: 768 } });
 await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 15000 });
-await page.waitForTimeout(1200);
+await page.waitForTimeout(3000);
 await page.screenshot({ path: out, fullPage: false, type: 'png' });
 await browser.close();
 `,
@@ -107,7 +107,7 @@ const browser = await chromium.connectOverCDP(cdp);
 const context = browser.contexts()[0] ?? await browser.newContext({ viewport: { width: %d, height: %d } });
 const page = context.pages()[0] ?? await context.newPage();
 await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 15000 });
-await page.waitForTimeout(1200);
+await page.waitForTimeout(3000);
 await page.screenshot({ path: out, fullPage: false, type: 'png' });
 `,
 		jsonString(targetURL),

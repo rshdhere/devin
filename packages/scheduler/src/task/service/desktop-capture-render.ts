@@ -233,6 +233,14 @@ export async function fetchRuntimePersistedScreenshot(
   return undefined;
 }
 
+export function shouldCapturePreviewOnPortChange(
+  svc: Pick<TaskService, "processingTasks">,
+  taskId: string,
+  portChanged: boolean,
+): boolean {
+  return portChanged && !svc.processingTasks.has(taskId);
+}
+
 export async function refreshDevboxPreviewPort(
   svc: TaskService,
   session: ReviewSession,
@@ -275,7 +283,7 @@ export async function refreshDevboxPreviewPort(
     }
     // Keep Chromium on the live preview URL so snapshots show the app, not about:blank.
     void navigateDesktopBrowserToPort(svc, session, taskId, port);
-    if (portChanged) {
+    if (shouldCapturePreviewOnPortChange(svc, taskId, portChanged)) {
       void captureDesktopScreenshot(svc, session, taskId);
     }
   } catch {
