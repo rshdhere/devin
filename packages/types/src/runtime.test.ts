@@ -28,6 +28,16 @@ describe("inferStackFromPrompt", () => {
     expect(inferStackFromPrompt("fastapi todo backend")).toBe("python");
   });
 
+  test("explicit python wins over chat-app cue", () => {
+    expect(inferStackFromPrompt("make me a chat app using python")).toBe(
+      "python",
+    );
+  });
+
+  test("ambiguous chat app defaults to node not nextjs", () => {
+    expect(inferStackFromPrompt("make me a chat app")).toBe("node");
+  });
+
   test("detects Node for express/todo prompts", () => {
     expect(inferStackFromPrompt("make me a todo-app using nodejs")).toBe(
       "node",

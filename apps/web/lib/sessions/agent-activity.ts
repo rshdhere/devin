@@ -412,33 +412,47 @@ export function isAddedChangeType(changeType: string): boolean {
   return lower === "added" || lower === "create" || lower === "new";
 }
 
+function isDependencyOrBuildPath(path: string): boolean {
+  const p = path.replace(/\\/g, "/").toLowerCase();
+  return (
+    p.includes("/node_modules/") ||
+    p.startsWith("node_modules/") ||
+    p.includes("/.next/") ||
+    p.startsWith(".next/") ||
+    p.includes("/dist/") ||
+    p.startsWith("dist/")
+  );
+}
+
 export function extractChangedFiles(events: TaskEvent[]): ChangedFile[] {
   const byPath = new Map<string, string>();
 
   for (const event of events) {
     if (event.type === "draft.diff" && event.data?.path) {
-      byPath.set(
-        normalizeSandboxFilePath(String(event.data.path)),
-        String(event.data.changeType ?? "modified"),
-      );
+      const normalized = normalizeSandboxFilePath(String(event.data.path));
+      if (isDependencyOrBuildPath(normalized)) {
+        continue;
+      }
+      byPath.set(normalized, String(event.data.changeType ?? "modified"));
       continue;
     }
     if (event.type === "agent.tool" && event.data?.tool) {
       const tool = String(event.data.tool);
+      // Only writes belong in Changes — reads of vendor trees used to pollute the panel.
+      if (tool !== "Write" && tool !== "ApplyPatch" && tool !== "write_file") {
+        continue;
+      }
       const detail =
         typeof event.data.detail === "string" ? event.data.detail.trim() : "";
-      const pathLike =
-        detail.split("\n")[0]?.trim() ||
-        (tool === "Write" || tool === "Read" ? detail : "");
+      const pathLike = detail.split("\n")[0]?.trim() || detail;
       if (!pathLike || pathLike.includes(" ")) {
         continue;
       }
       const normalized = normalizeSandboxFilePath(pathLike);
-      const kind =
-        tool === "Write" || tool === "ApplyPatch"
-          ? "added"
-          : (byPath.get(normalized) ?? "modified");
-      byPath.set(normalized, kind);
+      if (isDependencyOrBuildPath(normalized)) {
+        continue;
+      }
+      byPath.set(normalized, "added");
     }
   }
 

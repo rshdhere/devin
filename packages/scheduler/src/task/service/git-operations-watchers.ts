@@ -27,6 +27,7 @@ import {
   escapeShell,
   resolveAgentTimeoutMinutes,
   resolveBotAuthor,
+  resolveStackRuntime,
 } from "./config.js";
 import { maybeTriggerDesktopSnapshotFromRuntime } from "./desktop-capture.js";
 import { pushGreenfieldMain } from "./greenfield-provision-2.js";
@@ -276,6 +277,8 @@ export async function assertGreenfieldAgentProgress(
   preAgentHead: string,
 ): Promise<void> {
   const gitEnv = gitRuntimeEnv(svc, githubToken);
+  const stack = resolveStackRuntime(task);
+  const jsUiStack = stack === "nextjs" || stack === "node";
   const probe = await runtime.terminalAllowFailure({
     taskId: task.id,
     cwd: repoCwd,
@@ -294,12 +297,16 @@ export async function assertGreenfieldAgentProgress(
       '  if [ "$new_commits" -gt 0 ] && [ "$recovery_n" -ge "$new_commits" ]; then recovery_only=1; fi',
       "fi",
       'echo "head=$head dirty=$dirty new_commits=$new_commits recovery_only=$recovery_only base=$base"',
-      "echo '---SCAFFOLD---'",
-      "grep -RIl -E 'Scaffold ready|Scaffold is running|Implement the full app|App Router scaffold' --include='*.js' --include='*.ts' --include='*.html' --include='*.tsx' --include='*.jsx' . 2>/dev/null | head -8",
-      "echo '---STUB---'",
-      "grep -RIl -E 'Play .+ online with friends|View Leaderboard|Start Game|coming soon' --include='*.js' --include='*.ts' --include='*.tsx' --include='*.jsx' --include='*.html' . 2>/dev/null | head -8",
-      "echo '---BOARD---'",
-      "grep -RIl -E 'chessboard|Chessboard|game-board|GameBoard|grid-cols-8|squares\\.map|square\\[' --include='*.js' --include='*.ts' --include='*.tsx' --include='*.jsx' --include='*.css' . 2>/dev/null | head -5",
+      ...(jsUiStack
+        ? [
+            "echo '---SCAFFOLD---'",
+            "grep -RIl -E 'Scaffold ready|Scaffold is running|Implement the full app|App Router scaffold' --include='*.js' --include='*.ts' --include='*.html' --include='*.tsx' --include='*.jsx' . 2>/dev/null | head -8",
+            "echo '---STUB---'",
+            "grep -RIl -E 'Play .+ online with friends|View Leaderboard|Start Game|coming soon' --include='*.js' --include='*.ts' --include='*.tsx' --include='*.jsx' --include='*.html' . 2>/dev/null | head -8",
+            "echo '---BOARD---'",
+            "grep -RIl -E 'chessboard|Chessboard|game-board|GameBoard|grid-cols-8|squares\\.map|square\\[' --include='*.js' --include='*.ts' --include='*.tsx' --include='*.jsx' --include='*.css' . 2>/dev/null | head -5",
+          ]
+        : ["echo '---SCAFFOLD---'", "echo '---STUB---'", "echo '---BOARD---'"]),
     ].join("\n"),
   });
 
@@ -381,13 +388,13 @@ export async function assertGreenfieldAgentProgress(
     );
   }
 
-  if (stubFiles.length > 0 && boardFiles.length === 0) {
+  if (jsUiStack && stubFiles.length > 0 && boardFiles.length === 0) {
     throw new Error(
       `Agent left a marketing stub UI (${stubFiles.slice(0, 3).join(", ")}) without implementing the product. Build the real interactive app, then commit.`,
     );
   }
 
-  if (wantsGameBoard && boardFiles.length === 0) {
+  if (jsUiStack && wantsGameBoard && boardFiles.length === 0) {
     throw new Error(
       "Agent finished without a playable board/game UI. Implement the actual game (board + moves), not only a landing page.",
     );

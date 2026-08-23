@@ -74,7 +74,8 @@ export function pythonPromptGuidance(stackRuntime?: StackRuntime): string[] {
   }
   return [
     "",
-    "Python / workspace disk:",
+    "Python / workspace:",
+    "- Entry point is app.py (Flask scaffold with /health). Start there — never invent app/page.tsx",
     "- PIP_NO_CACHE_DIR is set — do not run `pip cache` housekeeping or delete venvs in loops",
     "- Prefer a single venv in the repo; avoid duplicate `pip install` across multiple envs",
     "- If you see ENOSPC / no space left on device, commit sources and finish — do not rm -rf the repo",
@@ -242,7 +243,13 @@ export function buildAgentPrompt(
   const scaffoldLine =
     stackRuntime === "nextjs"
       ? "The repository has a thin Next.js App Router scaffold (app/page.tsx + /health API route)."
-      : "The repository only has a thin runnable scaffold (health + placeholder UI).";
+      : stackRuntime === "python"
+        ? "The repository has a thin Python Flask scaffold (app.py + /health + requirements.txt)."
+        : stackRuntime === "rust"
+          ? "The repository has a thin Rust Cargo scaffold (src/main.rs + Cargo.toml)."
+          : stackRuntime === "go"
+            ? "The repository has a thin Go scaffold (main.go + go.mod + /health)."
+            : "The repository has a thin Node.js scaffold (package.json + src entry + /health).";
 
   const productRequirements =
     stackRuntime === "nextjs"
@@ -252,13 +259,37 @@ export function buildAgentPrompt(
           "- GET / must be user-facing — never leave the scaffold placeholder text",
           "- Keep /health or app/health returning JSON { ok: true }",
           "- Do not finish while the page still shows scaffold placeholder copy",
+          "- Add dependencies only when needed; if you do, run bun install and verify start still works",
+          "- Smoke-check GET / and /health before finishing",
         ]
-      : [
-          "- Replace the placeholder with a real UI + API for the user's request",
-          "- GET / must be user-facing — never leave Express 'Cannot GET /' or a scaffold-only page",
-          "- Keep /health returning JSON { ok: true }",
-          "- Do not finish while the page still says 'Scaffold is running'",
-        ];
+      : stackRuntime === "python"
+        ? [
+            "- Extend app.py into the full product (Flask/FastAPI/etc.) — do NOT create Next.js files (no app/page.tsx, no package.json)",
+            "- Keep /health returning JSON { ok: true }",
+            "- Add Python deps to requirements.txt and install with pip when needed",
+            "- Smoke-check the Python server endpoints before finishing",
+          ]
+        : stackRuntime === "rust"
+          ? [
+              "- Extend the Cargo project (src/main.rs) into the full product — do NOT create Next.js or Node files",
+              "- Keep a health/ready check if the app is a server",
+              "- Use cargo build (debug) for smoke tests; do not invent package.json",
+            ]
+          : stackRuntime === "go"
+            ? [
+                "- Extend main.go into the full product — do NOT create Next.js or Node files",
+                "- Keep /health returning JSON { ok: true }",
+                "- Use go run / go test; do not invent package.json or app/page.tsx",
+              ]
+            : [
+                "- Replace the placeholder with a real UI + API for the user's request",
+                "- GET / must be user-facing — never leave Express 'Cannot GET /' or a scaffold-only page",
+                "- Keep /health returning JSON { ok: true }",
+                "- Do not finish while the page still says 'Scaffold is running'",
+                "- Do not create a Next.js App Router tree unless the user asked for Next.js",
+                "- Add dependencies only when needed; if you do, run bun install and verify start still works",
+                "- Smoke-check GET / and /health before finishing",
+              ];
 
   return [
     `Repository ${repository} is cloned at /workspace/${repoCwd}. Work in that directory.`,
@@ -268,8 +299,6 @@ export function buildAgentPrompt(
     "You are the implementer — build the full product the user asked for. Do not leave the scaffold untouched.",
     "Requirements:",
     ...productRequirements,
-    "- Add dependencies only when needed; if you do, run bun install and verify start still works",
-    "- Smoke-check GET / and /health before finishing",
     ...nextjsPromptGuidance(stackRuntime),
     ...rustPromptGuidance(stackRuntime),
     ...pythonPromptGuidance(stackRuntime),
@@ -293,9 +322,11 @@ export function buildAgentPrompt(
     "- After smoke tests pass and you have ≥3 product commits, STOP IMMEDIATELY — do not clean caches, du, rm -rf target/node_modules, or start extra polish loops",
     "",
     "Sandbox resilience:",
-    "- If shell/bun commands fail (ENOMEM, spawn errors), keep writing files with edit tools",
+    "- If shell commands fail (ENOMEM, spawn errors), keep writing files with edit tools",
     "- Do not launch subagents or long retry loops for shell — finish the product on disk",
-    "- Prefer zero-dependency Node.js (built-in http + SSE) when bun install cannot run",
+    stackRuntime === "nextjs" || stackRuntime === "node" || !stackRuntime
+      ? "- Prefer zero-dependency Node.js (built-in http + SSE) when bun install cannot run"
+      : "- Prefer the stack's standard toolchain; do not switch languages mid-task",
     "- The control plane runs tests, commits, and push after you finish or on timeout",
     "- Never spend time on disk cleanup or build-artifact housekeeping; exit so the session can mark Done",
     "",

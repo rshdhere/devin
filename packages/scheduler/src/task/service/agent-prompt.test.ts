@@ -112,4 +112,34 @@ describe("buildAgentPrompt", () => {
       "Make at least 3 focused commits beyond the scaffold",
     );
   });
+
+  it("describes python scaffolds without Next.js requirements", () => {
+    const prompt = buildAgentPrompt(
+      "make me a chat app using python",
+      "acme/chat-py",
+      "repo",
+      undefined,
+      "python",
+      true,
+    );
+
+    expect(prompt).toContain("thin Python Flask scaffold (app.py");
+    expect(prompt).toContain("do NOT create Next.js files");
+    expect(prompt).not.toContain("run bun install");
+    expect(prompt).not.toContain("App Router");
+  });
+
+  it("describes rust scaffolds without Node packaging", () => {
+    const prompt = buildAgentPrompt(
+      "make me a chat app using rust",
+      "acme/chat-rs",
+      "repo",
+      undefined,
+      "rust",
+      true,
+    );
+
+    expect(prompt).toContain("thin Rust Cargo scaffold");
+    expect(prompt).toContain("do NOT create Next.js or Node files");
+  });
 });

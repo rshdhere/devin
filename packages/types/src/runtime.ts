@@ -42,14 +42,17 @@ const PROMPT_RULES: Array<{ runtime: StackRuntime; pattern: RegExp }> = [
   {
     runtime: "python",
     pattern:
-      /\b(python|django|flask|fastapi|uvicorn|gunicorn|pip install|poetry|pytest)\b/i,
+      /\b(python|django|flask|fastapi|uvicorn|gunicorn|pip install|poetry|pytest|py)\b/i,
   },
   {
     runtime: "node",
     pattern:
-      /\b(node\.?js|nodejs|express|nestjs|npm|bun\b|todo[\s-]?app|chat[\s-]?app|javascript|typescript|mongoose|mongodb|koa|hono)\b/i,
+      /\b(node\.?js|nodejs|express|nestjs|npm|bun\b|javascript|typescript|mongoose|mongodb|koa|hono)\b/i,
   },
 ];
+
+/** Soft product cues used only when no language/framework was named. */
+const AMBIGUOUS_NODE_PATTERN = /\b(todo[\s-]?app|chat[\s-]?app)\b/i;
 
 export function isSandboxRuntime(value: string): value is SandboxRuntime {
   return (SANDBOX_RUNTIMES as readonly string[]).includes(value);
@@ -65,6 +68,11 @@ export function inferStackFromPrompt(prompt: string): StackRuntime {
     if (rule.pattern.test(text)) {
       return rule.runtime;
     }
+  }
+
+  // "chat app" / "todo app" with no language → Node, not Next.js.
+  if (AMBIGUOUS_NODE_PATTERN.test(text)) {
+    return "node";
   }
 
   return "node";

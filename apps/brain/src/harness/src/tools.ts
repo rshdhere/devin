@@ -154,6 +154,7 @@ export type ToolContext = {
   workDir: string;
   client: DevboxToolsClient;
   requireProductImplementation?: boolean;
+  stackRuntime?: "nextjs" | "node" | "go" | "rust" | "python";
 };
 
 export const OPENAI_TOOLS = [
@@ -178,7 +179,7 @@ export const OPENAI_TOOLS = [
     function: {
       name: "read_file",
       description:
-        "Read a UTF-8 file from the Devbox. Path is relative to the repo root (e.g. app/page.tsx).",
+        "Read a UTF-8 file from the Devbox. Path is relative to the repo root (e.g. app/page.tsx). Do not read node_modules.",
       parameters: {
         type: "object",
         properties: { path: { type: "string" } },
@@ -191,7 +192,7 @@ export const OPENAI_TOOLS = [
     function: {
       name: "write_file",
       description:
-        "Write a UTF-8 file in the Devbox. Path is relative to the repo root (e.g. app/page.tsx).",
+        "Write a UTF-8 file in the Devbox. Path is relative to the repo root (e.g. app/page.tsx). Do not write under node_modules.",
       parameters: {
         type: "object",
         properties: {
@@ -207,7 +208,7 @@ export const OPENAI_TOOLS = [
     function: {
       name: "list_dir",
       description:
-        "List directory entries in the Devbox. Path is relative to the repo root (default: .).",
+        "List directory entries in the Devbox. Path is relative to the repo root (default: .). Avoid listing node_modules.",
       parameters: {
         type: "object",
         properties: { path: { type: "string" } },
@@ -292,6 +293,59 @@ export const OPENAI_TOOLS = [
   },
 ];
 
+function isForbiddenProjectPath(path: string): boolean {
+  const normalized = path.replace(/\\/g, "/").toLowerCase();
+  return (
+    normalized.includes("/node_modules/") ||
+    normalized.startsWith("node_modules/") ||
+    normalized.includes("/.next/") ||
+    normalized.startsWith(".next/") ||
+    normalized.includes("/dist/") ||
+    normalized.startsWith("dist/") ||
+    normalized.includes("/.git/") ||
+    normalized.includes("/__pycache__/") ||
+    normalized.includes("/target/debug/") ||
+    normalized.includes("/target/release/")
+  );
+}
+
+/** Block Next.js App Router paths when the task stack is python/rust/go. */
+function isWrongStackPath(
+  stack: ToolContext["stackRuntime"],
+  path: string,
+): boolean {
+  if (stack !== "python" && stack !== "rust" && stack !== "go") {
+    return false;
+  }
+  const p = path.replace(/\\/g, "/").toLowerCase();
+  return (
+    /(^|\/)app\/.+\.(tsx|jsx)$/.test(p) ||
+    p.endsWith("/app/layout.tsx") ||
+    p.endsWith("next.config.js") ||
+    p.endsWith("next.config.mjs") ||
+    p.endsWith("next.config.ts")
+  );
+}
+
+function wrongStackMessage(stack: string, path: string): string {
+  return (
+    `refused ${path} — this task is a ${stack} project. ` +
+    "Do not create Next.js App Router files (app/*.tsx). " +
+    "Use list_dir and edit the stack entry files instead."
+  );
+}
+
+function toolErrorMessage(error: unknown): string {
+  if (!(error instanceof Error)) {
+    return String(error);
+  }
+  const message = error.message.trim();
+  if (/NOT_FOUND|no such file|ENOENT|HTTP 404/i.test(message)) {
+    return `file not found: ${message.slice(0, 240)} — use list_dir / check the path under the repo root (never node_modules)`;
+  }
+  return `tool error: ${message.slice(0, 400)}`;
+}
+
 export async function executeTool(
   ctx: ToolContext,
   name: string,
@@ -312,173 +366,244 @@ export async function executeTool(
     runtime_base_url: ctx.runtimeBaseUrl,
   };
 
-  switch (name) {
-    case "shell": {
-      const command = String(args.command ?? "");
-      const res = await promisify<ExecResult>(
-        ctx.client.Exec.bind(ctx.client),
-        {
-          ...base,
-          command,
-          cwd: String(args.cwd ?? ctx.workDir),
-          timeoutSec: Number(args.timeout_sec ?? 120),
-          timeout_sec: Number(args.timeout_sec ?? 120),
-        },
-      );
-      const code = res.exitCode ?? res.exit_code ?? 0;
-      return {
-        content: truncate(
-          `exit=${code}\nstdout:\n${res.stdout ?? ""}\nstderr:\n${res.stderr ?? ""}`,
-        ),
-      };
-    }
-    case "read_file": {
-      const path = resolveRepoPath(ctx.workDir, String(args.path ?? ""));
-      const res = await promisify<{ content?: string }>(
-        ctx.client.ReadFile.bind(ctx.client),
-        { ...base, path },
-      );
-      return { content: truncate(res.content ?? "") };
-    }
-    case "write_file": {
-      const path = resolveRepoPath(ctx.workDir, String(args.path ?? ""));
-      const res = await promisify<{ status?: string; path?: string }>(
-        ctx.client.WriteFile.bind(ctx.client),
-        {
-          ...base,
-          path,
-          content: String(args.content ?? ""),
-        },
-      );
-      return {
-        content: `wrote ${res.path ?? path} (${res.status ?? "ok"})`,
-      };
-    }
-    case "list_dir": {
-      const path = resolveRepoPath(
-        ctx.workDir,
-        String(args.path ?? ctx.workDir),
-      );
-      const res = await promisify<{ entries?: string[] }>(
-        ctx.client.ListDir.bind(ctx.client),
-        { ...base, path },
-      );
-      return { content: truncate((res.entries ?? []).join("\n")) };
-    }
-    case "git_commit": {
-      const res = await promisify<GitResult>(
-        ctx.client.GitCommit.bind(ctx.client),
-        {
-          ...base,
-          message: String(args.message ?? ""),
-          cwd: ctx.workDir,
-          paths: Array.isArray(args.paths) ? args.paths : ["."],
-        },
-      );
-      return { content: `${res.status ?? "ok"}: ${res.message ?? ""}` };
-    }
-    case "git_push": {
-      const res = await promisify<GitResult>(
-        ctx.client.GitPush.bind(ctx.client),
-        {
-          ...base,
-          branch: String(args.branch ?? ""),
-          cwd: ctx.workDir,
-        },
-      );
-      return { content: `${res.status ?? "ok"}: ${res.message ?? ""}` };
-    }
-    case "browser_open": {
-      const res = await promisify<{ status?: string }>(
-        ctx.client.BrowserOpen.bind(ctx.client),
-        { ...base, url: String(args.url ?? "") },
-      );
-      return { content: res.status ?? "ok" };
-    }
-    case "desktop_screenshot": {
-      await promisify(ctx.client.DesktopScreenshot.bind(ctx.client), base);
-      return { content: "screenshot captured" };
-    }
-    case "save_memory": {
-      const facts = Array.isArray(args.facts)
-        ? args.facts.map(String).filter(Boolean)
-        : [];
-      if (onSaveMemory && facts.length > 0) {
-        await onSaveMemory(facts);
-      }
-      return { content: `saved ${facts.length} fact(s)` };
-    }
-    case "finish": {
-      if (ctx.requireProductImplementation) {
-        const probe = await promisify<ExecResult>(
+  try {
+    switch (name) {
+      case "shell": {
+        const command = String(args.command ?? "");
+        const res = await promisify<ExecResult>(
           ctx.client.Exec.bind(ctx.client),
           {
             ...base,
-            command: [
-              "set +e",
-              "echo '---SCAFFOLD---'",
-              "grep -RIl -E 'Scaffold ready|Scaffold is running|Implement the full app|App Router scaffold' --include='*.js' --include='*.ts' --include='*.html' --include='*.tsx' --include='*.jsx' . 2>/dev/null | head -8",
-              "echo '---STUB---'",
-              "grep -RIl -E 'Play .+ online with friends|View Leaderboard|Start Game|coming soon' --include='*.js' --include='*.ts' --include='*.tsx' --include='*.jsx' --include='*.html' . 2>/dev/null | head -8",
-              "echo '---BOARD---'",
-              "grep -RIl -E 'chessboard|Chessboard|game-board|GameBoard|grid-cols-8|squares\\.map' --include='*.js' --include='*.ts' --include='*.tsx' --include='*.jsx' --include='*.css' . 2>/dev/null | head -5",
-              "echo '---COMMITS---'",
-              "git rev-list --count HEAD 2>/dev/null || echo 0",
-            ].join("\n"),
-            cwd: ctx.workDir,
-            timeoutSec: 45,
-            timeout_sec: 45,
+            command,
+            cwd: String(args.cwd ?? ctx.workDir),
+            timeoutSec: Number(args.timeout_sec ?? 120),
+            timeout_sec: Number(args.timeout_sec ?? 120),
           },
         );
-        const out = probe.stdout ?? "";
-        const section = (start: string, end?: string): string[] => {
-          const i = out.indexOf(start);
-          if (i < 0) {
-            return [];
-          }
-          const slice = out.slice(i + start.length);
-          const j = end ? slice.indexOf(end) : -1;
-          const body = j >= 0 ? slice.slice(0, j) : slice;
-          return body
-            .split("\n")
-            .map((line) => line.trim())
-            .filter(
-              (line) =>
-                line &&
-                !line.startsWith("---") &&
-                (line.endsWith(".js") ||
-                  line.endsWith(".ts") ||
-                  line.endsWith(".tsx") ||
-                  line.endsWith(".jsx") ||
-                  line.endsWith(".html") ||
-                  line.endsWith(".css")),
-            );
+        const code = res.exitCode ?? res.exit_code ?? 0;
+        return {
+          content: truncate(
+            `exit=${code}\nstdout:\n${res.stdout ?? ""}\nstderr:\n${res.stderr ?? ""}`,
+          ),
         };
-        const leaks = section("---SCAFFOLD---", "---STUB---");
-        const stubs = section("---STUB---", "---BOARD---");
-        const boards = section("---BOARD---", "---COMMITS---");
-        if (leaks.length > 0) {
-          return {
-            content:
-              `Cannot finish yet — scaffold placeholders remain in: ${leaks.slice(0, 5).join(", ")}. ` +
-              "Replace them with the full product UI/API, make focused commits, then call finish again.",
-          };
-        }
-        if (stubs.length > 0 && boards.length === 0) {
-          return {
-            content:
-              `Cannot finish yet — marketing stub UI still present (${stubs.slice(0, 3).join(", ")}) without a real interactive product. ` +
-              "Build the actual app (e.g. playable board + moves for games), commit, then finish.",
-          };
-        }
       }
-      return {
-        content: "finished",
-        done: true,
-        summary: String(args.summary ?? "done"),
-      };
+      case "read_file": {
+        const path = resolveRepoPath(ctx.workDir, String(args.path ?? ""));
+        if (isForbiddenProjectPath(path)) {
+          return {
+            content:
+              `refused to read ${path} — do not touch dependency/build trees ` +
+              "(node_modules, .next, dist, target, __pycache__). Use project source instead.",
+          };
+        }
+        if (isWrongStackPath(ctx.stackRuntime, path)) {
+          return { content: wrongStackMessage(ctx.stackRuntime!, path) };
+        }
+        const res = await promisify<{ content?: string }>(
+          ctx.client.ReadFile.bind(ctx.client),
+          { ...base, path },
+        );
+        return { content: truncate(res.content ?? "") };
+      }
+      case "write_file": {
+        const path = resolveRepoPath(ctx.workDir, String(args.path ?? ""));
+        if (isForbiddenProjectPath(path)) {
+          return {
+            content:
+              `refused to write ${path} — never edit dependency/build trees. ` +
+              "Write project source files instead.",
+          };
+        }
+        if (isWrongStackPath(ctx.stackRuntime, path)) {
+          return { content: wrongStackMessage(ctx.stackRuntime!, path) };
+        }
+        const res = await promisify<{ status?: string; path?: string }>(
+          ctx.client.WriteFile.bind(ctx.client),
+          {
+            ...base,
+            path,
+            content: String(args.content ?? ""),
+          },
+        );
+        return {
+          content: `wrote ${res.path ?? path} (${res.status ?? "ok"})`,
+        };
+      }
+      case "list_dir": {
+        const path = resolveRepoPath(
+          ctx.workDir,
+          String(args.path ?? ctx.workDir),
+        );
+        if (isForbiddenProjectPath(path)) {
+          return {
+            content: `refused to list ${path} — stay in project source, not node_modules.`,
+          };
+        }
+        const res = await promisify<{ entries?: string[] }>(
+          ctx.client.ListDir.bind(ctx.client),
+          { ...base, path },
+        );
+        return { content: truncate((res.entries ?? []).join("\n")) };
+      }
+      case "git_commit": {
+        const res = await promisify<GitResult>(
+          ctx.client.GitCommit.bind(ctx.client),
+          {
+            ...base,
+            message: String(args.message ?? ""),
+            cwd: ctx.workDir,
+            paths: Array.isArray(args.paths) ? args.paths : ["."],
+          },
+        );
+        return { content: `${res.status ?? "ok"}: ${res.message ?? ""}` };
+      }
+      case "git_push": {
+        const res = await promisify<GitResult>(
+          ctx.client.GitPush.bind(ctx.client),
+          {
+            ...base,
+            branch: String(args.branch ?? ""),
+            cwd: ctx.workDir,
+          },
+        );
+        return { content: `${res.status ?? "ok"}: ${res.message ?? ""}` };
+      }
+      case "browser_open": {
+        const res = await promisify<{ status?: string }>(
+          ctx.client.BrowserOpen.bind(ctx.client),
+          { ...base, url: String(args.url ?? "") },
+        );
+        return { content: res.status ?? "ok" };
+      }
+      case "desktop_screenshot": {
+        await promisify(ctx.client.DesktopScreenshot.bind(ctx.client), base);
+        return { content: "screenshot captured" };
+      }
+      case "save_memory": {
+        const facts = Array.isArray(args.facts)
+          ? args.facts.map(String).filter(Boolean)
+          : [];
+        if (onSaveMemory && facts.length > 0) {
+          await onSaveMemory(facts);
+        }
+        return { content: `saved ${facts.length} fact(s)` };
+      }
+      case "finish": {
+        if (ctx.requireProductImplementation) {
+          const stack = ctx.stackRuntime;
+          const isJs =
+            stack === "nextjs" || stack === "node" || stack === undefined;
+          if (isJs) {
+            const probe = await promisify<ExecResult>(
+              ctx.client.Exec.bind(ctx.client),
+              {
+                ...base,
+                command: [
+                  "set +e",
+                  "echo '---SCAFFOLD---'",
+                  "grep -RIl -E 'Scaffold ready|Scaffold is running|Implement the full app|App Router scaffold' --include='*.js' --include='*.ts' --include='*.html' --include='*.tsx' --include='*.jsx' . 2>/dev/null | head -8",
+                  "echo '---STUB---'",
+                  "grep -RIl -E 'Play .+ online with friends|View Leaderboard|Start Game|coming soon' --include='*.js' --include='*.ts' --include='*.tsx' --include='*.jsx' --include='*.html' . 2>/dev/null | head -8",
+                  "echo '---BOARD---'",
+                  "grep -RIl -E 'chessboard|Chessboard|game-board|GameBoard|grid-cols-8|squares\\.map' --include='*.js' --include='*.ts' --include='*.tsx' --include='*.jsx' --include='*.css' . 2>/dev/null | head -5",
+                  "echo '---COMMITS---'",
+                  "git rev-list --count HEAD 2>/dev/null || echo 0",
+                ].join("\n"),
+                cwd: ctx.workDir,
+                timeoutSec: 45,
+                timeout_sec: 45,
+              },
+            );
+            const out = probe.stdout ?? "";
+            const section = (start: string, end?: string): string[] => {
+              const i = out.indexOf(start);
+              if (i < 0) {
+                return [];
+              }
+              const slice = out.slice(i + start.length);
+              const j = end ? slice.indexOf(end) : -1;
+              const body = j >= 0 ? slice.slice(0, j) : slice;
+              return body
+                .split("\n")
+                .map((line) => line.trim())
+                .filter(
+                  (line) =>
+                    line &&
+                    !line.startsWith("---") &&
+                    (line.endsWith(".js") ||
+                      line.endsWith(".ts") ||
+                      line.endsWith(".tsx") ||
+                      line.endsWith(".jsx") ||
+                      line.endsWith(".html") ||
+                      line.endsWith(".css")),
+                );
+            };
+            const leaks = section("---SCAFFOLD---", "---STUB---");
+            const stubs = section("---STUB---", "---BOARD---");
+            const boards = section("---BOARD---", "---COMMITS---");
+            if (leaks.length > 0) {
+              return {
+                content:
+                  `Cannot finish yet — scaffold placeholders remain in: ${leaks.slice(0, 5).join(", ")}. ` +
+                  "Replace them with the full product UI/API, make focused commits, then call finish again.",
+              };
+            }
+            if (stubs.length > 0 && boards.length === 0) {
+              return {
+                content:
+                  `Cannot finish yet — marketing stub UI still present (${stubs.slice(0, 3).join(", ")}) without a real interactive product. ` +
+                  "Build the actual app (e.g. playable board + moves for games), commit, then finish.",
+              };
+            }
+          } else {
+            // Non-JS stacks: only refuse finish if the thin health-only scaffold
+            // is still the only product code (entry file barely changed).
+            const entry =
+              stack === "python"
+                ? "app.py"
+                : stack === "rust"
+                  ? "src/main.rs"
+                  : "main.go";
+            const probe = await promisify<ExecResult>(
+              ctx.client.Exec.bind(ctx.client),
+              {
+                ...base,
+                command: [
+                  "set +e",
+                  `wc -l < '${entry}' 2>/dev/null || echo 0`,
+                  "git rev-list --count HEAD 2>/dev/null || echo 0",
+                ].join("\n"),
+                cwd: ctx.workDir,
+                timeoutSec: 20,
+                timeout_sec: 20,
+              },
+            );
+            const lines = (probe.stdout ?? "")
+              .trim()
+              .split("\n")
+              .map((l) => l.trim())
+              .filter(Boolean);
+            const entryLines = Number(lines[0] ?? 0);
+            if (entryLines > 0 && entryLines < 25) {
+              return {
+                content:
+                  `Cannot finish yet — ${entry} still looks like the thin scaffold (~${entryLines} lines). ` +
+                  "Implement the full product in this stack, make focused commits, then finish.",
+              };
+            }
+          }
+        }
+        return {
+          content: "finished",
+          done: true,
+          summary: String(args.summary ?? "done"),
+        };
+      }
+      default:
+        return { content: `unknown tool: ${name}` };
     }
-    default:
-      return { content: `unknown tool: ${name}` };
+  } catch (error) {
+    // Never abort the harness on a single tool failure (missing files, etc.).
+    return { content: toolErrorMessage(error) };
   }
 }

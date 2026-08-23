@@ -23,6 +23,8 @@ export type BrainHarnessOptions = {
   runtimeBaseUrl: string;
   workDir?: string;
   followUp?: boolean;
+  /** Greenfield stack so prompts/gates match the scaffold (python ≠ nextjs). */
+  stackRuntime?: "nextjs" | "node" | "go" | "rust" | "python";
   /** Greenfield: refuse finish while scaffold placeholder copy remains. */
   requireProductImplementation?: boolean;
   sessionContext?: string;

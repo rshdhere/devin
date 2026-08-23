@@ -11,6 +11,7 @@ import {
   resolveRepoPath,
   type ToolContext,
 } from "./tools.js";
+import { normalizeBrainStack } from "./stack.js";
 import type {
   BrainHarnessOptions,
   BrainHarnessResult,
@@ -107,6 +108,7 @@ export async function runBrainHarness(
     (options.followUp ? FOLLOWUP_MAX_STEPS : DEFAULT_MAX_STEPS);
   const deadline = Date.now() + (options.maxWaitMs ?? 20 * 60 * 1000);
   const workDir = options.workDir?.trim() || "repo";
+  const stackRuntime = normalizeBrainStack(options.stackRuntime);
 
   const client = createOpenAIClient(options.openaiApiKey);
   const toolsClient = createDevboxToolsClient(options.toolGatewayUrl);
@@ -116,7 +118,27 @@ export async function runBrainHarness(
     workDir,
     client: toolsClient,
     requireProductImplementation: options.requireProductImplementation,
+    stackRuntime,
   };
+
+  // Seed the real file tree so the model does not invent Next.js paths on
+  // python/rust/go scaffolds (classic failure: read app/page.tsx → abort).
+  let repoListing = "";
+  try {
+    const listed = await executeTool(
+      toolCtx,
+      "list_dir",
+      JSON.stringify({ path: "." }),
+    );
+    if (
+      listed.content &&
+      !/^tool error:|^file not found:|^refused/i.test(listed.content)
+    ) {
+      repoListing = listed.content.slice(0, 2_000);
+    }
+  } catch {
+    repoListing = "";
+  }
 
   const messages: ChatMessage[] = [
     {
@@ -125,8 +147,10 @@ export async function runBrainHarness(
         workDir,
         followUp: options.followUp,
         requireProductImplementation: options.requireProductImplementation,
+        stackRuntime,
         sessionContext: options.sessionContext,
         recalledMemory: options.recalledMemory,
+        repoListing,
       }),
     },
     { role: "user", content: options.prompt },
@@ -134,13 +158,15 @@ export async function runBrainHarness(
 
   emit({
     type: "agent.started",
-    message: `Brain harness started (model=${model}, workDir=${workDir})`,
+    message: `Brain harness started (model=${model}, workDir=${workDir}, stack=${stackRuntime ?? "auto"})`,
     data: {
       model,
       workDir,
+      stackRuntime: stackRuntime ?? null,
       followUp: Boolean(options.followUp),
       agent: "brain",
       toolGateway: options.toolGatewayUrl ?? "127.0.0.1:9095",
+      repoListing: repoListing || null,
     },
   });
   emit({

@@ -234,11 +234,10 @@ export function buildHeuristicDraftPlan(ctx: DraftPlannerContext): DraftPlan {
   const lower = ctx.prompt.toLowerCase();
   const stackRuntime = inferStackFromPrompt(ctx.prompt);
   const isNextjs = stackRuntime === "nextjs";
-  const isNode =
-    !isNextjs &&
-    ["node", "express", "typescript", "javascript", "api"].some((term) =>
-      lower.includes(term),
-    );
+  const isNode = stackRuntime === "node";
+  const isPython = stackRuntime === "python";
+  const isRust = stackRuntime === "rust";
+  const isGo = stackRuntime === "go";
 
   const files: DraftFilePlan[] = [
     {
@@ -266,6 +265,45 @@ export function buildHeuristicDraftPlan(ctx: DraftPlannerContext): DraftPlan {
         summary: "Create the main page for the requested app",
       },
     );
+  } else if (isPython) {
+    files.push(
+      {
+        path: "app.py",
+        changeType: "update",
+        summary: "Implement the Python app entry point",
+      },
+      {
+        path: "requirements.txt",
+        changeType: "update",
+        summary: "Declare Python dependencies",
+      },
+    );
+  } else if (isRust) {
+    files.push(
+      {
+        path: "Cargo.toml",
+        changeType: "update",
+        summary: "Define Cargo package metadata and dependencies",
+      },
+      {
+        path: "src/main.rs",
+        changeType: "update",
+        summary: "Implement the Rust entry point",
+      },
+    );
+  } else if (isGo) {
+    files.push(
+      {
+        path: "go.mod",
+        changeType: "update",
+        summary: "Define the Go module",
+      },
+      {
+        path: "main.go",
+        changeType: "update",
+        summary: "Implement the Go entry point",
+      },
+    );
   } else if (isNode) {
     files.push(
       {
@@ -287,7 +325,7 @@ export function buildHeuristicDraftPlan(ctx: DraftPlannerContext): DraftPlan {
     });
   }
 
-  if (lower.includes("todo")) {
+  if (lower.includes("todo") && (isNode || isNextjs)) {
     files.push({
       path: "src/routes/todos.ts",
       changeType: "create",

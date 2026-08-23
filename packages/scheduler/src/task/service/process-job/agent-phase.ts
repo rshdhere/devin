@@ -240,6 +240,7 @@ export async function runAgentPhase(
           runtimeBaseUrl: state.runtimeBaseUrl!,
           workDir: repoReadyInSandbox ? state.repoCwd : "repo",
           followUp: job.resumeSession === true,
+          stackRuntime: resolveStackRuntime(task, job),
           requireProductImplementation: state.createdNewRepo === true,
           sessionContext: job.sessionContext,
           recalledMemory: recalled || undefined,

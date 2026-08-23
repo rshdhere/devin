@@ -9,7 +9,7 @@ describe("buildSystemPrompt", () => {
       followUp: true,
     });
     expect(prompt).toContain("follow-up");
-    expect(prompt).toContain("Do NOT run bun/npm start");
+    expect(prompt).toContain("Do NOT run bun/npm/python servers");
   });
 });
 

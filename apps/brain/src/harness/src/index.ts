@@ -6,6 +6,11 @@ export {
   executeTool,
   resolveRepoPath,
 } from "./tools.js";
+export {
+  normalizeBrainStack,
+  stackEntryFiles,
+  stackGuidanceLines,
+} from "./stack.js";
 export { resolveOpenAIModel, resolveSummaryModel } from "./openai.js";
 export type {
   BrainHarnessEvent,
@@ -13,3 +18,4 @@ export type {
   BrainHarnessResult,
   ChatMessage,
 } from "./types.js";
+export type { BrainStackRuntime } from "./stack.js";
