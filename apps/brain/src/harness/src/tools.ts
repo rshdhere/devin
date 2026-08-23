@@ -416,30 +416,59 @@ export async function executeTool(
             ...base,
             command: [
               "set +e",
+              "echo '---SCAFFOLD---'",
               "grep -RIl -E 'Scaffold ready|Scaffold is running|Implement the full app|App Router scaffold' --include='*.js' --include='*.ts' --include='*.html' --include='*.tsx' --include='*.jsx' . 2>/dev/null | head -8",
+              "echo '---STUB---'",
+              "grep -RIl -E 'Play .+ online with friends|View Leaderboard|Start Game|coming soon' --include='*.js' --include='*.ts' --include='*.tsx' --include='*.jsx' --include='*.html' . 2>/dev/null | head -8",
+              "echo '---BOARD---'",
+              "grep -RIl -E 'chessboard|Chessboard|game-board|GameBoard|grid-cols-8|squares\\.map' --include='*.js' --include='*.ts' --include='*.tsx' --include='*.jsx' --include='*.css' . 2>/dev/null | head -5",
+              "echo '---COMMITS---'",
+              "git rev-list --count HEAD 2>/dev/null || echo 0",
             ].join("\n"),
             cwd: ctx.workDir,
             timeoutSec: 45,
             timeout_sec: 45,
           },
         );
-        const leaks = (probe.stdout ?? "")
-          .split("\n")
-          .map((line) => line.trim())
-          .filter(
-            (line) =>
-              line &&
-              (line.endsWith(".js") ||
-                line.endsWith(".ts") ||
-                line.endsWith(".tsx") ||
-                line.endsWith(".jsx") ||
-                line.endsWith(".html")),
-          );
+        const out = probe.stdout ?? "";
+        const section = (start: string, end?: string): string[] => {
+          const i = out.indexOf(start);
+          if (i < 0) {
+            return [];
+          }
+          const slice = out.slice(i + start.length);
+          const j = end ? slice.indexOf(end) : -1;
+          const body = j >= 0 ? slice.slice(0, j) : slice;
+          return body
+            .split("\n")
+            .map((line) => line.trim())
+            .filter(
+              (line) =>
+                line &&
+                !line.startsWith("---") &&
+                (line.endsWith(".js") ||
+                  line.endsWith(".ts") ||
+                  line.endsWith(".tsx") ||
+                  line.endsWith(".jsx") ||
+                  line.endsWith(".html") ||
+                  line.endsWith(".css")),
+            );
+        };
+        const leaks = section("---SCAFFOLD---", "---STUB---");
+        const stubs = section("---STUB---", "---BOARD---");
+        const boards = section("---BOARD---", "---COMMITS---");
         if (leaks.length > 0) {
           return {
             content:
               `Cannot finish yet — scaffold placeholders remain in: ${leaks.slice(0, 5).join(", ")}. ` +
               "Replace them with the full product UI/API, make focused commits, then call finish again.",
+          };
+        }
+        if (stubs.length > 0 && boards.length === 0) {
+          return {
+            content:
+              `Cannot finish yet — marketing stub UI still present (${stubs.slice(0, 3).join(", ")}) without a real interactive product. ` +
+              "Build the actual app (e.g. playable board + moves for games), commit, then finish.",
           };
         }
       }

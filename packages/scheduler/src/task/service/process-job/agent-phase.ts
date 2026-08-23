@@ -240,6 +240,7 @@ export async function runAgentPhase(
           requireProductImplementation: state.createdNewRepo === true,
           sessionContext: job.sessionContext,
           recalledMemory: recalled || undefined,
+          maxSteps: state.createdNewRepo ? 80 : undefined,
           maxWaitMs: resolveAgentMaxWaitMs({
             followUp: job.resumeSession === true,
           }),
@@ -596,6 +597,28 @@ async function tryRecoverAfterAgentInterruption(
       preAgentHead,
     );
     if (!recovered) {
+      return null;
+    }
+    try {
+      await assertGreenfieldAgentProgress(
+        svc,
+        state.runtime,
+        task,
+        state.repoCwd,
+        state.githubToken,
+        preAgentHead,
+      );
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Greenfield product incomplete";
+      emit(
+        svc,
+        "agent.log",
+        task.id,
+        `Interruption recovery pushed partial work but product check failed: ${message}`,
+      );
       return null;
     }
     return {

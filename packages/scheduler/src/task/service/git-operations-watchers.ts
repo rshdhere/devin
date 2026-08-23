@@ -10,6 +10,7 @@ import {
 import {
   buildPushGreenfieldMainScript,
   greenfieldCommitPlateauReason,
+  GREENFIELD_MIN_PRODUCT_COMMITS,
   GREENFIELD_PLATEAU_MIN_COMMITS,
   GREENFIELD_PLATEAU_MS,
 } from "../../greenfield/git-sync.js";
@@ -64,8 +65,6 @@ export function startGreenfieldPushWatcher(
           `base='${baseHead.replace(/'/g, "")}'`,
           'if [ -n "$base" ] && git cat-file -e "$base^{commit}" 2>/dev/null; then',
           '  commits=$(git rev-list --count "$base"..HEAD 2>/dev/null || echo 0)',
-          'elif [ -n "$head" ]; then',
-          "  commits=$(git rev-list --count HEAD 2>/dev/null || echo 0)",
           "fi",
           'echo "head=$head commits=$commits"',
         ].join("\n"),
@@ -98,8 +97,11 @@ export function startGreenfieldPushWatcher(
         }
       }
 
+      // Only plateau when we can count commits since the pre-agent HEAD.
+      // Never use total-repo history — that soft-completed stub landing pages.
       if (
         !plateauCancelRequested &&
+        Boolean(baseHead) &&
         commits >= GREENFIELD_PLATEAU_MIN_COMMITS &&
         Date.now() - lastHeadChangeAt >= GREENFIELD_PLATEAU_MS
       ) {
@@ -283,36 +285,63 @@ export async function assertGreenfieldAgentProgress(
       "head=$(git rev-parse HEAD 2>/dev/null || true)",
       "dirty=$(git status --porcelain 2>/dev/null | wc -l | tr -d ' ')",
       "new_commits=0",
+      "recovery_only=0",
       `base='${preAgentHead.replace(/'/g, "")}'`,
       'if [ -n "$base" ] && git cat-file -e "$base^{commit}" 2>/dev/null; then',
       '  new_commits=$(git rev-list --count "$base"..HEAD 2>/dev/null || echo 0)',
+      '  msgs=$(git log --format=%s "$base"..HEAD 2>/dev/null || true)',
+      '  recovery_n=$(printf "%s\\n" "$msgs" | grep -ciE "interruption recovery|checkpoint —" || true)',
+      '  if [ "$new_commits" -gt 0 ] && [ "$recovery_n" -ge "$new_commits" ]; then recovery_only=1; fi',
       "fi",
-      'echo "head=$head dirty=$dirty new_commits=$new_commits base=$base"',
+      'echo "head=$head dirty=$dirty new_commits=$new_commits recovery_only=$recovery_only base=$base"',
+      "echo '---SCAFFOLD---'",
       "grep -RIl -E 'Scaffold ready|Scaffold is running|Implement the full app|App Router scaffold' --include='*.js' --include='*.ts' --include='*.html' --include='*.tsx' --include='*.jsx' . 2>/dev/null | head -8",
+      "echo '---STUB---'",
+      "grep -RIl -E 'Play .+ online with friends|View Leaderboard|Start Game|coming soon' --include='*.js' --include='*.ts' --include='*.tsx' --include='*.jsx' --include='*.html' . 2>/dev/null | head -8",
+      "echo '---BOARD---'",
+      "grep -RIl -E 'chessboard|Chessboard|game-board|GameBoard|grid-cols-8|squares\\.map|square\\[' --include='*.js' --include='*.ts' --include='*.tsx' --include='*.jsx' --include='*.css' . 2>/dev/null | head -5",
     ].join("\n"),
   });
 
   const output = `${probe.stdout}\n${probe.stderr}`.trim();
-  const headMatch = output.match(/^head=(\S+)/m);
-  const dirtyMatch = output.match(/dirty=(\d+)/);
-  const newCommitsMatch = output.match(/new_commits=(\d+)/);
-  const head = headMatch?.[1] ?? "";
-  const dirty = Number(dirtyMatch?.[1] ?? 0);
-  const newCommits = Number(newCommitsMatch?.[1] ?? 0);
+  const head = output.match(/^head=(\S+)/m)?.[1] ?? "";
+  const dirty = Number(output.match(/dirty=(\d+)/)?.[1] ?? 0);
+  const newCommits = Number(output.match(/new_commits=(\d+)/)?.[1] ?? 0);
+  const recoveryOnly = /recovery_only=1\b/.test(output);
   const movedHead =
     Boolean(preAgentHead) && Boolean(head) && head !== preAgentHead;
-  const leakLines = output
-    .split("\n")
-    .map((line) => line.trim())
-    .filter(
-      (line) =>
-        line &&
-        !line.startsWith("head=") &&
-        (line.endsWith(".js") ||
-          line.endsWith(".ts") ||
-          line.endsWith(".tsx") ||
-          line.endsWith(".jsx") ||
-          line.endsWith(".html")),
+
+  const sectionFiles = (startMarker: string, endMarker?: string): string[] => {
+    const start = output.indexOf(startMarker);
+    if (start < 0) {
+      return [];
+    }
+    const slice = output.slice(start + startMarker.length);
+    const end = endMarker ? slice.indexOf(endMarker) : -1;
+    const body = end >= 0 ? slice.slice(0, end) : slice;
+    return body
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(
+        (line) =>
+          line &&
+          !line.startsWith("---") &&
+          !line.startsWith("head=") &&
+          (line.endsWith(".js") ||
+            line.endsWith(".ts") ||
+            line.endsWith(".tsx") ||
+            line.endsWith(".jsx") ||
+            line.endsWith(".html") ||
+            line.endsWith(".css")),
+      );
+  };
+
+  const scaffoldLeaks = sectionFiles("---SCAFFOLD---", "---STUB---");
+  const stubFiles = sectionFiles("---STUB---", "---BOARD---");
+  const boardFiles = sectionFiles("---BOARD---");
+  const wantsGameBoard =
+    /\b(chess|checkers|tic[\s-]?tac[\s-]?toe|sudoku|board game)\b/i.test(
+      task.prompt ?? "",
     );
 
   emit(svc, "agent.log", task.id, "Checking greenfield agent progress", {
@@ -321,7 +350,10 @@ export async function assertGreenfieldAgentProgress(
     dirty,
     newCommits,
     movedHead,
-    scaffoldLeakFiles: leakLines,
+    recoveryOnly,
+    scaffoldLeakFiles: scaffoldLeaks,
+    stubFiles,
+    boardFiles,
   });
 
   if (!movedHead && newCommits < 1 && dirty < 1) {
@@ -331,9 +363,33 @@ export async function assertGreenfieldAgentProgress(
     );
   }
 
-  if (leakLines.length > 0) {
+  if (recoveryOnly) {
     throw new Error(
-      `Agent left scaffold placeholders in place (${leakLines.slice(0, 3).join(", ")}). Implement the full product with multiple focused commits.`,
+      "Agent only left interruption-recovery/checkpoint commits — the product was not implemented. Continue building the full app with focused feature commits.",
+    );
+  }
+
+  if (newCommits < GREENFIELD_MIN_PRODUCT_COMMITS && dirty < 1) {
+    throw new Error(
+      `Agent produced only ${newCommits} commit(s) beyond the scaffold (need ≥${GREENFIELD_MIN_PRODUCT_COMMITS}). Implement the full product with multiple focused commits.`,
+    );
+  }
+
+  if (scaffoldLeaks.length > 0) {
+    throw new Error(
+      `Agent left scaffold placeholders in place (${scaffoldLeaks.slice(0, 3).join(", ")}). Implement the full product with multiple focused commits.`,
+    );
+  }
+
+  if (stubFiles.length > 0 && boardFiles.length === 0) {
+    throw new Error(
+      `Agent left a marketing stub UI (${stubFiles.slice(0, 3).join(", ")}) without implementing the product. Build the real interactive app, then commit.`,
+    );
+  }
+
+  if (wantsGameBoard && boardFiles.length === 0) {
+    throw new Error(
+      "Agent finished without a playable board/game UI. Implement the actual game (board + moves), not only a landing page.",
     );
   }
 }

@@ -35,7 +35,11 @@ export function isRecoverableAgentInterruption(message: string): boolean {
 
 /** Soft-complete greenfield once enough commits land and HEAD stops moving. */
 export const GREENFIELD_PLATEAU_MIN_COMMITS = 3;
-export const GREENFIELD_PLATEAU_MS = 3 * 60 * 1000;
+/** Wait longer before soft-complete so Brain can finish a real product. */
+export const GREENFIELD_PLATEAU_MS = 8 * 60 * 1000;
+
+/** Minimum commits beyond the pre-agent HEAD for greenfield to count as done. */
+export const GREENFIELD_MIN_PRODUCT_COMMITS = 3;
 
 export function greenfieldCommitPlateauReason(commits: number): string {
   return (

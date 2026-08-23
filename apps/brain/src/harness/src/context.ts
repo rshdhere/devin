@@ -21,8 +21,10 @@ export function buildSystemPrompt(input: {
   if (input.requireProductImplementation) {
     lines.push(
       "This repo starts as a thin scaffold with placeholder UI copy.",
-      "You MUST replace every 'Scaffold is running' / 'Implement the full app' placeholder with the real product.",
-      "Do not call finish while those strings still exist in source files.",
+      "You MUST replace every 'Scaffold is running' / 'Implement the full app' / App Router scaffold placeholder with the real product.",
+      "Do not ship a marketing landing page (Start Game / View Leaderboard / coming soon) without the actual interactive product.",
+      "For games (chess, etc.), implement a playable board and moves — not only a hero CTA.",
+      "Do not call finish while those stubs remain.",
       "Make at least 3 focused git_commit calls beyond the scaffold before finishing.",
     );
   }
