@@ -184,13 +184,16 @@ export async function runAgentPhase(
     task.id,
     isTemplateGreenfield
       ? "Template execution started (OpenAI scaffold)"
-      : `${task.agent} agent started`,
+      : task.agent === "brain"
+        ? "Brain harness starting on execution host"
+        : `${task.agent} agent started`,
     {
       prompt: task.prompt,
       agent: task.agent,
       repository: state.repository,
       templateGreenfield: isTemplateGreenfield,
       sessionActive: true,
+      harness: task.agent === "brain",
     },
   );
 

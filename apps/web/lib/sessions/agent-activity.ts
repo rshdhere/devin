@@ -164,17 +164,34 @@ export function humanizeToolProgressLine(
     : "";
   switch (tool) {
     case "Write":
+    case "write_file":
     case "ApplyPatch":
       return fileName ? `Edited \`${fileName}\`` : "Edited a file";
     case "Read":
+    case "read_file":
       return fileName ? `Read \`${fileName}\`` : "Read a file";
+    case "List":
+    case "list_dir":
+      return shortDetail ? `Listed \`${shortDetail}\`` : "Listed a directory";
     case "Bash":
     case "Shell":
+    case "shell":
       return shortDetail
         ? `Ran \`${shortDetail.length > 48 ? `${shortDetail.slice(0, 45)}…` : shortDetail}\``
         : "Ran a shell command";
     case "Edit":
       return fileName ? `Updated \`${fileName}\`` : "Updated a file";
+    case "Commit":
+    case "git_commit":
+      return shortDetail
+        ? `Committed · ${shortDetail.length > 48 ? `${shortDetail.slice(0, 45)}…` : shortDetail}`
+        : "Committed changes";
+    case "Push":
+    case "git_push":
+      return "Pushed branch";
+    case "Finish":
+    case "finish":
+      return shortDetail ? `Finished · ${shortDetail}` : "Finished";
     default:
       if (shortDetail) {
         return `${tool} · ${shortDetail.length > 64 ? `${shortDetail.slice(0, 61)}…` : shortDetail}`;
@@ -469,17 +486,41 @@ export function progressActivityLines(
   const seen = new Set<string>();
 
   for (const event of events) {
+    if (event.type === "agent.started") {
+      const text = event.message.trim() || "Brain harness started";
+      if (!seen.has(text)) {
+        seen.add(text);
+        lines.push({ line: text, timestamp: event.timestamp });
+      }
+      continue;
+    }
     if (event.type === "agent.tool" && event.data?.tool) {
       const tool = String(event.data.tool);
       if (isToolMetadataName(tool) || /^hook/i.test(tool)) {
         continue;
       }
       const detail =
-        typeof event.data.detail === "string" ? event.data.detail : "";
+        typeof event.data.detail === "string"
+          ? event.data.detail
+          : event.message.replace(
+              /^(Write|Read|Shell|List|Commit|Push|Finish)\s+/i,
+              "",
+            );
       const line = humanizeToolProgressLine(tool, detail);
       if (line && !seen.has(line)) {
         seen.add(line);
         lines.push({ line, timestamp: event.timestamp });
+      }
+      continue;
+    }
+    if (
+      event.type === "agent.log" &&
+      /brain harness|step \d+|Brain harness/i.test(event.message)
+    ) {
+      const text = event.message.trim();
+      if (text && !seen.has(text)) {
+        seen.add(text);
+        lines.push({ line: text, timestamp: event.timestamp });
       }
       continue;
     }
@@ -490,9 +531,16 @@ export function progressActivityLines(
         lines.push({ line: text, timestamp: event.timestamp });
       }
     }
+    if (event.type === "agent.completed") {
+      const text = "Harness finished";
+      if (!seen.has(text)) {
+        seen.add(text);
+        lines.push({ line: text, timestamp: event.timestamp });
+      }
+    }
   }
 
-  return lines.slice(-12);
+  return lines.slice(-20);
 }
 
 export function sumLineCounts(counts: Record<string, number>): number {

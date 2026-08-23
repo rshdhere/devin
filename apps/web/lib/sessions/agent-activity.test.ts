@@ -68,6 +68,39 @@ describe("progressActivityLines", () => {
       true,
     );
   });
+
+  it("humanizes Brain harness tool names", () => {
+    const lines = progressActivityLines([
+      event({
+        type: "agent.started",
+        message: "Brain harness started (model=gpt-4o-mini, workDir=repo)",
+      }),
+      event({
+        type: "agent.tool",
+        message: "Write app/page.tsx",
+        data: { tool: "Write", detail: "app/page.tsx" },
+      }),
+      event({
+        type: "agent.tool",
+        message: "Shell bun install",
+        data: { tool: "Shell", detail: "bun install" },
+      }),
+      event({
+        type: "agent.log",
+        message: "brain harness step 2/80",
+      }),
+    ]);
+    expect(
+      lines.some((entry) => entry.line.includes("Brain harness started")),
+    ).toBe(true);
+    expect(lines.some((entry) => entry.line === "Edited `page.tsx`")).toBe(
+      true,
+    );
+    expect(lines.some((entry) => entry.line.includes("bun install"))).toBe(
+      true,
+    );
+    expect(lines.some((entry) => entry.line.includes("step 2/80"))).toBe(true);
+  });
 });
 
 describe("buildConversationMessages", () => {

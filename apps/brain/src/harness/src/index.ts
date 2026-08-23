@@ -1,4 +1,4 @@
-export { runBrainHarness } from "./loop.js";
+export { runBrainHarness, toolProgressDetail } from "./loop.js";
 export { buildSystemPrompt, compactMessages } from "./context.js";
 export {
   OPENAI_TOOLS,

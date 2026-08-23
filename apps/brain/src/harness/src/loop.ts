@@ -20,6 +20,80 @@ const DEFAULT_MAX_STEPS = 40;
 const FOLLOWUP_MAX_STEPS = 20;
 const COMPACT_AFTER = 24;
 
+/** Map OpenAI tool names + args into UI-friendly progress detail. */
+export function toolProgressDetail(
+  name: string,
+  rawArgs: string,
+): { tool: string; detail: string; message: string } {
+  let args: Record<string, unknown> = {};
+  try {
+    args = JSON.parse(rawArgs || "{}") as Record<string, unknown>;
+  } catch {
+    args = {};
+  }
+
+  const path =
+    typeof args.path === "string"
+      ? args.path
+      : typeof args.file === "string"
+        ? args.file
+        : "";
+  const command = typeof args.command === "string" ? args.command : "";
+  const summary = typeof args.summary === "string" ? args.summary : "";
+  const message = typeof args.message === "string" ? args.message : "";
+
+  switch (name) {
+    case "write_file":
+      return {
+        tool: "Write",
+        detail: path || "file",
+        message: `Write ${path || "file"}`,
+      };
+    case "read_file":
+      return {
+        tool: "Read",
+        detail: path || "file",
+        message: `Read ${path || "file"}`,
+      };
+    case "list_dir":
+      return {
+        tool: "List",
+        detail: path || ".",
+        message: `List ${path || "."}`,
+      };
+    case "shell":
+      return {
+        tool: "Shell",
+        detail: command || "command",
+        message: `Shell ${command || "command"}`.slice(0, 200),
+      };
+    case "git_commit":
+      return {
+        tool: "Commit",
+        detail: message || "commit",
+        message: `Commit ${message || ""}`.slice(0, 200),
+      };
+    case "git_push":
+      return {
+        tool: "Push",
+        detail: typeof args.branch === "string" ? args.branch : "main",
+        message: "Push branch",
+      };
+    case "finish":
+      return {
+        tool: "Finish",
+        detail: summary || "done",
+        message: `Finish ${summary || "done"}`.slice(0, 200),
+      };
+    default:
+      return {
+        tool: name,
+        detail: path || command || summary || "",
+        message: `${name} ${(rawArgs || "").slice(0, 160)}`.trim(),
+      };
+  }
+}
+
 export async function runBrainHarness(
   options: BrainHarnessOptions,
 ): Promise<BrainHarnessResult> {
@@ -56,9 +130,20 @@ export async function runBrainHarness(
   ];
 
   emit({
+    type: "agent.started",
+    message: `Brain harness started (model=${model}, workDir=${workDir})`,
+    data: {
+      model,
+      workDir,
+      followUp: Boolean(options.followUp),
+      agent: "brain",
+      toolGateway: options.toolGatewayUrl ?? "127.0.0.1:9095",
+    },
+  });
+  emit({
     type: "agent.log",
-    message: `brain harness started (model=${model})`,
-    data: { model, followUp: Boolean(options.followUp) },
+    message: `brain harness loop ready (maxSteps=${maxSteps})`,
+    data: { model, followUp: Boolean(options.followUp), maxSteps },
   });
 
   let finalSummary = "";
@@ -68,12 +153,23 @@ export async function runBrainHarness(
     while (steps < maxSteps) {
       const abort = options.getAbortReason?.()?.trim();
       if (abort) {
+        emit({
+          type: "agent.failed",
+          message: abort,
+          data: { steps, aborted: true },
+        });
         return { status: "failed", message: abort, agent: "brain" };
       }
       if (Date.now() >= deadline) {
+        const message = `Brain harness timed out after ${Math.round((options.maxWaitMs ?? 0) / 1000)}s`;
+        emit({
+          type: "agent.failed",
+          message,
+          data: { steps, timedOut: true },
+        });
         return {
           status: "failed",
-          message: `Brain harness timed out after ${Math.round((options.maxWaitMs ?? 0) / 1000)}s`,
+          message,
           agent: "brain",
         };
       }
@@ -88,14 +184,25 @@ export async function runBrainHarness(
         emit({
           type: "agent.log",
           message: "compacted conversation context",
+          data: { steps },
         });
       }
 
       steps += 1;
+      emit({
+        type: "agent.log",
+        message: `brain harness step ${steps}/${maxSteps}`,
+        data: { step: steps, maxSteps, model },
+      });
+
       const turn = await runModelTurn(client, messages, model);
 
       if (turn.content?.trim()) {
-        emit({ type: "agent.output", message: turn.content.trim() });
+        emit({
+          type: "agent.output",
+          message: turn.content.trim(),
+          data: { step: steps },
+        });
       }
 
       if (turn.toolCalls.length === 0) {
@@ -108,6 +215,11 @@ export async function runBrainHarness(
             role: "user",
             content:
               "Do not stop yet. Keep implementing with tools until scaffold placeholders are gone, then call finish.",
+          });
+          emit({
+            type: "agent.log",
+            message: "nudged model to keep implementing (no tool calls yet)",
+            data: { step: steps },
           });
           continue;
         }
@@ -123,10 +235,19 @@ export async function runBrainHarness(
 
       let finished = false;
       for (const call of turn.toolCalls) {
+        const progress = toolProgressDetail(
+          call.function.name,
+          call.function.arguments,
+        );
         emit({
           type: "agent.tool",
-          message: `${call.function.name} ${call.function.arguments.slice(0, 200)}`,
-          data: { tool: call.function.name },
+          message: progress.message,
+          data: {
+            tool: progress.tool,
+            detail: progress.detail,
+            brainTool: call.function.name,
+            step: steps,
+          },
         });
 
         const result = await executeTool(
@@ -135,6 +256,17 @@ export async function runBrainHarness(
           call.function.arguments,
           options.onSaveMemory,
         );
+
+        emit({
+          type: "agent.log",
+          message: `${progress.tool} → ${result.content.slice(0, 180)}`,
+          data: {
+            tool: progress.tool,
+            brainTool: call.function.name,
+            step: steps,
+            done: Boolean(result.done),
+          },
+        });
 
         messages.push({
           role: "tool",
@@ -155,23 +287,31 @@ export async function runBrainHarness(
     }
 
     if (!finalSummary && steps >= maxSteps) {
+      const message = `Brain harness hit max steps (${maxSteps})`;
+      emit({ type: "agent.failed", message, data: { steps, maxSteps } });
       return {
         status: "failed",
-        message: `Brain harness hit max steps (${maxSteps})`,
+        message,
         agent: "brain",
       };
     }
 
+    const message = finalSummary || "Task completed";
+    emit({
+      type: "agent.completed",
+      message,
+      data: { steps, model, agent: "brain" },
+    });
     return {
       status: "completed",
-      message: finalSummary || "Task completed",
+      message,
       output: finalSummary,
       agent: "brain",
     };
   } catch (error) {
     const message =
       error instanceof Error ? error.message : "Brain harness failed";
-    emit({ type: "agent.failed", message });
+    emit({ type: "agent.failed", message, data: { steps } });
     return { status: "failed", message, agent: "brain" };
   }
 }

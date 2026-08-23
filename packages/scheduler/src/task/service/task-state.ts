@@ -73,21 +73,40 @@ export function emit(
   message: string,
   data?: Record<string, unknown>,
 ): void {
+  // Publish to the in-memory bus immediately so SSE / worker history reflect
+  // Brain harness tool steps without waiting on Postgres append.
+  const memorySequence = nextEventSequence(svc, taskId);
+  const event: TaskEvent = {
+    id: crypto.randomUUID(),
+    taskId,
+    type,
+    message,
+    timestamp: new Date().toISOString(),
+    data: {
+      source: "scheduler",
+      sequence: memorySequence,
+      ...(data ?? {}),
+    },
+  };
+  svc.eventBus.publish(event);
+
   void (async () => {
-    const sequence = await nextEventSequenceFromStore(svc, taskId);
-    const event: TaskEvent = {
-      id: crypto.randomUUID(),
-      taskId,
-      type,
-      message,
-      timestamp: new Date().toISOString(),
-      data: {
-        source: "scheduler",
-        sequence,
-        ...(data ?? {}),
-      },
-    };
-    publishEvent(svc, event, sequence);
+    if (!svc.taskStore.isEnabled()) {
+      return;
+    }
+    try {
+      const sequence = await nextEventSequenceFromStore(svc, taskId);
+      const durable: TaskEvent = {
+        ...event,
+        data: {
+          ...event.data,
+          sequence,
+        },
+      };
+      await svc.taskStore.appendEvent(durable, sequence);
+    } catch {
+      // best-effort persistence
+    }
   })();
 }
 

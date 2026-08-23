@@ -1,5 +1,11 @@
 export type BrainHarnessEvent = {
-  type: "agent.log" | "agent.tool" | "agent.output" | "agent.failed";
+  type:
+    | "agent.started"
+    | "agent.log"
+    | "agent.tool"
+    | "agent.output"
+    | "agent.completed"
+    | "agent.failed";
   message: string;
   data?: Record<string, unknown>;
 };
