@@ -539,7 +539,16 @@ export function progressActivityLines(
     }
     if (
       event.type === "agent.log" &&
-      /brain harness|step \d+|Brain harness/i.test(event.message)
+      /brain harness step \d+\/\d+|brain harness loop ready/i.test(
+        event.message,
+      )
+    ) {
+      // Heartbeats — never clutter Progress (tools/outputs cover real work).
+      continue;
+    }
+    if (
+      event.type === "agent.log" &&
+      /compacted conversation|nudged model/i.test(event.message)
     ) {
       const text = event.message.trim();
       if (text && !seen.has(text)) {

@@ -244,7 +244,7 @@ export async function runAgentPhase(
           requireProductImplementation: state.createdNewRepo === true,
           sessionContext: job.sessionContext,
           recalledMemory: recalled || undefined,
-          maxSteps: state.createdNewRepo ? 80 : undefined,
+          maxSteps: state.createdNewRepo ? 120 : undefined,
           maxWaitMs: resolveAgentMaxWaitMs({
             followUp: job.resumeSession === true,
           }),

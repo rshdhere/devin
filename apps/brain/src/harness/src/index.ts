@@ -4,6 +4,8 @@ export {
   OPENAI_TOOLS,
   createDevboxToolsClient,
   executeTool,
+  ensureBotCommitMessage,
+  resolveBotCommitAuthor,
   resolveRepoPath,
 } from "./tools.js";
 export {

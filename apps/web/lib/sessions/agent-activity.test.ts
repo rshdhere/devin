@@ -89,6 +89,14 @@ describe("progressActivityLines", () => {
         type: "agent.log",
         message: "brain harness step 2/80",
       }),
+      event({
+        type: "agent.log",
+        message: "brain harness loop ready (maxSteps=80)",
+      }),
+      event({
+        type: "agent.log",
+        message: "nudged model to keep implementing (no tool calls yet)",
+      }),
     ]);
     expect(
       lines.some((entry) => entry.line.includes("Brain harness started")),
@@ -99,7 +107,13 @@ describe("progressActivityLines", () => {
     expect(lines.some((entry) => entry.line.includes("bun install"))).toBe(
       true,
     );
-    expect(lines.some((entry) => entry.line.includes("step 2/80"))).toBe(true);
+    expect(lines.some((entry) => entry.line.includes("step 2/80"))).toBe(false);
+    expect(lines.some((entry) => entry.line.includes("loop ready"))).toBe(
+      false,
+    );
+    expect(lines.some((entry) => entry.line.includes("nudged model"))).toBe(
+      true,
+    );
   });
 });
 

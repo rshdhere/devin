@@ -73,6 +73,69 @@ function truncate(value: string, max = MAX_OUTPUT_CHARS): string {
   return `${trimmed.slice(0, max)}\n… (truncated; narrow your command)`;
 }
 
+const FORBIDDEN_COAUTHOR =
+  /co-authored-by:\s*.*(cursor|claude|anthropic|openai|codex|copilot|gemini)/i;
+
+export function resolveBotCommitAuthor(): { name: string; email: string } {
+  const name = process.env.GITHUB_BOT_NAME?.trim() || "baby-devin-bot";
+  const email =
+    process.env.GITHUB_BOT_EMAIL?.trim() ||
+    "baby-devin-bot@users.noreply.github.com";
+  return { name, email };
+}
+
+/**
+ * Ensure every Brain git_commit includes baby-devin-bot and drops vendor AI
+ * co-authors the model may have invented.
+ */
+export function ensureBotCommitMessage(raw: string): string {
+  const bot = resolveBotCommitAuthor();
+  const trailer = `Co-authored-by: ${bot.name} <${bot.email}>`;
+  const trimmed = raw.trim() || "devin: agent changes";
+  const parts = trimmed.split(/\n\n+/);
+  const subject = (parts[0] ?? "devin: agent changes")
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line && !FORBIDDEN_COAUTHOR.test(line))
+    .join("\n")
+    .trim();
+  const bodyLines = parts
+    .slice(1)
+    .join("\n\n")
+    .split("\n")
+    .map((line) => line.trimEnd())
+    .filter((line) => {
+      const t = line.trim();
+      if (!t) {
+        return true;
+      }
+      if (FORBIDDEN_COAUTHOR.test(t)) {
+        return false;
+      }
+      // Drop duplicate baby-devin-bot trailers; we re-append once below.
+      if (/^co-authored-by:\s*baby-devin-bot\b/i.test(t)) {
+        return false;
+      }
+      if (
+        new RegExp(
+          `^co-authored-by:\\s*${bot.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`,
+          "i",
+        ).test(t)
+      ) {
+        return false;
+      }
+      return true;
+    });
+  while (
+    bodyLines.length > 0 &&
+    bodyLines[bodyLines.length - 1]?.trim() === ""
+  ) {
+    bodyLines.pop();
+  }
+  const body = [...bodyLines, trailer].join("\n").trim();
+  return `${subject}\n\n${body}`;
+}
+
 /**
  * File tools resolve against the guest /workspace root. Models usually pass
  * repo-relative paths (app/page.tsx); prefix with workDir so they land in
@@ -450,7 +513,7 @@ export async function executeTool(
           ctx.client.GitCommit.bind(ctx.client),
           {
             ...base,
-            message: String(args.message ?? ""),
+            message: ensureBotCommitMessage(String(args.message ?? "")),
             cwd: ctx.workDir,
             paths: Array.isArray(args.paths) ? args.paths : ["."],
           },

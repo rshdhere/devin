@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import { toolProgressDetail } from "./loop.js";
-import { resolveRepoPath } from "./tools.js";
+import { ensureBotCommitMessage, resolveRepoPath } from "./tools.js";
 
 describe("resolveRepoPath", () => {
   it("prefixes repo-relative paths with workDir", () => {
@@ -27,6 +27,37 @@ describe("resolveRepoPath", () => {
   it("defaults empty path to workDir", () => {
     expect(resolveRepoPath("repo", "")).toBe("repo");
     expect(resolveRepoPath("repo", ".")).toBe("repo");
+  });
+});
+
+describe("ensureBotCommitMessage", () => {
+  it("appends baby-devin-bot trailer to subject-only messages", () => {
+    const msg = ensureBotCommitMessage(
+      "fix(deps): update futures-util to stabilize dependencies",
+    );
+    expect(msg).toContain(
+      "fix(deps): update futures-util to stabilize dependencies",
+    );
+    expect(msg).toContain(
+      "Co-authored-by: baby-devin-bot <baby-devin-bot@users.noreply.github.com>",
+    );
+    expect(msg.split("Co-authored-by: baby-devin-bot").length - 1).toBe(1);
+  });
+
+  it("does not duplicate an existing baby-devin-bot trailer", () => {
+    const msg = ensureBotCommitMessage(
+      "feat: add room\n\nCo-authored-by: baby-devin-bot <baby-devin-bot@users.noreply.github.com>",
+    );
+    expect(msg.split("Co-authored-by: baby-devin-bot").length - 1).toBe(1);
+  });
+
+  it("strips Cursor/Claude co-authors", () => {
+    const msg = ensureBotCommitMessage(
+      "feat: board\n\nCo-authored-by: Cursor Agent <cursoragent@cursor.com>\nCo-authored-by: Claude <noreply@anthropic.com>",
+    );
+    expect(msg).not.toMatch(/Cursor Agent/i);
+    expect(msg).not.toMatch(/Claude/i);
+    expect(msg).toContain("Co-authored-by: baby-devin-bot");
   });
 });
 
