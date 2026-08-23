@@ -327,11 +327,11 @@ export async function assertGreenfieldAgentProgress(
   if (!movedHead && newCommits < 1 && dirty < 1) {
     throw new Error(
       "Agent finished without product commits — scaffold was left unchanged. " +
-        "The cursor agent must edit files and commit (CLI missing, sandbox, or no-op run).",
+        "The agent must edit files and commit (CLI missing, sandbox, or no-op run).",
     );
   }
 
-  if (leakLines.length > 0 && newCommits < 2 && dirty < 1) {
+  if (leakLines.length > 0) {
     throw new Error(
       `Agent left scaffold placeholders in place (${leakLines.slice(0, 3).join(", ")}). Implement the full product with multiple focused commits.`,
     );

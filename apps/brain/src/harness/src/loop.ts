@@ -38,6 +38,7 @@ export async function runBrainHarness(
     runtimeBaseUrl: options.runtimeBaseUrl,
     workDir,
     client: toolsClient,
+    requireProductImplementation: options.requireProductImplementation,
   };
 
   const messages: ChatMessage[] = [
@@ -46,6 +47,7 @@ export async function runBrainHarness(
       content: buildSystemPrompt({
         workDir,
         followUp: options.followUp,
+        requireProductImplementation: options.requireProductImplementation,
         sessionContext: options.sessionContext,
         recalledMemory: options.recalledMemory,
       }),
@@ -97,6 +99,18 @@ export async function runBrainHarness(
       }
 
       if (turn.toolCalls.length === 0) {
+        if (options.requireProductImplementation) {
+          messages.push({
+            role: "assistant",
+            content: turn.content,
+          });
+          messages.push({
+            role: "user",
+            content:
+              "Do not stop yet. Keep implementing with tools until scaffold placeholders are gone, then call finish.",
+          });
+          continue;
+        }
         finalSummary = turn.content?.trim() || "Task completed";
         break;
       }

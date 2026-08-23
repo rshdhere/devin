@@ -28,7 +28,7 @@ const PROMPT_RULES: Array<{ runtime: StackRuntime; pattern: RegExp }> = [
   {
     runtime: "nextjs",
     pattern:
-      /\b(next\.?js|nextjs|create-next-app|turbopack|app router|react server components)\b/i,
+      /\b(next[\s._-]*js|nextjs|create-next-app|turbopack|app router|react server components)\b/i,
   },
   {
     runtime: "rust",

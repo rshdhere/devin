@@ -6,6 +6,16 @@ describe("inferStackFromPrompt", () => {
     expect(inferStackFromPrompt("Build a Next.js auth app")).toBe("nextjs");
   });
 
+  test("detects Next.js with spaced next js", () => {
+    expect(inferStackFromPrompt("make me a chess-app using next js")).toBe(
+      "nextjs",
+    );
+  });
+
+  test("detects Next.js with next-js kebab", () => {
+    expect(inferStackFromPrompt("chess app in next-js")).toBe("nextjs");
+  });
+
   test("detects Go", () => {
     expect(inferStackFromPrompt("make a go api with gin")).toBe("go");
   });

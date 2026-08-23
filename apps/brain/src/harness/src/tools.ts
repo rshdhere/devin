@@ -123,6 +123,7 @@ export type ToolContext = {
   runtimeBaseUrl: string;
   workDir: string;
   client: DevboxToolsClient;
+  requireProductImplementation?: boolean;
 };
 
 export const OPENAI_TOOLS = [
@@ -369,6 +370,40 @@ export async function executeTool(
       return { content: `saved ${facts.length} fact(s)` };
     }
     case "finish": {
+      if (ctx.requireProductImplementation) {
+        const probe = await promisify<ExecResult>(
+          ctx.client.Exec.bind(ctx.client),
+          {
+            ...base,
+            command: [
+              "set +e",
+              "grep -RIl -E 'Scaffold ready|Scaffold is running|Implement the full app' --include='*.js' --include='*.ts' --include='*.html' --include='*.tsx' --include='*.jsx' . 2>/dev/null | head -8",
+            ].join("\n"),
+            cwd: ctx.workDir,
+            timeoutSec: 45,
+            timeout_sec: 45,
+          },
+        );
+        const leaks = (probe.stdout ?? "")
+          .split("\n")
+          .map((line) => line.trim())
+          .filter(
+            (line) =>
+              line &&
+              (line.endsWith(".js") ||
+                line.endsWith(".ts") ||
+                line.endsWith(".tsx") ||
+                line.endsWith(".jsx") ||
+                line.endsWith(".html")),
+          );
+        if (leaks.length > 0) {
+          return {
+            content:
+              `Cannot finish yet — scaffold placeholders remain in: ${leaks.slice(0, 5).join(", ")}. ` +
+              "Replace them with the full product UI/API, make focused commits, then call finish again.",
+          };
+        }
+      }
       return {
         content: "finished",
         done: true,

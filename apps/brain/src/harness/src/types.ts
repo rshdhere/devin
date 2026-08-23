@@ -17,6 +17,8 @@ export type BrainHarnessOptions = {
   runtimeBaseUrl: string;
   workDir?: string;
   followUp?: boolean;
+  /** Greenfield: refuse finish while scaffold placeholder copy remains. */
+  requireProductImplementation?: boolean;
   sessionContext?: string;
   recalledMemory?: string;
   maxSteps?: number;

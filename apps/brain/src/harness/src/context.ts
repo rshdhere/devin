@@ -3,6 +3,7 @@ import type { ChatMessage } from "./types.js";
 export function buildSystemPrompt(input: {
   workDir: string;
   followUp?: boolean;
+  requireProductImplementation?: boolean;
   sessionContext?: string;
   recalledMemory?: string;
 }): string {
@@ -15,6 +16,15 @@ export function buildSystemPrompt(input: {
     "When the user request is satisfied, call finish with a short summary.",
     "Make focused commits with git_commit when you change code.",
   ];
+
+  if (input.requireProductImplementation) {
+    lines.push(
+      "This repo starts as a thin scaffold with placeholder UI copy.",
+      "You MUST replace every 'Scaffold is running' / 'Implement the full app' placeholder with the real product.",
+      "Do not call finish while those strings still exist in source files.",
+      "Make at least 3 focused git_commit calls beyond the scaffold before finishing.",
+    );
+  }
 
   if (input.followUp) {
     lines.push(
