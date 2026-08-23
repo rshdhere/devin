@@ -86,7 +86,7 @@ export const createTaskSchema = z.object({
   testCommand: z.string().min(1).max(500).optional(),
   issueTitle: z.string().min(1).max(200).optional(),
   issueBody: z.string().max(8000).optional(),
-  agentModel: z.enum(["auto"]).optional(),
+  agentModel: z.enum(["auto", "gpt-4o-mini", "gpt-4.1-mini"]).optional(),
 });
 
 export type DashboardSettingsUpdate = z.infer<
