@@ -19,13 +19,13 @@ docker build -f docker/tool-gateway/Dockerfile -t devin-tool-gateway:latest .
 docker run --rm --network host -e TOOL_GATEWAY_GRPC_ADDR=:9095 devin-tool-gateway:latest
 ```
 
-Proto source: `apps/brain/src/proto/devbox/v1/tools.proto`
+Proto source: `apps/brain/src/harness/proto/devbox/v1/tools.proto`
 
 Regenerate:
 
 ```bash
-protoc -I apps/brain/src/proto \
+protoc -I apps/brain/src/harness/proto \
   --go_out=apps/tool-gateway/gen --go_opt=paths=source_relative \
   --go-grpc_out=apps/tool-gateway/gen --go-grpc_opt=paths=source_relative \
-  apps/brain/src/proto/devbox/v1/tools.proto
+  apps/brain/src/harness/proto/devbox/v1/tools.proto
 ```

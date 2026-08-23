@@ -8,7 +8,7 @@ In Devin’s architecture, the brain is the cloud service that drives intelligen
 
 ```text
 Web UI → API server → Brain (:9092)
-                         │  src/harness (OpenAI) + src/proto (gRPC IDL)
+                         │  src/harness (OpenAI + DevboxTools proto)
                          ↓ POST /internal/v1/jobs
                     Scheduler worker (execution host)
                          ↓ tool-gateway gRPC (:9095) → runtime HTTP
@@ -17,7 +17,7 @@ Web UI → API server → Brain (:9092)
 
 - Accepts task create / retry / continue / terminate / wake
 - Persists tasks, events, and sessions when `DATABASE_URL` is set
-- Runs the Brain harness under `src/harness` (tools via `src/proto/devbox/v1`)
+- Runs the Brain harness under `src/harness` (tools via `src/harness/proto/devbox/v1`)
 - Delegates sandbox provision via `EXECUTION_WORKER_URL`
 - Runs `@devin/scheduler` with `mode: "brain"`
 

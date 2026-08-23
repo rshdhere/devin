@@ -5,7 +5,7 @@ import * as protoLoader from "@grpc/proto-loader";
 
 const PROTO_PATH = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
-  "../../proto/devbox/v1/tools.proto",
+  "../proto/devbox/v1/tools.proto",
 );
 
 const MAX_OUTPUT_CHARS = 8_000;
