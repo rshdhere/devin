@@ -5,6 +5,7 @@ import { deleteSandbox } from "../sandbox-lifecycle.js";
 import { emergencyPushAgentWork } from "../greenfield-provision-2.js";
 import { isGuestFilesystemCorrupt } from "../guest-fs-corrupt.js";
 import { emit, updateTask } from "../task-state.js";
+import { reapOrphanRunningTasks } from "../session-lifecycle.js";
 import { runAgentPhase } from "./agent-phase.js";
 import { runSandboxSetupPhase } from "./sandbox-phase.js";
 import type { ProcessJobState } from "./state.js";
@@ -43,7 +44,15 @@ export async function processJob(
   }
 
   if (task.status === "running") {
-    return;
+    if (svc.processingTasks.has(job.taskId)) {
+      return;
+    }
+    // Worker may have died mid-run; reclaim before dropping this job.
+    await reapOrphanRunningTasks(svc);
+    task = svc.tasks.get(job.taskId) ?? task;
+    if (task.status === "running") {
+      return;
+    }
   }
 
   // A runtime owns one agent run per task. Allowing follow-ups through this

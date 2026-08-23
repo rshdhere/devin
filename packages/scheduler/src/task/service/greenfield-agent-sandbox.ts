@@ -123,103 +123,19 @@ export async function ensureBashInSandbox(
 }
 
 /**
- * Guests sometimes boot from snapshots where `agent` is missing or off PATH.
- * Prefer locating a baked-in binary. Online install is a short fallback — the
- * installer often succeeds while a naive `test -x /root/...` check still fails
- * (HOME mismatch, progress bars on stderr, --version quirks).
+ * @deprecated In-guest Cursor Agent CLI is retired. Intelligence runs on
+ * apps/brain over gRPC DevboxTools. Kept as a no-op for transitional imports.
  */
-
 export async function ensureCursorAgentInSandbox(
   svc: TaskService,
-  runtime: RuntimeClient,
+  _runtime: RuntimeClient,
   taskId: string,
 ): Promise<void> {
-  const located = await findCursorAgentBinary(svc, runtime, taskId);
-  if (located) {
-    emit(svc, "agent.log", taskId, "cursor agent CLI ready in sandbox", {
-      detail: located.slice(0, 240),
-    });
-    await linkCursorAgentBinary(svc, runtime, taskId, located);
-    return;
-  }
-
-  const installHost = await probeSandboxHttps(
-    svc,
-    runtime,
-    taskId,
-    "https://cursor.com/",
-  );
-  if (!installHost.ok) {
-    throw new Error(
-      "cursor agent CLI is missing from the agent Firecracker snapshot, and the sandbox cannot reach cursor.com to install it" +
-        ` (${installHost.detail}). Rebuild the agent snapshot on the execution host` +
-        " (devin-infra rebuild-agent-snapshot <instance-id>).",
-    );
-  }
-
   emit(
     svc,
     "agent.log",
     taskId,
-    "cursor agent CLI missing — attempting short online install",
-    {
-      cursorCom: installHost.detail,
-    },
-  );
-
-  // Official installer. Do not use `set -e` across the pipe — curl progress
-  // noise on stderr previously masked a successful install, and HOME may not
-  // be /root inside the guest.
-  const install = await runtime.terminalAllowFailure({
-    taskId,
-    env: gitRuntimeEnv(svc),
-    command: [
-      "set +e",
-      shellPrepareWritableHome(),
-      'export PATH="/usr/local/bin:/root/.local/bin:$HOME/.local/bin:/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin:$PATH"',
-      "curl https://cursor.com/install -fsS | bash",
-      "ec=$?",
-      'echo "cursor_install_exit=$ec home=$HOME"',
-      'ls -la /usr/local/bin/agent /root/.local/bin/agent "$HOME/.local/bin/agent" 2>&1 | head -20',
-      "ls -la /root/.local/share/cursor-agent/versions 2>&1 | tail -5",
-      'ls -la "$HOME/.local/share/cursor-agent/versions" 2>&1 | tail -5',
-      "exit 0",
-    ].join("\n"),
-  });
-
-  const afterInstall = await findCursorAgentBinary(svc, runtime, taskId);
-  if (afterInstall) {
-    await linkCursorAgentBinary(svc, runtime, taskId, afterInstall);
-    emit(svc, "agent.log", taskId, "cursor agent CLI installed in sandbox", {
-      detail: afterInstall.slice(0, 240),
-      installLog: (install.stdout || "").trim().slice(0, 300),
-    });
-    return;
-  }
-
-  const stdout = (install.stdout || "").trim();
-  const stderr = (install.stderr || "").trim();
-  // Prefer installer text over curl progress-bar spam on stderr.
-  const detail =
-    stdout
-      .split("\n")
-      .filter((line) => !/^#/.test(line.trim()) && !/^\s*[\d.]+%$/.test(line))
-      .join("\n")
-      .trim()
-      .slice(0, 500) ||
-    stderr
-      .split("\n")
-      .filter((line) => !line.includes("#") && !/\d+\.\d+%/.test(line))
-      .join("\n")
-      .trim()
-      .slice(0, 400) ||
-    "agent binary not found after install";
-
-  throw new Error(
-    "cursor agent CLI is not available in the sandbox after install" +
-      (detail ? `: ${detail}` : "") +
-      ". Rebuild the agent Firecracker snapshot" +
-      " (devin-infra rebuild-agent-snapshot <instance-id>).",
+    "cursor agent CLI skipped — Brain harness owns intelligence",
   );
 }
 

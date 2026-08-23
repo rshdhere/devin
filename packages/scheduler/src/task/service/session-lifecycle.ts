@@ -26,6 +26,10 @@ import {
   persistTaskContextMemory,
   resolveSessionRetentionMs,
 } from "../../context/session-context.js";
+import { resolveAgentMaxWaitMs } from "./config.js";
+
+/** Grace period past agent max-wait before reclaiming an orphaned running task. */
+export const ORPHAN_RUNNING_BUFFER_MS = 5 * 60 * 1000;
 
 export async function continueTask(
   svc: TaskService,
@@ -407,6 +411,8 @@ export function startIdleWatchdog(svc: TaskService): void {
 }
 
 export async function runIdleWatchdog(svc: TaskService): Promise<void> {
+  await reapOrphanRunningTasks(svc);
+
   const cutoff = Date.now() - svc.idleTimeoutMs;
   for (const [taskId, session] of svc.activeSessions) {
     const persisted = await svc.taskStore.getSession(taskId);
@@ -424,6 +430,57 @@ export async function runIdleWatchdog(svc: TaskService): Promise<void> {
   } catch {
     // Retention prune is best-effort.
   }
+}
+
+/**
+ * Reclaim tasks left in `running` after a worker crash or lost runAndWait.
+ * Live workers keep the task in processingTasks; those are left alone.
+ */
+export async function reapOrphanRunningTasks(
+  svc: TaskService,
+): Promise<number> {
+  const maxAgeMs = resolveAgentMaxWaitMs() + ORPHAN_RUNNING_BUFFER_MS;
+  const now = Date.now();
+  let reaped = 0;
+
+  for (const task of svc.tasks.values()) {
+    if (task.status !== "running") {
+      continue;
+    }
+    if (svc.processingTasks.has(task.id)) {
+      continue;
+    }
+
+    const updated = Date.parse(task.updatedAt);
+    if (!Number.isFinite(updated) || now - updated < maxAgeMs) {
+      continue;
+    }
+
+    const ageMin = Math.round((now - updated) / 60_000);
+    const message =
+      `Agent run orphaned after ${ageMin}m with no active worker — ` +
+      "likely a hung smoke curl/start or crashed control plane. Send a follow-up to continue.";
+
+    const session =
+      svc.activeSessions.get(task.id) ?? svc.reviewSessions.get(task.id);
+    if (session?.runtime) {
+      try {
+        await session.runtime.cancelRun(task.id, message);
+      } catch {
+        // Best-effort cancel in the guest.
+      }
+    }
+
+    updateTask(svc, task.id, "failed", message);
+    svc.processingTasks.delete(task.id);
+    emit(svc, "task.failed", task.id, message, {
+      orphanRunning: true,
+      ageMinutes: ageMin,
+    });
+    reaped += 1;
+  }
+
+  return reaped;
 }
 
 export async function sleepIdleSession(

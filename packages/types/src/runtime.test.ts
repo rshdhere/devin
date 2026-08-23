@@ -36,19 +36,19 @@ describe("inferStackFromPrompt", () => {
 });
 
 describe("resolveRuntimeForTask", () => {
-  test("cursor uses the prompt stack snapshot", () => {
-    expect(resolveRuntimeForTask("cursor", "python django app")).toBe("python");
+  test("brain uses the prompt stack snapshot", () => {
+    expect(resolveRuntimeForTask("brain", "python django app")).toBe("python");
   });
 
-  test("claude uses the prompt stack snapshot", () => {
-    expect(resolveRuntimeForTask("claude", "build a rust cli with cargo")).toBe(
+  test("brain uses rust stack from prompt", () => {
+    expect(resolveRuntimeForTask("brain", "build a rust cli with cargo")).toBe(
       "rust",
     );
   });
 
   test("explicit runtime overrides prompt inference", () => {
     expect(
-      resolveRuntimeForTask("cursor", "make a chess app using nextjs", "node"),
+      resolveRuntimeForTask("brain", "make a chess app using nextjs", "node"),
     ).toBe("node");
   });
 

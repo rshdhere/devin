@@ -85,7 +85,7 @@ function buildPlannerUserPrompt(ctx: DraftPlannerContext): string {
 
   return [
     repoLine,
-    `Agent runtime: ${ctx.agent ?? "cursor"}`,
+    `Agent runtime: ${ctx.agent ?? "brain"}`,
     ctx.hasTestCommand ? "Tests will run after implementation." : "",
     "",
     "User request:",

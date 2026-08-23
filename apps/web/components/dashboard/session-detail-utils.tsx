@@ -14,6 +14,19 @@ import {
 } from "lucide-react";
 import type { TaskEvent } from "@devin/types";
 
+function isWorkTimerTerminalEvent(event: TaskEvent): boolean {
+  if (event.type === "task.completed" || event.type === "task.failed") {
+    return true;
+  }
+  if (event.type !== "task.phase_changed") {
+    return false;
+  }
+  return (
+    event.data?.awaitingReview === true ||
+    event.data?.phase === "awaiting_review"
+  );
+}
+
 export function formatElapsedTime(
   startTime: string,
   isActive = false,
@@ -23,7 +36,6 @@ export function formatElapsedTime(
   const orderedEvents = [...events].sort(
     (a, b) => Date.parse(a.timestamp) - Date.parse(b.timestamp),
   );
-  const terminalTypes = new Set(["task.completed", "task.failed"]);
   let activeStart: number | null = null;
   let elapsedMs = 0;
 
@@ -34,7 +46,7 @@ export function formatElapsedTime(
     }
     if (event.type === "execution.started") {
       activeStart ??= timestamp;
-    } else if (terminalTypes.has(event.type) && activeStart !== null) {
+    } else if (isWorkTimerTerminalEvent(event) && activeStart !== null) {
       elapsedMs += Math.max(0, timestamp - activeStart);
       activeStart = null;
     }
@@ -44,7 +56,7 @@ export function formatElapsedTime(
     elapsedMs += Math.max(0, Date.now() - activeStart);
   } else if (elapsedMs === 0) {
     const terminal = orderedEvents.find((event) =>
-      terminalTypes.has(event.type),
+      isWorkTimerTerminalEvent(event),
     );
     const end = terminal ? Date.parse(terminal.timestamp) : Date.now();
     elapsedMs = Math.max(0, end - fallbackStart);

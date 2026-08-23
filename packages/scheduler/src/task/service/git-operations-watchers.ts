@@ -1,6 +1,6 @@
 import { RuntimeClient } from "@devin/agent-sdk";
 import type { TaskEventType } from "@devin/events";
-import { resolveCursorAgentModel } from "@devin/types";
+import { resolveBrainAgentModel } from "@devin/types";
 import {
   createGitHubIssue,
   createGitHubPullRequest,
@@ -406,8 +406,6 @@ export function runtimeSecrets(
 ): Record<string, string> {
   const secrets: Record<string, string> = {};
   for (const key of [
-    "CURSOR_API_KEY",
-    "ANTHROPIC_API_KEY",
     "VERCEL_TOKEN",
     "VERCEL_ORG_ID",
     "VERCEL_PROJECT_ID",
@@ -422,17 +420,16 @@ export function runtimeSecrets(
   );
   secrets.AGENT_RUN_TIMEOUT_MIN = agentTimeout;
   if (options?.followUp) {
-    // Tighter idle stall so hung curl/start loops don't sit for 15m+.
     secrets.AGENT_IDLE_STALL_MIN =
       process.env.AGENT_FOLLOWUP_IDLE_STALL_MIN?.trim() || "2";
     secrets.AGENT_SHELL_HANG_MIN =
       process.env.AGENT_FOLLOWUP_SHELL_HANG_MIN?.trim() || "4";
   }
-  const resolvedAgent = agent ?? "cursor";
-  if (resolvedAgent === "cursor") {
-    secrets.AGENT_MODEL = resolveCursorAgentModel(
+  const resolvedAgent = agent ?? "brain";
+  if (resolvedAgent === "brain") {
+    secrets.AGENT_MODEL = resolveBrainAgentModel(
       agentModel,
-      process.env.AGENT_MODEL,
+      process.env.OPENAI_MODEL ?? process.env.AGENT_MODEL,
     );
   } else if (process.env.AGENT_MODEL?.trim()) {
     secrets.AGENT_MODEL = process.env.AGENT_MODEL.trim();

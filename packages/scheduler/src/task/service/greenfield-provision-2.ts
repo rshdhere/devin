@@ -174,32 +174,24 @@ export async function ensureSandboxConnectivity(
       await sleep(2_000);
     }
 
-    const dnsCheck = await probeSandboxDns(
+    const dnsCheck = await probeSandboxDns(svc, runtime, taskId, "github.com");
+    const githubHttps = await probeSandboxHttps(
       svc,
       runtime,
       taskId,
-      "api2.cursor.sh",
+      "https://github.com/",
     );
-    const cursorCheck = await probeSandboxHttps(
+    const npmCheck = await probeSandboxHttps(
       svc,
       runtime,
       taskId,
-      "https://api2.cursor.sh/",
-    );
-    const installCheck = await probeSandboxHttps(
-      svc,
-      runtime,
-      taskId,
-      "https://cursor.com/",
+      "https://registry.npmjs.org/",
     );
 
-    if (dnsCheck.ok && cursorCheck.ok) {
+    if (dnsCheck.ok && githubHttps.ok) {
       emit(svc, "agent.log", taskId, "Sandbox outbound connectivity verified", {
-        cursorApi: cursorCheck.detail,
-        cursorCom: installCheck.ok
-          ? installCheck.detail
-          : `unreachable (${installCheck.detail})`,
-        githubPending: true,
+        github: githubHttps.detail,
+        npm: npmCheck.ok ? npmCheck.detail : `unreachable (${npmCheck.detail})`,
       });
       break;
     }
@@ -211,26 +203,26 @@ export async function ensureSandboxConnectivity(
       `Sandbox egress probe attempt ${attempt + 1}/3`,
       {
         dns: dnsCheck,
-        cursor: cursorCheck,
-        cursorCom: installCheck,
+        github: githubHttps,
+        npm: npmCheck,
         attempt: attempt + 1,
       },
     );
 
     if (attempt === 2) {
-      const combined = `${dnsCheck.detail} ${cursorCheck.detail} ${installCheck.detail}`;
+      const combined = `${dnsCheck.detail} ${githubHttps.detail} ${npmCheck.detail}`;
       const corrupt = isGuestFilesystemCorrupt(combined);
       const message = corrupt
         ? "Sandbox guest filesystem is corrupt (rootfs/mem snapshot mismatch). " +
           GUEST_FS_REBUILD_HINT
-        : "Sandbox has no outbound DNS/HTTPS to the Cursor API (api2.cursor.sh). " +
+        : "Sandbox has no outbound DNS/HTTPS for GitHub/npm. " +
           "Guest network repair was attempted automatically — retry the task. " +
           "If it persists, on the execution host run: sudo devin-infra fix-sandbox-dns && sudo devin-infra fix-cni";
       emit(svc, "agent.log", taskId, message, {
-        cursorReachable: false,
+        githubReachable: false,
         dns: dnsCheck,
-        cursor: cursorCheck,
-        cursorCom: installCheck,
+        github: githubHttps,
+        npm: npmCheck,
         guestFsCorrupt: corrupt,
       });
       throw new Error(message);
@@ -259,7 +251,6 @@ export async function ensureSandboxConnectivity(
   }
 
   emit(svc, "agent.log", taskId, "Sandbox outbound connectivity verified", {
-    cursorReachable: true,
     githubReachable: true,
   });
 }

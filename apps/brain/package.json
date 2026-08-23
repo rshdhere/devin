@@ -7,6 +7,7 @@
     "start": "npx tsx src/bin.ts"
   },
   "dependencies": {
+    "@devin/brain-harness": "workspace:*",
     "@devin/scheduler": "workspace:*"
   },
   "devDependencies": {

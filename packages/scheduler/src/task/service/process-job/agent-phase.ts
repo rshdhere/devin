@@ -1,7 +1,13 @@
 import { RuntimeClient, type RunResponse } from "@devin/agent-sdk";
+import { runBrainHarness } from "@devin/brain-harness";
+import { resolveBrainAgentModel } from "@devin/types";
 import { usesRuntimeAgent } from "../../../agent/defaults.js";
 import { buildPruneWorkspaceDiskScript } from "../../../devbox/preview.js";
 import { isRecoverableAgentInterruption } from "../../../greenfield/git-sync.js";
+import {
+  ingestSessionMemory,
+  recallSessionMemory,
+} from "../../../context/hydradb.js";
 import type { ScheduleJob, Task } from "../types.js";
 import type { TaskService } from "../task-service.js";
 import {
@@ -27,7 +33,6 @@ import {
 } from "../git-operations.js";
 import {
   ensureBashInSandbox,
-  ensureCursorAgentInSandbox,
   ensureSandboxConnectivity,
   recoverGreenfieldAfterAgentInterruption,
   runTemplateGreenfieldVerify,
@@ -64,7 +69,7 @@ export async function runAgentPhase(
   const runtimeAgentTask = usesRuntimeAgent(task.agent);
 
   // Runtime agents own git history; auto-checkpoints fight them and cause
-  // divergent main + repeated push rejections during long cursor runs.
+  // divergent main + repeated push rejections during long brain runs.
   const stopAutoCommit =
     state.repository &&
     state.cloneUrl &&
@@ -84,14 +89,17 @@ export async function runAgentPhase(
 
   const stopEvents = forwardRuntimeEvents(svc, state.runtimeBaseUrl, task.id);
 
-  // Always verify egress for cursor — hydrate-first greenfield still needs
-  // api2.cursor.sh, and must not skip DNS just because clone was skipped.
-  if (task.agent === "cursor") {
-    await ensureSandboxConnectivity(svc, state.runtime, task.id);
+  // Ensure basic DNS for package installs / git (no third-party agent CLIs).
+  if (task.agent === "brain" && state.runtime) {
+    await ensureSandboxConnectivity(svc, state.runtime, task.id).catch(() => {
+      // Best-effort; brain tools still work offline for local edits.
+    });
   }
 
   const preAgentHead =
-    state.createdNewRepo && runtimeAgentTask && state.runtime
+    (state.createdNewRepo || job.resumeSession === true) &&
+    runtimeAgentTask &&
+    state.runtime
       ? await readGitHead(
           svc,
           state.runtime,
@@ -197,9 +205,8 @@ export async function runAgentPhase(
         resolveStackRuntime(task, job),
       );
     } else {
-      if (task.agent === "cursor" && state.runtime) {
+      if (state.runtime) {
         await ensureBashInSandbox(svc, state.runtime, task.id);
-        await ensureCursorAgentInSandbox(svc, state.runtime, task.id);
       }
       if (vercelDeploymentRequested(job.prompt)) {
         const vercelCli = await state.runtime.terminalAllowFailure({
@@ -216,27 +223,75 @@ export async function runAgentPhase(
           vercelCli: (vercelCli.stdout || vercelCli.stderr).trim(),
         });
       }
-      runResult = await state.runtime.runAndWait(
-        {
+
+      if (task.agent === "brain") {
+        const recalled = await recallSessionMemory({
+          taskId: task.id,
+          userId: task.userId,
+          query: job.prompt,
+          topK: 8,
+        });
+        const harnessResult = await runBrainHarness({
           taskId: task.id,
           prompt: agentPrompt,
-          agent: task.agent,
-          workDir: repoReadyInSandbox ? state.repoCwd : undefined,
-          env: runtimeSecrets(
-            svc,
-            state.githubToken,
-            task.agent,
-            job.agentModel,
-            { followUp: job.resumeSession === true },
-          ),
-        },
-        {
+          runtimeBaseUrl: state.runtimeBaseUrl!,
+          workDir: repoReadyInSandbox ? state.repoCwd : "repo",
+          followUp: job.resumeSession === true,
+          sessionContext: job.sessionContext,
+          recalledMemory: recalled || undefined,
           maxWaitMs: resolveAgentMaxWaitMs({
             followUp: job.resumeSession === true,
           }),
+          model: resolveBrainAgentModel(
+            job.agentModel,
+            process.env.OPENAI_MODEL,
+          ),
+          toolGatewayUrl:
+            process.env.TOOL_GATEWAY_GRPC_URL?.trim() || "127.0.0.1:9095",
           getAbortReason: () => greenfieldSoftAbort.reason,
-        },
-      );
+          onEvent: (event) => {
+            emit(svc, event.type, task.id, event.message, event.data);
+          },
+          onSaveMemory: async (facts) => {
+            await ingestSessionMemory({
+              taskId: task.id,
+              userId: task.userId,
+              text: facts.join("\n"),
+              title: `Brain memory ${task.id.slice(0, 8)}`,
+            });
+          },
+        });
+        runResult = {
+          taskId: task.id,
+          status: harnessResult.status,
+          message: harnessResult.message,
+          output: harnessResult.output,
+          agent: "brain",
+        };
+      } else {
+        // Legacy mock / unexpected agents — no in-guest Cursor/Claude.
+        runResult = await state.runtime.runAndWait(
+          {
+            taskId: task.id,
+            prompt: agentPrompt,
+            agent: "mock",
+            workDir: repoReadyInSandbox ? state.repoCwd : undefined,
+            env: runtimeSecrets(
+              svc,
+              state.githubToken,
+              task.agent,
+              job.agentModel,
+              { followUp: job.resumeSession === true },
+            ),
+          },
+          {
+            maxWaitMs: resolveAgentMaxWaitMs({
+              followUp: job.resumeSession === true,
+            }),
+            getAbortReason: () => greenfieldSoftAbort.reason,
+          },
+        );
+      }
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : "Agent run failed";
@@ -252,33 +307,16 @@ export async function runAgentPhase(
           followUp: job.resumeSession === true,
         }),
       });
-      if (
-        state.createdNewRepo &&
-        runtimeAgentTask &&
-        state.runtime &&
-        state.repository &&
-        state.cloneUrl
-      ) {
-        const recovered = await recoverGreenfieldAfterAgentInterruption(
-          svc,
-          state.runtime,
-          task,
-          job,
-          state.repoCwd,
-          state.githubToken,
-          preAgentHead,
-        );
-        if (recovered) {
-          runResult = {
-            status: "completed",
-            taskId: task.id,
-            message:
-              "Agent interrupted; control plane finalized greenfield commits",
-            agent: task.agent,
-          };
-        } else {
-          throw error;
-        }
+      const recovered = await tryRecoverAfterAgentInterruption(
+        svc,
+        job,
+        task,
+        state,
+        runtimeAgentTask,
+        preAgentHead,
+      );
+      if (recovered) {
+        runResult = recovered;
       } else {
         throw error;
       }
@@ -295,14 +333,7 @@ export async function runAgentPhase(
 
   if (runResult.status === "failed") {
     const failMessage = runResult.message || "Agent run failed";
-    if (
-      isRecoverableAgentInterruption(failMessage) &&
-      state.createdNewRepo &&
-      runtimeAgentTask &&
-      state.runtime &&
-      state.repository &&
-      state.cloneUrl
-    ) {
+    if (isRecoverableAgentInterruption(failMessage)) {
       emit(svc, "agent.failed", task.id, failMessage, {
         timeout:
           /timed out|did not finish within|idle-stalled|commit-plateau|shell-hung/i.test(
@@ -317,23 +348,16 @@ export async function runAgentPhase(
           followUp: job.resumeSession === true,
         }),
       });
-      const recovered = await recoverGreenfieldAfterAgentInterruption(
+      const recovered = await tryRecoverAfterAgentInterruption(
         svc,
-        state.runtime,
-        task,
         job,
-        state.repoCwd,
-        state.githubToken,
+        task,
+        state,
+        runtimeAgentTask,
         preAgentHead,
       );
       if (recovered) {
-        runResult = {
-          status: "completed",
-          taskId: task.id,
-          message:
-            "Agent interrupted; control plane finalized greenfield commits",
-          agent: task.agent,
-        };
+        runResult = recovered;
       } else {
         throw new Error(failMessage);
       }
@@ -540,5 +564,141 @@ export async function runAgentPhase(
         runtimeAgentTask,
       );
     }
+  }
+}
+
+async function tryRecoverAfterAgentInterruption(
+  svc: TaskService,
+  job: ScheduleJob,
+  task: Task,
+  state: ProcessJobState,
+  runtimeAgentTask: boolean,
+  preAgentHead: string,
+): Promise<RunResponse | null> {
+  if (
+    !runtimeAgentTask ||
+    !state.runtime ||
+    !state.repository ||
+    !state.cloneUrl
+  ) {
+    return null;
+  }
+
+  if (state.createdNewRepo) {
+    const recovered = await recoverGreenfieldAfterAgentInterruption(
+      svc,
+      state.runtime,
+      task,
+      job,
+      state.repoCwd,
+      state.githubToken,
+      preAgentHead,
+    );
+    if (!recovered) {
+      return null;
+    }
+    return {
+      status: "completed",
+      taskId: task.id,
+      message: "Agent interrupted; control plane finalized greenfield commits",
+      agent: task.agent,
+    };
+  }
+
+  if (job.resumeSession !== true) {
+    return null;
+  }
+
+  const recovered = await recoverFollowUpAfterAgentInterruption(
+    svc,
+    state.runtime,
+    task,
+    job,
+    state.repoCwd,
+    state.githubToken,
+    preAgentHead,
+  );
+  if (!recovered) {
+    return null;
+  }
+  return {
+    status: "completed",
+    taskId: task.id,
+    message: "Agent interrupted; control plane finalized follow-up commits",
+    agent: task.agent,
+  };
+}
+
+/**
+ * Soft-finalize a follow-up when the agent hangs on curl/start: commit dirty
+ * work and push so the pink-background-style change is not left spinning.
+ */
+async function recoverFollowUpAfterAgentInterruption(
+  svc: TaskService,
+  runtime: RuntimeClient,
+  task: Task,
+  job: ScheduleJob,
+  repoCwd: string,
+  githubToken: string | undefined,
+  preAgentHead: string,
+): Promise<boolean> {
+  try {
+    const gitEnv = gitRuntimeEnv(svc, githubToken);
+    await runtime.terminalAllowFailure({
+      taskId: task.id,
+      cwd: repoCwd,
+      env: gitEnv,
+      command: [
+        "set +e",
+        "pkill -u \"$(id -u)\" -f '[g]it commit' 2>/dev/null || true",
+        "sleep 0.5",
+        "rm -f .git/index.lock .git/HEAD.lock .git/refs/heads/*.lock 2>/dev/null || true",
+        "true",
+      ].join("\n"),
+    });
+
+    const status = await runtime.terminalAllowFailure({
+      taskId: task.id,
+      cwd: repoCwd,
+      env: gitEnv,
+      command: "git status --porcelain",
+    });
+    const dirty = Boolean(status.stdout.trim());
+    const head = await readGitHead(svc, runtime, task.id, repoCwd, githubToken);
+    const movedHead =
+      Boolean(preAgentHead) && Boolean(head) && head !== preAgentHead;
+
+    if (!dirty && !movedHead) {
+      emit(
+        svc,
+        "agent.log",
+        task.id,
+        "Follow-up interruption with no recoverable git work",
+      );
+      return false;
+    }
+
+    await finalizeGitWork(svc, runtime, task, job, repoCwd, githubToken, {
+      greenfield: false,
+      createPullRequest: true,
+    });
+    emit(
+      svc,
+      "agent.log",
+      task.id,
+      "Finalized follow-up commits after agent interruption",
+      { dirty, movedHead },
+    );
+    return true;
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : "Follow-up recovery failed";
+    emit(
+      svc,
+      "agent.log",
+      task.id,
+      `Follow-up interruption recovery failed: ${message}`,
+    );
+    return false;
   }
 }

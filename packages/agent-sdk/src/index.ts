@@ -145,14 +145,19 @@ export class RuntimeClient {
   private async fetchRuntime(
     path: string,
     init?: RequestInit,
+    timeoutMs?: number,
   ): Promise<Response> {
-    const dispatcher = await resolveRuntimeFetchDispatcher(this.fetchTimeoutMs);
+    const effectiveTimeoutMs = Math.max(
+      1_000,
+      timeoutMs ?? this.fetchTimeoutMs,
+    );
+    const dispatcher = await resolveRuntimeFetchDispatcher(effectiveTimeoutMs);
     const requestInit: RequestInit & {
       timeout?: false | number;
       dispatcher?: Dispatcher;
     } = {
       ...init,
-      signal: AbortSignal.timeout(this.fetchTimeoutMs),
+      signal: AbortSignal.timeout(effectiveTimeoutMs),
       ...(dispatcher ? { dispatcher } : {}),
     };
     if (isBunRuntime()) {
@@ -186,9 +191,14 @@ export class RuntimeClient {
     return response.json() as Promise<RunResponse>;
   }
 
-  async runStatus(taskId: string): Promise<RunResponse> {
+  async runStatus(
+    taskId: string,
+    opts?: { timeoutMs?: number },
+  ): Promise<RunResponse> {
     const response = await this.fetchRuntime(
       `/run/status?taskId=${encodeURIComponent(taskId)}`,
+      undefined,
+      opts?.timeoutMs,
     );
     if (!response.ok) {
       const errorBody = await response.text();
@@ -200,14 +210,18 @@ export class RuntimeClient {
   }
 
   async cancelRun(taskId: string, reason?: string): Promise<RunResponse> {
-    const response = await this.fetchRuntime("/run/cancel", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        taskId,
-        reason: reason?.trim() || "agent run cancelled by control plane",
-      }),
-    });
+    const response = await this.fetchRuntime(
+      "/run/cancel",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          taskId,
+          reason: reason?.trim() || "agent run cancelled by control plane",
+        }),
+      },
+      30_000,
+    );
     if (!response.ok) {
       const errorBody = await response.text();
       throw new Error(
@@ -215,6 +229,17 @@ export class RuntimeClient {
       );
     }
     return response.json() as Promise<RunResponse>;
+  }
+
+  private async cancelRunBestEffort(
+    taskId: string,
+    reason: string,
+  ): Promise<void> {
+    try {
+      await this.cancelRun(taskId, reason);
+    } catch {
+      // Best-effort: control plane still surfaces the timeout/abort.
+    }
   }
 
   async runAndWait(
@@ -237,6 +262,7 @@ export class RuntimeClient {
     while (Date.now() < deadline) {
       const abortReason = opts?.getAbortReason?.()?.trim();
       if (abortReason) {
+        await this.cancelRunBestEffort(body.taskId, abortReason);
         return {
           taskId: body.taskId,
           status: "failed",
@@ -244,16 +270,31 @@ export class RuntimeClient {
           agent: body.agent,
         };
       }
-      await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
-      const status = await this.runStatus(body.taskId);
+      const remainingMs = deadline - Date.now();
+      if (remainingMs <= 0) {
+        break;
+      }
+      await new Promise((resolve) =>
+        setTimeout(resolve, Math.min(pollIntervalMs, remainingMs)),
+      );
+      const statusTimeoutMs = Math.min(
+        this.fetchTimeoutMs,
+        Math.max(1_000, deadline - Date.now()),
+      );
+      if (Date.now() >= deadline) {
+        break;
+      }
+      const status = await this.runStatus(body.taskId, {
+        timeoutMs: statusTimeoutMs,
+      });
       if (status.status === "completed" || status.status === "failed") {
         return status;
       }
     }
 
-    throw new Error(
-      `Agent run for task ${body.taskId} did not finish within ${Math.round(maxWaitMs / 1000)}s`,
-    );
+    const timeoutMessage = `Agent run for task ${body.taskId} did not finish within ${Math.round(maxWaitMs / 1000)}s`;
+    await this.cancelRunBestEffort(body.taskId, timeoutMessage);
+    throw new Error(timeoutMessage);
   }
 
   async writeFile(

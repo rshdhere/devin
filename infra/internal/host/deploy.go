@@ -32,7 +32,11 @@ func Deploy(ctx context.Context) error {
 	if hostName == "" {
 		hostName = "devin-production-fc-01"
 	}
-	for _, image := range []string{registry + "/devin-firecracker:" + tag, registry + "/devin-scheduler:" + tag} {
+	for _, image := range []string{
+		registry + "/devin-firecracker:" + tag,
+		registry + "/devin-tool-gateway:" + tag,
+		registry + "/devin-scheduler:" + tag,
+	} {
 		if err := sysutil.Command(ctx, "docker", "pull", image); err != nil {
 			return err
 		}
@@ -61,17 +65,30 @@ ExecStop=/usr/bin/docker stop firecracker
 [Install]
 WantedBy=multi-user.target
 `, hostName, registry+"/devin-firecracker:"+tag)
+	toolGateway := fmt.Sprintf(`[Unit]
+Description=devin.baby tool-gateway
+After=docker.service
+Requires=docker.service
+[Service]
+Restart=always
+RestartSec=5
+ExecStartPre=-/usr/bin/docker rm -f tool-gateway
+ExecStart=/usr/bin/docker run --rm --name tool-gateway --network host -e TOOL_GATEWAY_GRPC_ADDR=:9095 %s
+ExecStop=/usr/bin/docker stop tool-gateway
+[Install]
+WantedBy=multi-user.target
+`, registry+"/devin-tool-gateway:"+tag)
 	scheduler := fmt.Sprintf(`[Unit]
 Description=devin.baby scheduler
-After=devin-firecracker.service
-Wants=devin-firecracker.service
+After=devin-firecracker.service devin-tool-gateway.service
+Wants=devin-firecracker.service devin-tool-gateway.service
 [Service]
 Restart=always
 RestartSec=5
 Environment=ORCHESTRATOR_URL=http://pending-ssm-sync:9090
 EnvironmentFile=-/etc/devin/scheduler-secrets.env
 ExecStartPre=-/usr/bin/docker rm -f scheduler
-ExecStart=/usr/bin/docker run --rm --name scheduler --network host --env-file /etc/devin/scheduler-secrets.env -v /var/lib/devin/task-snapshots:/var/lib/devin/task-snapshots -e DEVIN_SNAPSHOT_DIR=/var/lib/devin/task-snapshots -e DEVIN_SNAPSHOT_S3_BUCKET=${DEVIN_SNAPSHOT_S3_BUCKET} -e DEVIN_SNAPSHOT_S3_PREFIX=${DEVIN_SNAPSHOT_S3_PREFIX} -e SCHEDULER_PORT=9091 -e ORCHESTRATOR_URL=${ORCHESTRATOR_URL} -e FIRECRACKER_HOST_URL=http://127.0.0.1:9092 -e SCHEDULER_HOST_NAME=%s -e FIRECRACKER_HOST_NAME=%s -e QUEUE_DRIVER=${QUEUE_DRIVER} -e SQS_QUEUE_URL=${SQS_QUEUE_URL} -e AWS_REGION=%s -e DEFAULT_AGENT=cursor -e SANDBOX_READY_TIMEOUT_SECONDS=300 -e RUNTIME_READY_TIMEOUT_SECONDS=120 -e AGENT_RUN_TIMEOUT_MIN=60 %s
+ExecStart=/usr/bin/docker run --rm --name scheduler --network host --env-file /etc/devin/scheduler-secrets.env -v /var/lib/devin/task-snapshots:/var/lib/devin/task-snapshots -e DEVIN_SNAPSHOT_DIR=/var/lib/devin/task-snapshots -e DEVIN_SNAPSHOT_S3_BUCKET=${DEVIN_SNAPSHOT_S3_BUCKET} -e DEVIN_SNAPSHOT_S3_PREFIX=${DEVIN_SNAPSHOT_S3_PREFIX} -e SCHEDULER_PORT=9091 -e ORCHESTRATOR_URL=${ORCHESTRATOR_URL} -e FIRECRACKER_HOST_URL=http://127.0.0.1:9092 -e SCHEDULER_HOST_NAME=%s -e FIRECRACKER_HOST_NAME=%s -e QUEUE_DRIVER=${QUEUE_DRIVER} -e SQS_QUEUE_URL=${SQS_QUEUE_URL} -e AWS_REGION=%s -e DEFAULT_AGENT=brain -e TOOL_GATEWAY_GRPC_URL=127.0.0.1:9095 -e SANDBOX_READY_TIMEOUT_SECONDS=300 -e RUNTIME_READY_TIMEOUT_SECONDS=120 -e AGENT_RUN_TIMEOUT_MIN=60 %s
 ExecStop=/usr/bin/docker stop scheduler
 [Install]
 WantedBy=multi-user.target
@@ -80,6 +97,9 @@ WantedBy=multi-user.target
 		return err
 	}
 	if err := ensureTaskSnapshotDir(); err != nil {
+		return err
+	}
+	if err := sysutil.WriteFile("/etc/systemd/system/devin-tool-gateway.service", toolGateway, 0644); err != nil {
 		return err
 	}
 	if err := sysutil.WriteFile("/etc/systemd/system/devin-scheduler.service", scheduler, 0644); err != nil {
@@ -95,13 +115,18 @@ WantedBy=multi-user.target
 	// can leave "scheduler"/"firecracker" names claimed so `docker run --name`
 	// fails with Conflict and systemd flaps forever.
 	_ = sysutil.Systemctl(ctx, "stop", "devin-scheduler.service")
+	_ = sysutil.Systemctl(ctx, "stop", "devin-tool-gateway.service")
 	_ = sysutil.Systemctl(ctx, "stop", "devin-firecracker.service")
-	_ = sysutil.Command(ctx, "docker", "rm", "-f", "scheduler", "firecracker", "firecracker-host")
+	_ = sysutil.Command(ctx, "docker", "rm", "-f", "scheduler", "tool-gateway", "firecracker", "firecracker-host")
 	if err := sysutil.Systemctl(ctx, "start", "devin-firecracker.service"); err != nil {
 		_ = sysutil.Command(ctx, "journalctl", "-u", "devin-firecracker.service", "-n", "30", "--no-pager")
 		return err
 	}
 	sysutil.WaitHTTP(ctx, "http://127.0.0.1:9092/health", 60*time.Second)
+	if err := sysutil.Systemctl(ctx, "start", "devin-tool-gateway.service"); err != nil {
+		_ = sysutil.Command(ctx, "journalctl", "-u", "devin-tool-gateway.service", "-n", "30", "--no-pager")
+		return err
+	}
 	_ = SyncPlatformConfig(ctx)
 	if err := sysutil.Systemctl(ctx, "start", "devin-scheduler.service"); err != nil {
 		_ = sysutil.Command(ctx, "journalctl", "-u", "devin-scheduler.service", "-n", "30", "--no-pager")

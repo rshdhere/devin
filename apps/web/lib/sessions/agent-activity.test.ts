@@ -12,7 +12,7 @@ function task(overrides: Partial<Task> = {}): Task {
     id: "task-1",
     prompt: "make me a chat app",
     status: "running",
-    agent: "cursor",
+    agent: "brain",
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
     ...overrides,

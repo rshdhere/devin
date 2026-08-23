@@ -1,0 +1,113 @@
+syntax = "proto3";
+
+package devbox.v1;
+
+option go_package = "github.com/rshdhere/devin/apps/tool-gateway/gen/devbox/v1;devboxv1";
+
+// DevboxTools is the Brain → execution-host tool bus.
+// Each RPC includes runtime_base_url so the gateway can reach the guest
+// without holding a session registry.
+service DevboxTools {
+  rpc Exec(ExecRequest) returns (ExecResponse);
+  rpc ReadFile(ReadFileRequest) returns (ReadFileResponse);
+  rpc WriteFile(WriteFileRequest) returns (WriteFileResponse);
+  rpc ListDir(ListDirRequest) returns (ListDirResponse);
+  rpc GitClone(GitCloneRequest) returns (GitResponse);
+  rpc GitCommit(GitCommitRequest) returns (GitResponse);
+  rpc GitPush(GitPushRequest) returns (GitResponse);
+  rpc DesktopScreenshot(DesktopRequest) returns (DesktopResponse);
+  rpc BrowserOpen(BrowserOpenRequest) returns (BrowserOpenResponse);
+}
+
+message ExecRequest {
+  string task_id = 1;
+  string runtime_base_url = 2;
+  string command = 3;
+  string cwd = 4;
+  int32 timeout_sec = 5;
+}
+
+message ExecResponse {
+  int32 exit_code = 1;
+  string stdout = 2;
+  string stderr = 3;
+}
+
+message ReadFileRequest {
+  string task_id = 1;
+  string runtime_base_url = 2;
+  string path = 3;
+}
+
+message ReadFileResponse {
+  string content = 1;
+}
+
+message WriteFileRequest {
+  string task_id = 1;
+  string runtime_base_url = 2;
+  string path = 3;
+  string content = 4;
+}
+
+message WriteFileResponse {
+  string status = 1;
+  string path = 2;
+}
+
+message ListDirRequest {
+  string task_id = 1;
+  string runtime_base_url = 2;
+  string path = 3;
+}
+
+message ListDirResponse {
+  repeated string entries = 1;
+}
+
+message GitCloneRequest {
+  string task_id = 1;
+  string runtime_base_url = 2;
+  string url = 3;
+  string path = 4;
+}
+
+message GitCommitRequest {
+  string task_id = 1;
+  string runtime_base_url = 2;
+  string message = 3;
+  string cwd = 4;
+  repeated string paths = 5;
+}
+
+message GitPushRequest {
+  string task_id = 1;
+  string runtime_base_url = 2;
+  string branch = 3;
+  string cwd = 4;
+}
+
+message GitResponse {
+  string status = 1;
+  string message = 2;
+}
+
+message DesktopRequest {
+  string task_id = 1;
+  string runtime_base_url = 2;
+}
+
+message DesktopResponse {
+  bytes png = 1;
+  string content_type = 2;
+}
+
+message BrowserOpenRequest {
+  string task_id = 1;
+  string runtime_base_url = 2;
+  string url = 3;
+}
+
+message BrowserOpenResponse {
+  string status = 1;
+}

@@ -76,9 +76,20 @@ func SyncPlatformConfig(ctx context.Context) error {
 	}
 	agentModel := read("agent_model")
 	if agentModel == "" {
-		agentModel = "auto"
+		agentModel = "gpt-4o-mini"
 	}
-	secrets := fmt.Sprintf("DEFAULT_AGENT=cursor\nSERVICE_MODE=worker\nCURSOR_API_KEY=%s\nANTHROPIC_API_KEY=%s\nOPENAI_API_KEY=%s\nGITHUB_BOT_TOKEN=%s\nGITHUB_BOT_NAME=baby-devin-bot\nGITHUB_BOT_EMAIL=baby-devin-bot@users.noreply.github.com\nAGENT_RUN_TIMEOUT_MIN=60\nAGENT_MODEL=%s\nDEVIN_SNAPSHOT_DIR=/var/lib/devin/task-snapshots\n", read("cursor_api_key"), read("anthropic_api_key"), read("openai_api_key"), read("github_bot_token"), agentModel)
+	toolGatewayURL := read("tool_gateway_grpc_url")
+	if toolGatewayURL == "" {
+		toolGatewayURL = "127.0.0.1:9095"
+	}
+	secrets := fmt.Sprintf(
+		"DEFAULT_AGENT=brain\nSERVICE_MODE=worker\nTOOL_GATEWAY_GRPC_URL=%s\nOPENAI_API_KEY=%s\nGITHUB_BOT_TOKEN=%s\nGITHUB_BOT_NAME=baby-devin-bot\nGITHUB_BOT_EMAIL=baby-devin-bot@users.noreply.github.com\nAGENT_RUN_TIMEOUT_MIN=60\nAGENT_MODEL=%s\nOPENAI_MODEL=%s\nDEVIN_SNAPSHOT_DIR=/var/lib/devin/task-snapshots\n",
+		toolGatewayURL,
+		read("openai_api_key"),
+		read("github_bot_token"),
+		agentModel,
+		agentModel,
+	)
 	if db := read("database_url"); db != "" {
 		if postgresReachable(db) {
 			secrets += "DATABASE_URL=" + db + "\n"
@@ -97,7 +108,9 @@ func SyncPlatformConfig(ctx context.Context) error {
 	}
 	_ = sysutil.Systemctl(ctx, "daemon-reload")
 	_ = sysutil.Systemctl(ctx, "enable", "--now", "devin-firecracker.service")
+	_ = sysutil.Systemctl(ctx, "enable", "--now", "devin-tool-gateway.service")
 	_ = sysutil.Systemctl(ctx, "enable", "--now", "devin-scheduler.service")
+	_ = sysutil.Systemctl(ctx, "restart", "devin-tool-gateway.service")
 	_ = sysutil.Systemctl(ctx, "restart", "devin-scheduler.service")
 	if orchestrator != "" && hostName != "" {
 		_ = registerHost(ctx, orchestrator, hostName)

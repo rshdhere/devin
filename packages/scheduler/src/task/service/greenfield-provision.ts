@@ -76,15 +76,9 @@ export function validateGreenfieldDraftSecrets(
 }
 
 export function validateAgentSecrets(svc: TaskService, task: Task): void {
-  if (task.agent === "cursor" && !process.env.CURSOR_API_KEY?.trim()) {
+  if (task.agent === "brain" && !process.env.OPENAI_API_KEY?.trim()) {
     throw new Error(
-      "Cursor agent credentials are not configured on the execution host. Ask your platform admin to configure agent secrets.",
-    );
-  }
-
-  if (task.agent === "claude" && !process.env.ANTHROPIC_API_KEY?.trim()) {
-    throw new Error(
-      "Claude agent credentials are not configured on the execution host. Ask your platform admin to configure agent secrets.",
+      "OPENAI_API_KEY is not set for the Brain harness. Add it on the control plane / execution host.",
     );
   }
 }

@@ -31,14 +31,9 @@ export const textareaSpring = {
 
 export const agentOptions = [
   {
-    id: "cursor" as const,
-    label: "Cursor",
-    description: "Default — agent runs in the devbox",
-  },
-  {
-    id: "claude" as const,
-    label: "Claude",
-    description: "Claude Code in the devbox",
+    id: "brain" as const,
+    label: "Brain",
+    description: "OpenAI on control plane — Devbox tools over gRPC",
   },
 ] as const;
 

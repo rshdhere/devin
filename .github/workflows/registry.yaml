@@ -45,6 +45,9 @@ jobs:
           - app: firecracker
             image: devin-firecracker
             dockerfile: docker/firecracker/Dockerfile
+          - app: tool-gateway
+            image: devin-tool-gateway
+            dockerfile: docker/tool-gateway/Dockerfile
           - app: infra
             image: devin-infra
             dockerfile: infra/Dockerfile

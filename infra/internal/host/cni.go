@@ -12,8 +12,8 @@ func FixCNI(ctx context.Context) error {
 	if err := sysutil.MustRoot(); err != nil {
 		return err
 	}
-	_ = sysutil.Systemctl(ctx, "stop", "devin-firecracker-host.service", "devin-firecracker.service", "devin-scheduler.service")
-	_ = sysutil.Command(ctx, "docker", "stop", "firecracker-host", "firecracker", "scheduler")
+	_ = sysutil.Systemctl(ctx, "stop", "devin-firecracker-host.service", "devin-firecracker.service", "devin-tool-gateway.service", "devin-scheduler.service")
+	_ = sysutil.Command(ctx, "docker", "stop", "firecracker-host", "firecracker", "tool-gateway", "scheduler")
 	_ = sysutil.Command(ctx, "bash", "-c", `
 while read -r line; do
   rule="${line/-A/-D}"

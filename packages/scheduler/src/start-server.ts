@@ -19,7 +19,7 @@ export interface StartSchedulerServerOptions {
   orchestratorUrl: string;
   runtimeUrl: string;
   firecrackerHostUrl?: string;
-  defaultAgent?: "cursor" | "claude" | "mock";
+  defaultAgent?: "brain" | "mock";
   mode?: "standalone" | "brain" | "worker";
   executionWorkerUrl?: string;
 }

@@ -43,7 +43,7 @@ func TestPayloadsAreValidBashAndSelfInstalling(t *testing.T) {
 			t.Errorf("%s payload does not bootstrap devin-infra", name)
 		}
 	}
-	if !strings.Contains(cases["deploy"], "docker rm -f scheduler firecracker") {
+	if !strings.Contains(cases["deploy"], "docker rm -f scheduler tool-gateway firecracker") {
 		t.Error("deploy payload must clear leftover container names before host-deploy")
 	}
 	if !strings.Contains(cases["deploy"], "docker.io/example/devin-infra:abc123") {

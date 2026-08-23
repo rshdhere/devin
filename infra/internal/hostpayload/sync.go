@@ -16,15 +16,20 @@ read_ssm() { aws ssm get-parameter --region "$AWS_REGION" --name "$1" --with-dec
 mkdir -p /etc/devin /etc/systemd/system/devin-scheduler.service.d
 umask 077
 {
-  echo "DEFAULT_AGENT=cursor"
+  echo "DEFAULT_AGENT=brain"
   echo "SERVICE_MODE=worker"
-  echo "CURSOR_API_KEY=$(read_ssm "$SSM_PREFIX/cursor_api_key")"
-  echo "ANTHROPIC_API_KEY=$(read_ssm "$SSM_PREFIX/anthropic_api_key")"
+  tg="$(read_ssm "$SSM_PREFIX/tool_gateway_grpc_url")"
+  if [ -z "$tg" ]; then tg="127.0.0.1:9095"; fi
+  echo "TOOL_GATEWAY_GRPC_URL=$tg"
   echo "OPENAI_API_KEY=$(read_ssm "$SSM_PREFIX/openai_api_key")"
   echo "GITHUB_BOT_TOKEN=$(read_ssm "$SSM_PREFIX/github_bot_token")"
   echo "GITHUB_BOT_NAME=baby-devin-bot"
   echo "GITHUB_BOT_EMAIL=baby-devin-bot@users.noreply.github.com"
   echo "AGENT_RUN_TIMEOUT_MIN=60"
+  model="$(read_ssm "$SSM_PREFIX/agent_model")"
+  if [ -z "$model" ]; then model="gpt-4o-mini"; fi
+  echo "AGENT_MODEL=$model"
+  echo "OPENAI_MODEL=$model"
   echo "DEVIN_SNAPSHOT_DIR=/var/lib/devin/task-snapshots"
   db="$(read_ssm "$SSM_PREFIX/database_url")"
   if [ -n "$db" ]; then echo "DATABASE_URL=$db"; fi
@@ -34,6 +39,8 @@ mkdir -p /var/lib/devin/task-snapshots
 chown 1001:1001 /var/lib/devin/task-snapshots
 printf '[Service]\nEnvironmentFile=/etc/devin/scheduler-secrets.env\n' >/etc/systemd/system/devin-scheduler.service.d/secrets.conf
 systemctl daemon-reload
+systemctl enable --now devin-tool-gateway.service || true
+systemctl restart devin-tool-gateway.service || true
 systemctl restart devin-scheduler.service || true
 `, region, prefix, prefix)
 }

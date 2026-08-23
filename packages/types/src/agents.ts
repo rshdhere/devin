@@ -1,51 +1,71 @@
-export type AgentProvider = "cursor" | "claude" | "mock";
+export type AgentProvider = "brain" | "mock";
 
-export const CURSOR_AGENT_MODELS = [{ id: "auto", label: "Auto" }] as const;
+export const BRAIN_AGENT_MODELS = [
+  { id: "gpt-4o-mini", label: "GPT-4o mini" },
+  { id: "gpt-4.1-mini", label: "GPT-4.1 mini" },
+] as const;
 
-export type CursorAgentModelId = (typeof CURSOR_AGENT_MODELS)[number]["id"];
+export type BrainAgentModelId = (typeof BRAIN_AGENT_MODELS)[number]["id"];
 
-export const DEFAULT_CURSOR_AGENT_MODEL: CursorAgentModelId = "auto";
+export const DEFAULT_BRAIN_AGENT_MODEL: BrainAgentModelId = "gpt-4o-mini";
 
-/** Legacy Cursor CLI model ids — map to auto on Pro plans. */
-const CURSOR_MODEL_ALIASES: Record<string, CursorAgentModelId> = {
-  "composer-2.5": "auto",
-  "composer-2.5-fast": "auto",
-  "composer-2-fast": "auto",
-  "cursor-grok-4.5-medium": "auto",
-  "cursor-grok-4.6-medium": "auto",
-};
-
-const KNOWN_CURSOR_MODELS = new Set<string>(
-  CURSOR_AGENT_MODELS.map((model) => model.id),
+const KNOWN_BRAIN_MODELS = new Set<string>(
+  BRAIN_AGENT_MODELS.map((model) => model.id),
 );
 
-export function resolveCursorAgentModel(
+/** Map legacy Cursor model ids and unknown values to a cheap OpenAI default. */
+export function resolveBrainAgentModel(
   raw: string | undefined | null,
   fallback?: string | undefined | null,
-): CursorAgentModelId {
+): BrainAgentModelId {
   const trimmed = (raw?.trim() || fallback?.trim() || "").toLowerCase();
-  if (!trimmed) {
-    return DEFAULT_CURSOR_AGENT_MODEL;
+  if (!trimmed || trimmed === "auto") {
+    return DEFAULT_BRAIN_AGENT_MODEL;
   }
-  if (CURSOR_MODEL_ALIASES[trimmed]) {
-    return CURSOR_MODEL_ALIASES[trimmed]!;
+  if (KNOWN_BRAIN_MODELS.has(trimmed)) {
+    return trimmed as BrainAgentModelId;
   }
-  if (KNOWN_CURSOR_MODELS.has(trimmed)) {
-    return trimmed as CursorAgentModelId;
-  }
-  return DEFAULT_CURSOR_AGENT_MODEL;
+  return DEFAULT_BRAIN_AGENT_MODEL;
 }
 
-export function cursorAgentModelLabel(modelId: string): string {
-  const resolved = resolveCursorAgentModel(modelId);
-  const match = CURSOR_AGENT_MODELS.find((model) => model.id === resolved);
+export function brainAgentModelLabel(modelId: string): string {
+  const resolved = resolveBrainAgentModel(modelId);
+  const match = BRAIN_AGENT_MODELS.find((model) => model.id === resolved);
   return match?.label ?? resolved;
 }
 
+/** @deprecated Use resolveBrainAgentModel — kept for transitional imports. */
+export const resolveCursorAgentModel = resolveBrainAgentModel;
+/** @deprecated Use brainAgentModelLabel */
+export const cursorAgentModelLabel = brainAgentModelLabel;
+/** @deprecated */
+export const CURSOR_AGENT_MODELS = BRAIN_AGENT_MODELS;
+/** @deprecated */
+export const DEFAULT_CURSOR_AGENT_MODEL = DEFAULT_BRAIN_AGENT_MODEL;
+/** @deprecated */
+export type CursorAgentModelId = BrainAgentModelId;
+
+/** Sessions that keep a Firecracker Devbox for follow-ups / desktop. */
+export function usesDevboxSession(agent: AgentProvider): boolean {
+  return agent === "brain" || agent === "mock";
+}
+
+/** @deprecated Use usesDevboxSession — formerly meant in-guest Cursor/Claude. */
 export function usesRuntimeAgent(agent: AgentProvider): boolean {
-  return agent === "cursor" || agent === "claude";
+  return usesDevboxSession(agent);
 }
 
 export function isTemplateAgent(agent: AgentProvider): boolean {
   return agent === "mock";
+}
+
+/** Coerce legacy cursor/claude task agents to brain. */
+export function normalizeAgentProvider(
+  raw: string | undefined | null,
+): AgentProvider {
+  const value = raw?.trim().toLowerCase();
+  if (value === "mock") {
+    return "mock";
+  }
+  return "brain";
 }

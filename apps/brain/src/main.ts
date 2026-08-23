@@ -12,11 +12,7 @@ export const main = async () => {
     port,
     orchestratorUrl,
     runtimeUrl,
-    defaultAgent: process.env.DEFAULT_AGENT as
-      | "cursor"
-      | "claude"
-      | "mock"
-      | undefined,
+    defaultAgent: process.env.DEFAULT_AGENT as "brain" | "mock" | undefined,
     mode: "brain",
     executionWorkerUrl,
   });

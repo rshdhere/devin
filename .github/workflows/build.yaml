@@ -27,6 +27,9 @@ jobs:
       - name: Build firecracker image
         run: docker build -f docker/firecracker/Dockerfile -t devin-firecracker:ci .
 
+      - name: Build tool-gateway image
+        run: docker build -f docker/tool-gateway/Dockerfile -t devin-tool-gateway:ci .
+
   go:
     runs-on: ubuntu-latest
     steps:

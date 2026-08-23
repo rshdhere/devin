@@ -1,16 +1,12 @@
 import type { AgentProvider } from "../task/types.js";
-import { usesRuntimeAgent } from "@devin/types";
+import { usesRuntimeAgent, normalizeAgentProvider } from "@devin/types";
 
-export { usesRuntimeAgent };
+export { usesRuntimeAgent, normalizeAgentProvider };
 
 export function resolveDefaultAgent(): AgentProvider {
   const raw = process.env.DEFAULT_AGENT?.trim();
-  if (raw === "cursor" || raw === "claude") {
-    return raw;
-  }
-  // Brain-first architecture: runtime agents only. Template (mock) is opt-in.
   if (raw === "mock" && process.env.ALLOW_TEMPLATE_AGENT === "true") {
     return "mock";
   }
-  return "cursor";
+  return "brain";
 }

@@ -16,6 +16,12 @@ describe("buildFollowUpAgentPrompt", () => {
     expect(prompt).toContain("This is a follow-up in an existing session.");
     expect(prompt).toContain("Apply ONLY the new user request below.");
     expect(prompt).toContain("make the background black");
+    expect(prompt).toContain(
+      "Do NOT run local servers (`bun run start` / `npm start` / `npm run start`) on follow-ups.",
+    );
+    expect(prompt).toContain(
+      "Do NOT curl localhost or run smoke checks on follow-ups",
+    );
     expect(prompt).not.toContain("Make at least 3 focused commits");
     expect(prompt).not.toContain("Previous session context:");
     expect(prompt).not.toContain(
@@ -49,7 +55,7 @@ describe("buildFollowUpAgentPrompt", () => {
     expect(prompt).toContain("npx --yes vercel --prod --yes");
     expect(prompt).toContain("VERCEL_TOKEN");
     expect(prompt).toContain("Do NOT run local production servers");
-    expect(prompt).toContain("curl --max-time 5");
+    expect(prompt).toContain("do not re-smoke, re-curl");
     expect(prompt).not.toContain("npx --yes vercel --version");
   });
 });

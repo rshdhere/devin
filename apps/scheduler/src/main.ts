@@ -8,8 +8,7 @@ export const main = async () => {
   const firecrackerHostUrl =
     process.env.FIRECRACKER_HOST_URL?.trim() || undefined;
   const defaultAgent = process.env.DEFAULT_AGENT as
-    | "cursor"
-    | "claude"
+    | "brain"
     | "mock"
     | undefined;
   const mode = (process.env.SERVICE_MODE ?? "standalone") as

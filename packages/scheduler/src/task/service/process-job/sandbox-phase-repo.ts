@@ -133,7 +133,7 @@ export async function runSandboxRepoSetupPhase(
         );
         state.repoHydratedLocally = true;
       } else {
-        if (task.agent === "cursor") {
+        if (task.agent === "brain") {
           await ensureSandboxConnectivity(svc, state.runtime, task.id);
         }
         try {

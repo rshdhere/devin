@@ -45,7 +45,7 @@ export async function hydrateSessionFromOrchestrator(
     task = {
       id: taskId,
       prompt: "",
-      agent: "cursor",
+      agent: "brain",
       status: "running",
       title: "",
       sandboxName,

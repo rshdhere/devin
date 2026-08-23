@@ -39,9 +39,10 @@ func NewService(cfg Config) *Service {
 		cfg:     cfg,
 		runners: make(map[string]Runner),
 	}
-	s.runners["cursor"] = &CursorRunner{cfg: cfg}
-	s.runners["claude"] = &ClaudeRunner{cfg: cfg}
+	// Product intelligence lives on apps/brain (OpenAI harness + gRPC tools).
+	// The guest only keeps a lightweight mock runner for template verifies.
 	s.runners["mock"] = &MockRunner{cfg: cfg}
+	s.runners["brain"] = &MockRunner{cfg: cfg}
 	return s
 }
 
@@ -53,12 +54,16 @@ func (s *Service) Run(ctx context.Context, req RunRequest, bus *events.Bus) (*Ru
 	if provider == "" {
 		provider = "mock"
 	}
+	// Legacy in-guest Cursor/Claude providers are retired.
+	if provider == "cursor" || provider == "claude" {
+		provider = "mock"
+	}
 
 	runner, ok := s.runners[provider]
 	if !ok {
 		return &RunResult{
 			Status:  "failed",
-			Message: "unknown agent provider: " + provider,
+			Message: "unknown agent provider: " + provider + " (use Brain on the control plane)",
 			Agent:   provider,
 		}, nil
 	}

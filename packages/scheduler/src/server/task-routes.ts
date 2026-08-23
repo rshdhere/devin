@@ -5,7 +5,7 @@ import { handleTaskEvents } from "./task-events.js";
 
 type TaskRequestBody = {
   prompt?: string;
-  agent?: "cursor" | "claude" | "mock";
+  agent?: "brain" | "mock";
   userId?: string;
   repository?: string;
   cloneUrl?: string;

@@ -35,9 +35,10 @@ export DEVIN_IMAGE_TAG=%q
 export DEVIN_CONTAINER_REGISTRY=%q
 echo "==== fix guest filesystem: stop services ===="
 systemctl stop devin-scheduler.service 2>/dev/null || true
+systemctl stop devin-tool-gateway.service 2>/dev/null || true
 systemctl stop devin-firecracker.service 2>/dev/null || true
 systemctl stop devin-firecracker-host.service 2>/dev/null || true
-docker rm -f scheduler firecracker 2>/dev/null || true
+docker rm -f scheduler tool-gateway firecracker 2>/dev/null || true
 echo "==== prune stale microVM overlays ===="
 rm -rf /var/lib/devin/vms/*
 find /var/lib/devin/task-snapshots -type f -delete 2>/dev/null || true

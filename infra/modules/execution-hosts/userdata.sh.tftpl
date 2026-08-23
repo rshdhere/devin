@@ -115,11 +115,31 @@ ExecStop=/usr/bin/docker stop firecracker
 WantedBy=multi-user.target
 UNIT
 
+cat >/etc/systemd/system/devin-tool-gateway.service <<UNIT
+[Unit]
+Description=devin.baby tool-gateway
+After=docker.service
+Requires=docker.service
+
+[Service]
+Restart=always
+RestartSec=5
+ExecStartPre=-/usr/bin/docker rm -f tool-gateway
+ExecStart=/usr/bin/docker run --rm --name tool-gateway \\
+  --network host \\
+  -e TOOL_GATEWAY_GRPC_ADDR=:9095 \\
+  ${container_registry}/devin-tool-gateway:${image_tag}
+ExecStop=/usr/bin/docker stop tool-gateway
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+
 cat >/etc/systemd/system/devin-scheduler.service <<UNIT
 [Unit]
 Description=devin.baby scheduler
-After=devin-firecracker.service
-Wants=devin-firecracker.service
+After=devin-firecracker.service devin-tool-gateway.service
+Wants=devin-firecracker.service devin-tool-gateway.service
 
 [Service]
 Restart=always
@@ -139,7 +159,8 @@ ExecStart=/usr/bin/docker run --rm --name scheduler \\
   -e QUEUE_DRIVER=$${QUEUE_DRIVER} \\
   -e SQS_QUEUE_URL=$${SQS_QUEUE_URL} \\
   -e AWS_REGION=${aws_region} \\
-  -e DEFAULT_AGENT=cursor \\
+  -e DEFAULT_AGENT=brain \\
+  -e TOOL_GATEWAY_GRPC_URL=127.0.0.1:9095 \\
   -e SANDBOX_READY_TIMEOUT_SECONDS=300 \\
   -e RUNTIME_READY_TIMEOUT_SECONDS=120 \\
   -e AGENT_RUN_TIMEOUT_MIN=60 \\

@@ -8,15 +8,17 @@ In Devin’s architecture, the brain is the cloud service that drives intelligen
 
 ```text
 Web UI → API server → Brain (:9092)
+                         │  src/harness (OpenAI) + src/proto (gRPC IDL)
                          ↓ POST /internal/v1/jobs
                     Scheduler worker (execution host)
-                         ↓ orchestrator + firecracker
-                    Runtime agent in microVM
+                         ↓ tool-gateway gRPC (:9095) → runtime HTTP
+                    Devbox microVM (dumb tools)
 ```
 
 - Accepts task create / retry / continue / terminate / wake
 - Persists tasks, events, and sessions when `DATABASE_URL` is set
-- Delegates execution via `EXECUTION_WORKER_URL`
+- Runs the Brain harness under `src/harness` (tools via `src/proto/devbox/v1`)
+- Delegates sandbox provision via `EXECUTION_WORKER_URL`
 - Runs `@devin/scheduler` with `mode: "brain"`
 
 Point the API server’s `SCHEDULER_URL` at this service in cloud deployments.
@@ -45,6 +47,9 @@ Default listen port: **9092** (`BRAIN_PORT`).
 | `EXECUTION_WORKER_URL` | Worker scheduler on the execution host       |
 | `ORCHESTRATOR_URL`     | Orchestrator base URL                        |
 | `RUNTIME_URL`          | Runtime supervisor base URL                  |
-| `DEFAULT_AGENT`        | `cursor` \| `claude` \| `mock`               |
+| `DEFAULT_AGENT`        | `brain` (product); `mock` for template verify |
+| `OPENAI_API_KEY`       | OpenAI key for Brain harness                 |
+| `OPENAI_MODEL`         | Harness model (default `gpt-4o-mini`)        |
+| `TOOL_GATEWAY_GRPC_URL`| Execution-host tool-gateway (`127.0.0.1:9095`) |
 
 See `.env.sample` for a starter file. Ops notes: [docs/brain-and-postgres.md](../../docs/brain-and-postgres.md). Concept mapping: [docs/devin-alignment.md](../../docs/devin-alignment.md).

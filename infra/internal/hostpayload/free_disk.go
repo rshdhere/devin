@@ -10,8 +10,9 @@ df -h / /var/lib/devin 2>/dev/null || df -h /
 du -sh /var/lib/devin/vms /var/lib/devin/task-snapshots 2>/dev/null || true
 echo "==== stopping services ===="
 systemctl stop devin-scheduler.service 2>/dev/null || true
+systemctl stop devin-tool-gateway.service 2>/dev/null || true
 systemctl stop devin-firecracker.service 2>/dev/null || true
-docker rm -f scheduler firecracker 2>/dev/null || true
+docker rm -f scheduler tool-gateway firecracker 2>/dev/null || true
 echo "==== pruning stale VM state ===="
 rm -rf /var/lib/devin/vms/*
 find /var/lib/devin/task-snapshots -type f -mtime +14 -delete 2>/dev/null || true
@@ -19,11 +20,15 @@ docker container prune -f 2>/dev/null || true
 echo "==== restarting services ===="
 systemctl start devin-firecracker.service
 sleep 3
+systemctl start devin-tool-gateway.service
+sleep 1
 systemctl start devin-scheduler.service
 sleep 2
 echo "==== after ===="
 df -h / /var/lib/devin 2>/dev/null || df -h /
 curl -sf http://127.0.0.1:9092/health 2>/dev/null || echo "firecracker health: unavailable"
+echo
+ss -ltn 2>/dev/null | grep -E ':9095\b' || echo "tool-gateway :9095 not listening"
 echo
 curl -sf http://127.0.0.1:9091/health 2>/dev/null || echo "scheduler health: unavailable"
 echo

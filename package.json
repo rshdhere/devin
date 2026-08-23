@@ -27,6 +27,7 @@
   "packageManager": "bun@1.2.3",
   "workspaces": [
     "apps/*",
+    "apps/brain/src/harness",
     "packages/*",
     "packages/api/*",
     "packages/services/*",

@@ -18,7 +18,8 @@ Container images are expected on **Docker Hub** (not ECR). Configure `imagePullS
          ┌──────────────────────────────┼──────────────────────────────┐
          │  Execution host(s) EC2       │    NAT → public subnets      │
          │  firecracker :9092           │    (ALB / NLB via GitOps)    │
-         │  scheduler        :9091    │                              │
+         │  tool-gateway :9095 (local)  │                              │
+         │  scheduler    :9091          │                              │
          └──────────────────────────────┴──────────────────────────────┘
 
          Neon Postgres — optional; or self-hosted Postgres in EKS (GitOps)
@@ -89,6 +90,7 @@ Set `container_registry` in `terraform.tfvars` (e.g. `docker.io/youruser`). Imag
 | scheduler | `<container_registry>/devin-scheduler:<tag>` |
 | brain | `<container_registry>/devin-brain:<tag>` |
 | firecracker | `<container_registry>/devin-firecracker:<tag>` |
+| tool-gateway | `<container_registry>/devin-tool-gateway:<tag>` |
 | infra CLI | `<container_registry>/devin-infra:<tag>` |
 
 On **EKS**, add a `kubernetes.io/dockerconfigjson` secret and reference it in your GitOps manifests for private repos.
@@ -99,8 +101,8 @@ On **execution hosts**, run `docker login` before enabling the systemd units if 
 
 | Workflow | Trigger | What it does |
 | --- | --- | --- |
-| **Registry** | push to `main` | Builds and pushes all images including `devin-brain`, `devin-scheduler`, `devin-firecracker`, and `devin-infra` |
-| **Deploy execution hosts** | after Registry on `main`; or manual | SSM: `docker pull` + restart scheduler and firecracker on EC2 |
+| **Registry** | push to `main` | Builds and pushes all images including `devin-brain`, `devin-scheduler`, `devin-firecracker`, `devin-tool-gateway`, and `devin-infra` |
+| **Deploy execution hosts** | after Registry on `main`; or manual | SSM: `docker pull` + restart firecracker, tool-gateway, and scheduler on EC2 |
 | **build-check** | push / PR | Compiles Go services and dry-builds the scheduler Docker image |
 
 Execution hosts are **not** rolled by GitOps. Runtime golden snapshots require a manual deploy with `rebuild_runtime_snapshots=true` or `devin-infra bootstrap-snapshots <instance-id>`.
@@ -323,6 +325,7 @@ Aligned with deployment.md §4.5:
 | --- | --- | --- |
 | Execution host inbound | 9092 | EKS node SG → firecracker |
 | Execution host inbound | 9091 | EKS node SG → scheduler |
+| tool-gateway (:9095) | localhost only | Worker → gateway on same host; no SG open required |
 | Execution host outbound | 443 | GitHub, agent APIs, Docker Hub |
 | Execution host outbound | 9090 | Orchestrator NLB |
 | EKS node egress | 9091–9092 | VPC CIDR → execution hosts |

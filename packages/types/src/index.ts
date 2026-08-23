@@ -1,10 +1,20 @@
-export type { AgentProvider, CursorAgentModelId } from "./agents";
+export type {
+  AgentProvider,
+  BrainAgentModelId,
+  CursorAgentModelId,
+} from "./agents";
 export {
+  BRAIN_AGENT_MODELS,
   CURSOR_AGENT_MODELS,
+  DEFAULT_BRAIN_AGENT_MODEL,
   DEFAULT_CURSOR_AGENT_MODEL,
+  brainAgentModelLabel,
   cursorAgentModelLabel,
   isTemplateAgent,
+  normalizeAgentProvider,
+  resolveBrainAgentModel,
   resolveCursorAgentModel,
+  usesDevboxSession,
   usesRuntimeAgent,
 } from "./agents";
 export type {
@@ -29,7 +39,6 @@ export {
   isSandboxRuntime,
   resolveRuntimeForTask,
   runtimeLabel,
-  stackRuntimes,
   SANDBOX_RUNTIMES,
 } from "./runtime";
 export type { SandboxRuntime, StackRuntime } from "./runtime";

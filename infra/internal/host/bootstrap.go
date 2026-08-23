@@ -29,6 +29,7 @@ func BootstrapSnapshotsLocal(ctx context.Context) error {
 		if _, err := os.Stat(marker); err == nil {
 			log.Printf("snapshots already bootstrapped (%s)", marker)
 			_ = sysutil.Systemctl(ctx, "enable", "--now", "devin-firecracker.service")
+			_ = sysutil.Systemctl(ctx, "enable", "--now", "devin-tool-gateway.service")
 			_ = sysutil.Systemctl(ctx, "enable", "--now", "devin-scheduler.service")
 			return nil
 		}
@@ -83,9 +84,11 @@ func BootstrapSnapshotsLocal(ctx context.Context) error {
 	if force {
 		_ = sysutil.Systemctl(ctx, "restart", "devin-firecracker.service")
 		_ = sysutil.Systemctl(ctx, "restart", "devin-firecracker-host.service")
+		_ = sysutil.Systemctl(ctx, "restart", "devin-tool-gateway.service")
 	} else {
 		_ = sysutil.Systemctl(ctx, "enable", "--now", "devin-firecracker.service")
 		_ = sysutil.Systemctl(ctx, "enable", "--now", "devin-firecracker-host.service")
+		_ = sysutil.Systemctl(ctx, "enable", "--now", "devin-tool-gateway.service")
 	}
 	_ = sysutil.Systemctl(ctx, "enable", "--now", "devin-scheduler.service")
 	time.Sleep(3 * time.Second)

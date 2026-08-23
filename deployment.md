@@ -306,9 +306,11 @@ CMD ["bun", "run", "--cwd", "apps/scheduler", "start"]
 EOF
 
 docker build -f docker/firecracker/Dockerfile -t $REGISTRY/devin-firecracker:$TAG .
+docker build -f docker/tool-gateway/Dockerfile -t $REGISTRY/devin-tool-gateway:$TAG .
 
 docker push $REGISTRY/devin-scheduler:$TAG
 docker push $REGISTRY/devin-firecracker:$TAG
+docker push $REGISTRY/devin-tool-gateway:$TAG
 ```
 
 Pin image tags in your GitOps overlay `images` block (see `migration.md` §3).

@@ -83,7 +83,8 @@ export function SessionDetail({
   const isActive =
     task.status !== "completed" &&
     task.status !== "failed" &&
-    task.status !== "cancelled";
+    task.status !== "cancelled" &&
+    task.status !== "awaiting_review";
 
   const elapsedTime = useElapsedTime(task.createdAt, isActive, events);
 

@@ -69,7 +69,7 @@ export const githubPermissionsSchema = {
 
 export const createTaskSchema = z.object({
   prompt: z.string().min(1).max(8000),
-  agent: z.enum(["cursor", "claude", "mock"]).optional(),
+  agent: z.enum(["brain", "mock"]).optional(),
   runtime: z
     .enum(["agent", "nextjs", "node", "go", "rust", "python"])
     .optional(),

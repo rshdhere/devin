@@ -9,7 +9,7 @@ import {
 } from "@/components/dashboard/prompt-composer-constants";
 import { PromptComposerToolbar } from "@/components/dashboard/prompt-composer-toolbar";
 import { useSessions } from "@/components/dashboard/sessions-context";
-import { DEFAULT_CURSOR_AGENT_MODEL } from "@devin/types";
+import { DEFAULT_BRAIN_AGENT_MODEL } from "@devin/types";
 import { cn } from "@/lib/utils";
 
 interface PromptComposerProps {
@@ -26,7 +26,7 @@ export function PromptComposer({
   const { startSession } = useSessions();
   const agentMenuRef = useRef<HTMLDivElement>(null);
   const [prompt, setPrompt] = useState("");
-  const [agent, setAgent] = useState<AgentId>("cursor");
+  const [agent, setAgent] = useState<AgentId>("brain");
   const [showAgentMenu, setShowAgentMenu] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -62,7 +62,7 @@ export function PromptComposer({
         repository: selectedRepository ?? undefined,
         autoCreateRepository: selectedRepository ? undefined : true,
         autoStartSandbox: true,
-        agentModel: agent === "cursor" ? DEFAULT_CURSOR_AGENT_MODEL : undefined,
+        agentModel: agent === "brain" ? DEFAULT_BRAIN_AGENT_MODEL : undefined,
       });
       setPrompt("");
     } catch (submitError) {

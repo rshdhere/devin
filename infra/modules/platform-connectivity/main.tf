@@ -109,6 +109,18 @@ resource "aws_ssm_parameter" "orchestrator_url" {
   depends_on = [time_sleep.wait_for_orchestrator_nlb]
 }
 
+resource "aws_ssm_parameter" "tool_gateway_grpc_url" {
+  count = var.manage_ssm_parameters ? 1 : 0
+
+  name  = "${local.ssm_prefix}/tool_gateway_grpc_url"
+  type  = "String"
+  value = "127.0.0.1:9095"
+
+  tags = merge(var.tags, {
+    Name = "${var.name_prefix}-tool-gateway-grpc-url"
+  })
+}
+
 resource "aws_ssm_parameter" "task_queue_url" {
   count = var.manage_ssm_parameters && var.publish_task_queue_url ? 1 : 0
 

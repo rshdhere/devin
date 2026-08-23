@@ -10,6 +10,7 @@
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1108.0",
     "@devin/agent-sdk": "workspace:*",
+    "@devin/brain-harness": "workspace:*",
     "@devin/drizzle": "workspace:*",
     "@devin/events": "workspace:*",
     "@devin/queue": "workspace:*",

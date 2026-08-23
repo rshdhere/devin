@@ -15,10 +15,7 @@ import {
   agentOptions,
   type AgentId,
 } from "@/components/dashboard/prompt-composer-constants";
-import {
-  cursorAgentModelLabel,
-  DEFAULT_CURSOR_AGENT_MODEL,
-} from "@devin/types";
+import { brainAgentModelLabel, DEFAULT_BRAIN_AGENT_MODEL } from "@devin/types";
 import { cn } from "@/lib/utils";
 
 interface PromptComposerToolbarProps {
@@ -72,9 +69,7 @@ export function PromptComposerToolbar({
             onClick={onToggleAgentMenu}
             className="flex cursor-pointer items-center gap-1 rounded-md px-1.5 py-1 text-[13px] text-zinc-200 transition-colors hover:bg-white/[0.06]"
           >
-            <span>
-              {selectedAgent.label === "Cursor" ? "Agent" : selectedAgent.label}
-            </span>
+            <span>{selectedAgent.label}</span>
             <ChevronDown
               className={cn(
                 "size-3.5 text-zinc-500 transition-transform",
@@ -104,11 +99,11 @@ export function PromptComposerToolbar({
                   >
                     <span className="flex items-center gap-1.5 text-[13px]">
                       <Bot className="size-3.5 opacity-60" />
-                      {option.label === "Cursor" ? "Agent" : option.label}
+                      {option.label}
                     </span>
                     <span className="mt-0.5 text-[11px] text-zinc-600">
-                      {option.id === "cursor"
-                        ? cursorAgentModelLabel(DEFAULT_CURSOR_AGENT_MODEL)
+                      {option.id === "brain"
+                        ? brainAgentModelLabel(DEFAULT_BRAIN_AGENT_MODEL)
                         : option.description}
                     </span>
                   </MotionButton>
