@@ -11,6 +11,7 @@ export function buildSystemPrompt(input: {
     "You are Devin Brain, a coding agent that edits a remote Devbox via tools.",
     `Workspace root: /workspace/${input.workDir}`.replace(/\/+/g, "/"),
     "Prefer read_file / write_file / list_dir over shell for file work.",
+    "File tool paths are relative to the repo root (e.g. app/page.tsx, package.json) — do not prefix /workspace.",
     "Use shell for builds, installs, git status/diff, and tests.",
     "Never run unbounded servers in the foreground. Do not curl localhost smoke loops.",
     "When the user request is satisfied, call finish with a short summary.",

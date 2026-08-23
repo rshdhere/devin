@@ -144,11 +144,29 @@ func (s *server) ListDir(ctx context.Context, req *devboxv1.ListDirRequest) (*de
 	var asObj struct {
 		Entries []string `json:"entries"`
 		Files   []string `json:"files"`
+		Items   []struct {
+			Name  string `json:"name"`
+			Path  string `json:"path"`
+			IsDir bool   `json:"isDir"`
+		} `json:"items"`
 	}
 	if json.Unmarshal(raw, &asObj) == nil {
 		entries := asObj.Entries
 		if len(entries) == 0 {
 			entries = asObj.Files
+		}
+		if len(entries) == 0 && len(asObj.Items) > 0 {
+			entries = make([]string, 0, len(asObj.Items))
+			for _, item := range asObj.Items {
+				label := item.Path
+				if label == "" {
+					label = item.Name
+				}
+				if item.IsDir {
+					label += "/"
+				}
+				entries = append(entries, label)
+			}
 		}
 		return &devboxv1.ListDirResponse{Entries: entries}, nil
 	}
@@ -306,7 +324,13 @@ func (s *server) get(ctx context.Context, u string) ([]byte, error) {
 		return nil, status.Errorf(codes.Internal, "read body: %v", err)
 	}
 	if res.StatusCode >= 300 {
-		return nil, status.Errorf(codes.Internal, "HTTP %d: %s", res.StatusCode, truncate(string(data)))
+		code := codes.Internal
+		if res.StatusCode == http.StatusNotFound {
+			code = codes.NotFound
+		} else if res.StatusCode == http.StatusBadRequest {
+			code = codes.InvalidArgument
+		}
+		return nil, status.Errorf(code, "HTTP %d: %s", res.StatusCode, truncate(string(data)))
 	}
 	return data, nil
 }

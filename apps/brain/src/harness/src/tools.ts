@@ -73,6 +73,36 @@ function truncate(value: string, max = MAX_OUTPUT_CHARS): string {
   return `${trimmed.slice(0, max)}\n… (truncated; narrow your command)`;
 }
 
+/**
+ * File tools resolve against the guest /workspace root. Models usually pass
+ * repo-relative paths (app/page.tsx); prefix with workDir so they land in
+ * /workspace/<repo>/… instead of /workspace/app/….
+ */
+export function resolveRepoPath(workDir: string, rawPath: string): string {
+  const root = workDir.trim().replace(/^\/+|\/+$/g, "") || "repo";
+  let p = rawPath.trim().replace(/\\/g, "/");
+  if (!p || p === ".") {
+    return root;
+  }
+
+  while (p.startsWith("/workspace/")) {
+    p = p.slice("/workspace/".length);
+  }
+  while (p.startsWith("workspace/")) {
+    p = p.slice("workspace/".length);
+  }
+  p = p
+    .replace(/^\/+/, "")
+    .split("/")
+    .filter((seg) => seg.length > 0 && seg !== ".")
+    .join("/");
+
+  if (!p || p === root || p.startsWith(`${root}/`)) {
+    return p || root;
+  }
+  return `${root}/${p}`;
+}
+
 function promisify<T>(
   fn: (
     req: Record<string, unknown>,
@@ -147,7 +177,8 @@ export const OPENAI_TOOLS = [
     type: "function" as const,
     function: {
       name: "read_file",
-      description: "Read a UTF-8 file from the Devbox.",
+      description:
+        "Read a UTF-8 file from the Devbox. Path is relative to the repo root (e.g. app/page.tsx).",
       parameters: {
         type: "object",
         properties: { path: { type: "string" } },
@@ -159,7 +190,8 @@ export const OPENAI_TOOLS = [
     type: "function" as const,
     function: {
       name: "write_file",
-      description: "Write a UTF-8 file in the Devbox.",
+      description:
+        "Write a UTF-8 file in the Devbox. Path is relative to the repo root (e.g. app/page.tsx).",
       parameters: {
         type: "object",
         properties: {
@@ -174,7 +206,8 @@ export const OPENAI_TOOLS = [
     type: "function" as const,
     function: {
       name: "list_dir",
-      description: "List directory entries in the Devbox.",
+      description:
+        "List directory entries in the Devbox. Path is relative to the repo root (default: .).",
       parameters: {
         type: "object",
         properties: { path: { type: "string" } },
@@ -300,29 +333,35 @@ export async function executeTool(
       };
     }
     case "read_file": {
+      const path = resolveRepoPath(ctx.workDir, String(args.path ?? ""));
       const res = await promisify<{ content?: string }>(
         ctx.client.ReadFile.bind(ctx.client),
-        { ...base, path: String(args.path ?? "") },
+        { ...base, path },
       );
       return { content: truncate(res.content ?? "") };
     }
     case "write_file": {
+      const path = resolveRepoPath(ctx.workDir, String(args.path ?? ""));
       const res = await promisify<{ status?: string; path?: string }>(
         ctx.client.WriteFile.bind(ctx.client),
         {
           ...base,
-          path: String(args.path ?? ""),
+          path,
           content: String(args.content ?? ""),
         },
       );
       return {
-        content: `wrote ${res.path ?? args.path} (${res.status ?? "ok"})`,
+        content: `wrote ${res.path ?? path} (${res.status ?? "ok"})`,
       };
     }
     case "list_dir": {
+      const path = resolveRepoPath(
+        ctx.workDir,
+        String(args.path ?? ctx.workDir),
+      );
       const res = await promisify<{ entries?: string[] }>(
         ctx.client.ListDir.bind(ctx.client),
-        { ...base, path: String(args.path ?? ctx.workDir) },
+        { ...base, path },
       );
       return { content: truncate((res.entries ?? []).join("\n")) };
     }
@@ -377,7 +416,7 @@ export async function executeTool(
             ...base,
             command: [
               "set +e",
-              "grep -RIl -E 'Scaffold ready|Scaffold is running|Implement the full app' --include='*.js' --include='*.ts' --include='*.html' --include='*.tsx' --include='*.jsx' . 2>/dev/null | head -8",
+              "grep -RIl -E 'Scaffold ready|Scaffold is running|Implement the full app|App Router scaffold' --include='*.js' --include='*.ts' --include='*.html' --include='*.tsx' --include='*.jsx' . 2>/dev/null | head -8",
             ].join("\n"),
             cwd: ctx.workDir,
             timeoutSec: 45,

@@ -288,7 +288,7 @@ export async function assertGreenfieldAgentProgress(
       '  new_commits=$(git rev-list --count "$base"..HEAD 2>/dev/null || echo 0)',
       "fi",
       'echo "head=$head dirty=$dirty new_commits=$new_commits base=$base"',
-      "grep -RIl -E 'Scaffold ready|Scaffold is running|Implement the full app' --include='*.js' --include='*.ts' --include='*.html' --include='*.tsx' --include='*.jsx' . 2>/dev/null | head -8",
+      "grep -RIl -E 'Scaffold ready|Scaffold is running|Implement the full app|App Router scaffold' --include='*.js' --include='*.ts' --include='*.html' --include='*.tsx' --include='*.jsx' . 2>/dev/null | head -8",
     ].join("\n"),
   });
 
