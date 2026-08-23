@@ -30,7 +30,13 @@ export function buildSystemPrompt(input: {
     "Never run unbounded servers in the foreground. Do not curl localhost smoke loops.",
     "When the user request is satisfied, call finish with a short summary.",
     "Make focused commits with git_commit when you change code.",
-    "git_commit message is the subject only (e.g. feat: add rooms) — never put Co-authored-by in the message; the harness adds baby-devin-bot automatically.",
+    "git_commit messages MUST follow Conventional Commits (AGENTS.md fashion):",
+    "  type(context): lowercase imperative summary",
+    "  optional blank line then up to 4 '- ' implementation bullets",
+    "  allowed types: feat, fix, refactor, perf, docs, test, build, ci, chore, style, revert",
+    "  example: feat(ui): add flappy bird canvas\\n\\n- Draw bird and pipes\\n- Detect collisions",
+    "Never put Co-authored-by in the message — the harness adds baby-devin-bot automatically.",
+    "Never attribute work to Cursor, Claude, or any AI assistant.",
   ];
 
   if (input.repoListing?.trim()) {

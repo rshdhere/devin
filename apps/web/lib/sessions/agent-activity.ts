@@ -169,23 +169,30 @@ export function humanizeToolProgressLine(
       return fileName ? `Edited \`${fileName}\`` : "Edited a file";
     case "Read":
     case "read_file":
-      return fileName ? `Read \`${fileName}\`` : "Read a file";
+      // Reads are noisy in Progress — Changes / edits already show work.
+      return null;
     case "List":
     case "list_dir":
-      return shortDetail ? `Listed \`${shortDetail}\`` : "Listed a directory";
+      return null;
     case "Bash":
     case "Shell":
     case "shell":
+      if (isNoisyShellCommand(shortDetail)) {
+        return null;
+      }
       return shortDetail
         ? `Ran \`${shortDetail.length > 48 ? `${shortDetail.slice(0, 45)}…` : shortDetail}\``
         : "Ran a shell command";
     case "Edit":
       return fileName ? `Updated \`${fileName}\`` : "Updated a file";
     case "Commit":
-    case "git_commit":
-      return shortDetail
-        ? `Committed · ${shortDetail.split("\n")[0]!.length > 48 ? `${shortDetail.split("\n")[0]!.slice(0, 45)}…` : shortDetail.split("\n")[0]}`
-        : "Committed changes";
+    case "git_commit": {
+      const subject = shortDetail.split("\n")[0]?.trim() ?? "";
+      if (!subject || /^co-authored-by:/i.test(subject)) {
+        return "Committed changes";
+      }
+      return `Committed · ${subject.length > 48 ? `${subject.slice(0, 45)}…` : subject}`;
+    }
     case "Push":
     case "git_push":
       return "Pushed branch";
@@ -198,6 +205,20 @@ export function humanizeToolProgressLine(
       }
       return tool;
   }
+}
+
+/** Shell probes that clutter Progress without showing product work. */
+export function isNoisyShellCommand(command: string): boolean {
+  const c = command.trim().toLowerCase();
+  if (!c) {
+    return true;
+  }
+  return (
+    /^(git\s+(status|diff|log|show|rev-parse|branch|remote)\b)/.test(c) ||
+    /^(ls|pwd|whoami|date|uname|echo|cat\s+\S+$)/.test(c) ||
+    /^(find|tree|du|df|wc)\b/.test(c) ||
+    /^git\s+add\b/.test(c)
+  );
 }
 
 export function looksLikeSyntheticFollowUpPrompt(text: string): boolean {
@@ -508,13 +529,15 @@ export function progressActivityLines(
 ): ProgressActivityLine[] {
   const lines: ProgressActivityLine[] = [];
   const seen = new Set<string>();
+  let lastLine = "";
 
   for (const event of events) {
     if (event.type === "agent.started") {
-      const text = event.message.trim() || "Brain harness started";
+      const text = "Brain harness started";
       if (!seen.has(text)) {
         seen.add(text);
         lines.push({ line: text, timestamp: event.timestamp });
+        lastLine = text;
       }
       continue;
     }
@@ -531,49 +554,48 @@ export function progressActivityLines(
               "",
             );
       const line = humanizeToolProgressLine(tool, detail);
-      if (line && !seen.has(line)) {
-        seen.add(line);
-        lines.push({ line, timestamp: event.timestamp });
+      if (!line) {
+        continue;
       }
+      // Collapse consecutive identical commits / edits (model spam).
+      if (line === lastLine) {
+        continue;
+      }
+      // Allow the same edit later if something else happened in between,
+      // but still cap exact duplicates overall for commits.
+      if (line.startsWith("Committed ·") && seen.has(line)) {
+        continue;
+      }
+      seen.add(line);
+      lines.push({ line, timestamp: event.timestamp });
+      lastLine = line;
       continue;
     }
     if (
       event.type === "agent.log" &&
-      /brain harness step \d+\/\d+|brain harness loop ready/i.test(
+      /brain harness step \d+\/\d+|brain harness loop ready|Commit skipped/i.test(
         event.message,
       )
     ) {
-      // Heartbeats — never clutter Progress (tools/outputs cover real work).
       continue;
     }
     if (
       event.type === "agent.log" &&
       /compacted conversation|nudged model/i.test(event.message)
     ) {
-      const text = event.message.trim();
-      if (text && !seen.has(text)) {
-        seen.add(text);
-        lines.push({ line: text, timestamp: event.timestamp });
-      }
       continue;
-    }
-    if (event.type === "agent.output" && !isAgentStreamNoise(event.message)) {
-      const text = event.message.trim();
-      if (text.length >= 24 && text.length <= 200 && !seen.has(text)) {
-        seen.add(text);
-        lines.push({ line: text, timestamp: event.timestamp });
-      }
     }
     if (event.type === "agent.completed") {
       const text = "Harness finished";
       if (!seen.has(text)) {
         seen.add(text);
         lines.push({ line: text, timestamp: event.timestamp });
+        lastLine = text;
       }
     }
   }
 
-  return lines.slice(-20);
+  return lines.slice(-16);
 }
 
 export function sumLineCounts(counts: Record<string, number>): number {

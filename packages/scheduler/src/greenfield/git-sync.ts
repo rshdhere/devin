@@ -93,7 +93,9 @@ export function buildPushGreenfieldMainScript(opts?: {
     "attempt=0",
     'while [ "$attempt" -lt "$max" ]; do',
     "  attempt=$((attempt + 1))",
-    `  if timeout ${timeout} git fetch --depth 1 --no-tags origin main && ${pushCmd}; then`,
+    // Avoid --depth 1 here — it orphans pre-agent commits and breaks
+    // greenfield progress counting (rev-list base..HEAD).
+    `  if timeout ${timeout} git fetch --no-tags origin main && ${pushCmd}; then`,
     "    exit 0",
     "  fi",
     '  [ "$attempt" -lt "$max" ] && sleep 2',

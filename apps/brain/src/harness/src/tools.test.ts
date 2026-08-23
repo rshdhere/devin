@@ -1,6 +1,10 @@
 import { describe, expect, it } from "bun:test";
 import { toolProgressDetail } from "./loop.js";
-import { ensureBotCommitMessage, resolveRepoPath } from "./tools.js";
+import {
+  ensureBotCommitMessage,
+  normalizeConventionalSubject,
+  resolveRepoPath,
+} from "./tools.js";
 
 describe("resolveRepoPath", () => {
   it("prefixes repo-relative paths with workDir", () => {
@@ -30,6 +34,20 @@ describe("resolveRepoPath", () => {
   });
 });
 
+describe("normalizeConventionalSubject", () => {
+  it("keeps typed scoped subjects and lowercases the verb", () => {
+    expect(
+      normalizeConventionalSubject("feat(ui): Add flappy bird canvas"),
+    ).toBe("feat(ui): add flappy bird canvas");
+  });
+
+  it("rewrites Implemented … into imperative feat", () => {
+    expect(
+      normalizeConventionalSubject("feat: implement flappy bird game UI"),
+    ).toBe("feat: add flappy bird game UI");
+  });
+});
+
 describe("ensureBotCommitMessage", () => {
   it("appends baby-devin-bot trailer to subject-only messages", () => {
     const msg = ensureBotCommitMessage(
@@ -44,28 +62,47 @@ describe("ensureBotCommitMessage", () => {
     expect(msg.split("Co-authored-by: baby-devin-bot").length - 1).toBe(1);
   });
 
+  it("preserves conventional bullets before the trailer", () => {
+    const msg = ensureBotCommitMessage(
+      [
+        "feat(ui): add flappy bird canvas",
+        "",
+        "- Render bird and pipes",
+        "- Detect collisions",
+        "- Keep /health JSON ok",
+      ].join("\n"),
+    );
+    expect(msg.startsWith("feat(ui): add flappy bird canvas\n\n")).toBe(true);
+    expect(msg).toContain("- Render bird and pipes");
+    expect(msg).toContain("- Detect collisions");
+    expect(msg).toContain(
+      "Co-authored-by: baby-devin-bot <baby-devin-bot@users.noreply.github.com>",
+    );
+  });
+
   it("does not duplicate an existing baby-devin-bot trailer", () => {
     const msg = ensureBotCommitMessage(
-      "feat: add room\n\nCo-authored-by: baby-devin-bot <baby-devin-bot@users.noreply.github.com>",
+      "feat(chat): add room\n\nCo-authored-by: baby-devin-bot <baby-devin-bot@users.noreply.github.com>",
     );
     expect(msg.split("Co-authored-by: baby-devin-bot").length - 1).toBe(1);
+    expect(msg.startsWith("feat(chat): add room\n\n")).toBe(true);
   });
 
   it("strips Cursor/Claude co-authors", () => {
     const msg = ensureBotCommitMessage(
-      "feat: board\n\nCo-authored-by: Cursor Agent <cursoragent@cursor.com>\nCo-authored-by: Claude <noreply@anthropic.com>",
+      "feat(board): add board\n\nCo-authored-by: Cursor Agent <cursoragent@cursor.com>\nCo-authored-by: Claude <noreply@anthropic.com>",
     );
     expect(msg).not.toMatch(/Cursor Agent/i);
     expect(msg).not.toMatch(/Claude/i);
     expect(msg).toContain("Co-authored-by: baby-devin-bot");
-    expect(msg.startsWith("feat: board\n\n")).toBe(true);
+    expect(msg.startsWith("feat(board): add board\n\n")).toBe(true);
   });
 
   it("replaces trailer-only messages with a real subject", () => {
     const msg = ensureBotCommitMessage(
       "Co-authored-by: baby-devin-bot <baby-devin-bot@users.noreply.github.com>",
     );
-    expect(msg.startsWith("devin: agent changes\n\n")).toBe(true);
+    expect(msg.startsWith("chore(repo): update project files\n\n")).toBe(true);
     expect(msg).toContain(
       "Co-authored-by: baby-devin-bot <baby-devin-bot@users.noreply.github.com>",
     );
@@ -74,9 +111,9 @@ describe("ensureBotCommitMessage", () => {
 
   it("strips co-author from single-newline subject lines", () => {
     const msg = ensureBotCommitMessage(
-      "feat: websocket hub\nCo-authored-by: baby-devin-bot <baby-devin-bot@users.noreply.github.com>",
+      "feat(ws): add websocket hub\nCo-authored-by: baby-devin-bot <baby-devin-bot@users.noreply.github.com>",
     );
-    expect(msg.startsWith("feat: websocket hub\n\n")).toBe(true);
+    expect(msg.startsWith("feat(ws): add websocket hub\n\n")).toBe(true);
   });
 });
 
@@ -105,11 +142,11 @@ describe("toolProgressDetail", () => {
       "git_commit",
       JSON.stringify({
         message:
-          "feat: rooms\n\nCo-authored-by: baby-devin-bot <baby-devin-bot@users.noreply.github.com>",
+          "feat(ui): add rooms\n\nCo-authored-by: baby-devin-bot <baby-devin-bot@users.noreply.github.com>",
       }),
     );
     expect(progress.tool).toBe("Commit");
-    expect(progress.detail).toBe("feat: rooms");
+    expect(progress.detail).toBe("feat(ui): add rooms");
     expect(progress.message).not.toContain("Co-authored-by");
   });
 });

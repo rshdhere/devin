@@ -291,12 +291,18 @@ export async function assertGreenfieldAgentProgress(
       "recovery_only=0",
       `base='${preAgentHead.replace(/'/g, "")}'`,
       'if [ -n "$base" ] && git cat-file -e "$base^{commit}" 2>/dev/null; then',
-      '  new_commits=$(git rev-list --count "$base"..HEAD 2>/dev/null || echo 0)',
+      '  new_commits=$(git rev-list --count "$base"..HEAD 2>/dev/null | tr -d "[:space:]")',
       '  msgs=$(git log --format=%s "$base"..HEAD 2>/dev/null || true)',
-      '  recovery_n=$(printf "%s\\n" "$msgs" | grep -ciE "interruption recovery|checkpoint —" || true)',
-      '  if [ "$new_commits" -gt 0 ] && [ "$recovery_n" -ge "$new_commits" ]; then recovery_only=1; fi',
+      "else",
+      // Shallow fetch --depth 1 during greenfield push can orphan preAgentHead.
+      // Fall back to counting non-scaffold commits still present locally.
+      "  msgs=$(git log --format=%s -n 40 2>/dev/null || true)",
+      '  new_commits=$(printf "%s\\n" "$msgs" | grep -civE "^(devin: initialize|devin: scaffold|Bootstrapped|chore: bootstrap)" || true)',
+      '  new_commits=$(printf "%s" "$new_commits" | tr -d "[:space:]")',
       "fi",
-      'echo "head=$head dirty=$dirty new_commits=$new_commits recovery_only=$recovery_only base=$base"',
+      'recovery_n=$(printf "%s\\n" "$msgs" | grep -ciE "interruption recovery|checkpoint —" || true)',
+      'if [ -n "$new_commits" ] && [ "$new_commits" -gt 0 ] 2>/dev/null && [ "$recovery_n" -ge "$new_commits" ] 2>/dev/null; then recovery_only=1; fi',
+      'echo "head=$head dirty=$dirty new_commits=${new_commits:-0} recovery_only=$recovery_only base=$base"',
       ...(jsUiStack
         ? [
             "echo '---SCAFFOLD---'",
@@ -304,7 +310,7 @@ export async function assertGreenfieldAgentProgress(
             "echo '---STUB---'",
             "grep -RIl -E 'Play .+ online with friends|View Leaderboard|Start Game|coming soon' --include='*.js' --include='*.ts' --include='*.tsx' --include='*.jsx' --include='*.html' . 2>/dev/null | head -8",
             "echo '---BOARD---'",
-            "grep -RIl -E 'chessboard|Chessboard|game-board|GameBoard|grid-cols-8|squares\\.map|square\\[' --include='*.js' --include='*.ts' --include='*.tsx' --include='*.jsx' --include='*.css' . 2>/dev/null | head -5",
+            "grep -RIl -E 'chessboard|Chessboard|game-board|GameBoard|flappy|canvas|grid-cols-8|squares\\.map|square\\[' --include='*.js' --include='*.ts' --include='*.tsx' --include='*.jsx' --include='*.css' . 2>/dev/null | head -5",
           ]
         : ["echo '---SCAFFOLD---'", "echo '---STUB---'", "echo '---BOARD---'"]),
     ].join("\n"),
@@ -347,7 +353,7 @@ export async function assertGreenfieldAgentProgress(
   const stubFiles = sectionFiles("---STUB---", "---BOARD---");
   const boardFiles = sectionFiles("---BOARD---");
   const wantsGameBoard =
-    /\b(chess|checkers|tic[\s-]?tac[\s-]?toe|sudoku|board game)\b/i.test(
+    /\b(chess|checkers|tic[\s-]?tac[\s-]?toe|sudoku|flappy|board game)\b/i.test(
       task.prompt ?? "",
     );
 
@@ -377,9 +383,21 @@ export async function assertGreenfieldAgentProgress(
   }
 
   if (newCommits < GREENFIELD_MIN_PRODUCT_COMMITS && dirty < 1) {
-    throw new Error(
-      `Agent produced only ${newCommits} commit(s) beyond the scaffold (need ≥${GREENFIELD_MIN_PRODUCT_COMMITS}). Implement the full product with multiple focused commits.`,
-    );
+    // Accept 2+ real commits when HEAD moved and scaffold is gone — shallow
+    // greenfield fetch sometimes undercounts vs GitHub history.
+    if (movedHead && newCommits >= 2 && scaffoldLeaks.length === 0) {
+      emit(
+        svc,
+        "agent.log",
+        task.id,
+        "Accepting greenfield progress with partial commit count",
+        { newCommits, dirty, movedHead },
+      );
+    } else {
+      throw new Error(
+        `Agent produced only ${newCommits} commit(s) beyond the scaffold (need ≥${GREENFIELD_MIN_PRODUCT_COMMITS}). Implement the full product with multiple focused commits.`,
+      );
+    }
   }
 
   if (scaffoldLeaks.length > 0) {

@@ -266,16 +266,6 @@ export async function runBrainHarness(
           call.function.arguments,
           workDir,
         );
-        emit({
-          type: "agent.tool",
-          message: progress.message,
-          data: {
-            tool: progress.tool,
-            detail: progress.detail,
-            brainTool: call.function.name,
-            step: steps,
-          },
-        });
 
         const result = await executeTool(
           toolCtx,
@@ -284,14 +274,38 @@ export async function runBrainHarness(
           options.onSaveMemory,
         );
 
+        const skippedCommit =
+          call.function.name === "git_commit" &&
+          /nothing to commit|skipped duplicate|tool error:|refused /i.test(
+            result.content,
+          );
+
+        // Emit Progress only for successful work — empty/duplicate commits used
+        // to spam "Committed · …" while git history barely moved.
+        if (!skippedCommit) {
+          emit({
+            type: "agent.tool",
+            message: progress.message,
+            data: {
+              tool: progress.tool,
+              detail: progress.detail,
+              brainTool: call.function.name,
+              step: steps,
+            },
+          });
+        }
+
         emit({
           type: "agent.log",
-          message: `${progress.tool} → ${result.content.slice(0, 180)}`,
+          message: skippedCommit
+            ? `Commit skipped · ${result.content.slice(0, 160)}`
+            : `${progress.tool} → ${result.content.slice(0, 180)}`,
           data: {
             tool: progress.tool,
             brainTool: call.function.name,
             step: steps,
             done: Boolean(result.done),
+            skipped: skippedCommit,
           },
         });
 

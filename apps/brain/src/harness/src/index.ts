@@ -5,6 +5,7 @@ export {
   createDevboxToolsClient,
   executeTool,
   ensureBotCommitMessage,
+  normalizeConventionalSubject,
   resolveBotCommitAuthor,
   resolveRepoPath,
 } from "./tools.js";

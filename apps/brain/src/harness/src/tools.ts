@@ -78,6 +78,14 @@ const FORBIDDEN_COAUTHOR =
 
 const ANY_COAUTHOR = /^co-authored-by:/i;
 
+const CONVENTIONAL_TYPES =
+  "feat|fix|refactor|perf|docs|test|build|ci|chore|style|revert";
+
+const CONVENTIONAL_SUBJECT = new RegExp(
+  `^(${CONVENTIONAL_TYPES})(\\([a-z0-9][a-z0-9/_-]{0,32}\\))?:\\s+(.+)$`,
+  "i",
+);
+
 function isCoAuthorTrailer(line: string): boolean {
   return ANY_COAUTHOR.test(line.trim());
 }
@@ -90,9 +98,88 @@ export function resolveBotCommitAuthor(): { name: string; email: string } {
   return { name, email };
 }
 
+/** Lowercase the imperative verb after type(context): — per AGENTS.md. */
+function normalizeImperativeSummary(summary: string): string {
+  const trimmed = summary.trim().replace(/[.;:,]+$/g, "");
+  if (!trimmed) {
+    return "update project";
+  }
+  // Strip leading "Added/Implemented/Updated …" → imperative.
+  const stripped = trimmed
+    .replace(
+      /^(added|implemented|implements|implement|updated|created|fixed|improved|changed|refactored)\s+/i,
+      "",
+    )
+    .trim();
+  const words = (stripped || trimmed).split(/\s+/);
+  if (words[0]) {
+    words[0] = words[0].toLowerCase();
+  }
+  // Prefer an imperative verb when the summary is a noun phrase.
+  const first = words[0] ?? "update";
+  if (
+    !/^(add|fix|update|remove|rename|move|wire|implement|introduce|prevent|support|improve|refactor|document|test|build|ship)\b/i.test(
+      first,
+    )
+  ) {
+    return `add ${words.join(" ")}`.slice(0, 72);
+  }
+  return words.join(" ").slice(0, 72);
+}
+
 /**
- * Ensure every Brain git_commit has a real subject line plus baby-devin-bot.
- * Models often pass only a Co-authored-by trailer — never use that as the title.
+ * Shape Brain commit subjects like AGENTS.md Conventional Commits:
+ * `type(context): imperative summary`
+ */
+export function normalizeConventionalSubject(rawSubject: string): string {
+  const subject = rawSubject.trim().replace(/\s+/g, " ");
+  if (!subject || isCoAuthorTrailer(subject)) {
+    return "chore(repo): update project files";
+  }
+
+  const match = subject.match(CONVENTIONAL_SUBJECT);
+  if (match) {
+    const type = match[1]!.toLowerCase();
+    const scope = match[2]?.toLowerCase() ?? "";
+    const summary = normalizeImperativeSummary(match[3] ?? "");
+    return `${type}${scope}: ${summary}`.slice(0, 72);
+  }
+
+  // Bare "feat: …" without scope — keep type, normalize summary.
+  const bare = subject.match(
+    new RegExp(`^(${CONVENTIONAL_TYPES}):\\s*(.+)$`, "i"),
+  );
+  if (bare) {
+    return `${bare[1]!.toLowerCase()}: ${normalizeImperativeSummary(bare[2] ?? "")}`.slice(
+      0,
+      72,
+    );
+  }
+
+  return `feat: ${normalizeImperativeSummary(subject)}`.slice(0, 72);
+}
+
+function extractBulletPoints(lines: string[]): string[] {
+  const bullets: string[] = [];
+  for (const line of lines) {
+    const t = line.trim();
+    const bullet = t.match(/^[-*]\s+(.+)$/);
+    if (bullet?.[1]) {
+      const text = bullet[1].trim().replace(/[.;]+$/g, "");
+      if (text && !isCoAuthorTrailer(text)) {
+        bullets.push(`- ${text}`);
+      }
+    }
+    if (bullets.length >= 4) {
+      break;
+    }
+  }
+  return bullets;
+}
+
+/**
+ * Ensure every Brain git_commit follows AGENTS.md Conventional Commits fashion
+ * and always attaches baby-devin-bot (product attribution trailer).
  */
 export function ensureBotCommitMessage(raw: string): string {
   const bot = resolveBotCommitAuthor();
@@ -108,17 +195,10 @@ export function ensureBotCommitMessage(raw: string): string {
     contentLines.push(t);
   }
 
-  let subject = contentLines[0]?.trim() ?? "";
-  if (!subject || isCoAuthorTrailer(subject)) {
-    subject = "devin: agent changes";
-  }
-  // GitHub titles should be one line; extra lines belong in the body before trailer.
-  subject = subject.split("\n")[0]?.trim() || "devin: agent changes";
-  if (subject.length > 72) {
-    subject = `${subject.slice(0, 69).trim()}…`;
-  }
-
-  return `${subject}\n\n${trailer}`;
+  const subject = normalizeConventionalSubject(contentLines[0] ?? "");
+  const bullets = extractBulletPoints(contentLines.slice(1));
+  const body = [...bullets, trailer].join("\n");
+  return `${subject}\n\n${body}`;
 }
 
 /**
@@ -269,11 +349,15 @@ export const OPENAI_TOOLS = [
     function: {
       name: "git_commit",
       description:
-        "Commit tracked changes. Pass only the commit subject (e.g. feat: add chat rooms) — baby-devin-bot co-author is added automatically; do not include Co-authored-by lines.",
+        "Commit tracked changes using Conventional Commits. Message format: type(context): imperative summary, optional blank line, then up to 4 '- ' bullets. Example: feat(ui): add flappy bird canvas\\n\\n- Render bird on canvas\\n- Add collision checks. Do not include Co-authored-by — baby-devin-bot is added automatically.",
       parameters: {
         type: "object",
         properties: {
-          message: { type: "string" },
+          message: {
+            type: "string",
+            description:
+              "Conventional commit: type(context): lowercase imperative summary, optionally followed by up to 4 bullet lines",
+          },
           paths: { type: "array", items: { type: "string" } },
         },
         required: ["message"],
@@ -516,16 +600,59 @@ export async function executeTool(
         return { content: truncate((res.entries ?? []).join("\n")) };
       }
       case "git_commit": {
+        const commitMessage = ensureBotCommitMessage(
+          String(args.message ?? ""),
+        );
+        const subject =
+          commitMessage.split(/\n\n+/)[0]?.trim() || "devin: agent changes";
+
+        // Avoid empty / duplicate commits that spam Progress and undercount
+        // greenfield progress when the model calls git_commit on a clean tree.
+        const probe = await promisify<ExecResult>(
+          ctx.client.Exec.bind(ctx.client),
+          {
+            ...base,
+            command: [
+              "set +e",
+              "git add -A >/dev/null 2>&1",
+              "dirty=$(git status --porcelain 2>/dev/null | wc -l | tr -d ' ')",
+              "last=$(git log -1 --format=%s 2>/dev/null || true)",
+              'echo "dirty=$dirty"',
+              'printf "last=%s\\n" "$last"',
+            ].join("\n"),
+            cwd: ctx.workDir,
+            timeoutSec: 30,
+            timeout_sec: 30,
+          },
+        );
+        const probeOut = probe.stdout ?? "";
+        const dirty = Number(probeOut.match(/^dirty=(\d+)/m)?.[1] ?? 0);
+        const lastSubject = probeOut.match(/^last=(.*)$/m)?.[1]?.trim() ?? "";
+        if (dirty < 1) {
+          return {
+            content:
+              "nothing to commit — working tree clean. Edit files first, then git_commit with a new subject.",
+          };
+        }
+        if (
+          lastSubject &&
+          lastSubject.toLowerCase() === subject.toLowerCase()
+        ) {
+          return {
+            content: `skipped duplicate commit subject "${subject}" — make a different focused change before committing again.`,
+          };
+        }
+
         const res = await promisify<GitResult>(
           ctx.client.GitCommit.bind(ctx.client),
           {
             ...base,
-            message: ensureBotCommitMessage(String(args.message ?? "")),
+            message: commitMessage,
             cwd: ctx.workDir,
             paths: Array.isArray(args.paths) ? args.paths : ["."],
           },
         );
-        return { content: `${res.status ?? "ok"}: ${res.message ?? ""}` };
+        return { content: `${res.status ?? "ok"}: ${subject}` };
       }
       case "git_push": {
         const res = await promisify<GitResult>(

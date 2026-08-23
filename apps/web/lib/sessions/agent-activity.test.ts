@@ -86,6 +86,21 @@ describe("progressActivityLines", () => {
         data: { tool: "Shell", detail: "bun install" },
       }),
       event({
+        type: "agent.tool",
+        message: "Shell git status",
+        data: { tool: "Shell", detail: "git status" },
+      }),
+      event({
+        type: "agent.tool",
+        message: "List repo",
+        data: { tool: "List", detail: "repo" },
+      }),
+      event({
+        type: "agent.tool",
+        message: "Read app/page.tsx",
+        data: { tool: "Read", detail: "app/page.tsx" },
+      }),
+      event({
         type: "agent.log",
         message: "brain harness step 2/80",
       }),
@@ -97,23 +112,42 @@ describe("progressActivityLines", () => {
         type: "agent.log",
         message: "nudged model to keep implementing (no tool calls yet)",
       }),
+      event({
+        type: "agent.tool",
+        message: "Commit feat: bird",
+        data: { tool: "Commit", detail: "feat: bird" },
+      }),
+      event({
+        type: "agent.tool",
+        message: "Commit feat: bird",
+        data: { tool: "Commit", detail: "feat: bird" },
+      }),
     ]);
-    expect(
-      lines.some((entry) => entry.line.includes("Brain harness started")),
-    ).toBe(true);
+    expect(lines.some((entry) => entry.line === "Brain harness started")).toBe(
+      true,
+    );
     expect(lines.some((entry) => entry.line === "Edited `page.tsx`")).toBe(
       true,
     );
     expect(lines.some((entry) => entry.line.includes("bun install"))).toBe(
       true,
     );
+    expect(lines.some((entry) => entry.line.includes("git status"))).toBe(
+      false,
+    );
+    expect(lines.some((entry) => entry.line.includes("Listed"))).toBe(false);
+    expect(lines.some((entry) => entry.line.includes("Read `"))).toBe(false);
     expect(lines.some((entry) => entry.line.includes("step 2/80"))).toBe(false);
     expect(lines.some((entry) => entry.line.includes("loop ready"))).toBe(
       false,
     );
     expect(lines.some((entry) => entry.line.includes("nudged model"))).toBe(
-      true,
+      false,
     );
+    expect(
+      lines.filter((entry) => entry.line.includes("Committed · feat: bird"))
+        .length,
+    ).toBe(1);
   });
 });
 

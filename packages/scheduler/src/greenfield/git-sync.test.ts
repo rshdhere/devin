@@ -64,7 +64,8 @@ describe("greenfield-git-sync", () => {
 
   test("buildPushGreenfieldMainScript uses force-with-lease by default", () => {
     const script = buildPushGreenfieldMainScript();
-    expect(script).toContain("git fetch --depth 1");
+    expect(script).toContain("git fetch --no-tags origin main");
+    expect(script).not.toContain("git fetch --depth 1");
     expect(script).toContain("git push --force-with-lease");
     expect(script).toContain("max=3");
   });
