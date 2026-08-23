@@ -31,13 +31,14 @@ describe("resolveRepoPath", () => {
 });
 
 describe("toolProgressDetail", () => {
-  it("maps write_file to Write with path detail", () => {
+  it("maps write_file to Write with path detail under workDir", () => {
     const progress = toolProgressDetail(
       "write_file",
       JSON.stringify({ path: "app/page.tsx", content: "x" }),
+      "repo",
     );
     expect(progress.tool).toBe("Write");
-    expect(progress.detail).toBe("app/page.tsx");
+    expect(progress.detail).toBe("repo/app/page.tsx");
   });
 
   it("maps shell to Shell with command detail", () => {

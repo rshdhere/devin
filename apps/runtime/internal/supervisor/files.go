@@ -85,6 +85,17 @@ func (s *Server) handleFilesRead(w http.ResponseWriter, r *http.Request) {
 	target := s.resolveWorkspacePath(rel)
 	data, err := os.ReadFile(target)
 	if err != nil {
+		// Agents/UI often omit the repo/ prefix (app/page.tsx vs repo/app/page.tsx).
+		if !strings.HasPrefix(strings.TrimPrefix(rel, "/"), "repo/") && !strings.Contains(rel, "/repo/") {
+			alt := s.resolveWorkspacePath("repo/" + strings.TrimPrefix(rel, "/"))
+			if altData, altErr := os.ReadFile(alt); altErr == nil {
+				target = alt
+				data = altData
+				err = nil
+			}
+		}
+	}
+	if err != nil {
 		writeError(w, http.StatusNotFound, err.Error())
 		return
 	}

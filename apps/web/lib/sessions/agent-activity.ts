@@ -394,6 +394,16 @@ export function normalizeSandboxFilePath(path: string): string {
       p = p.slice("workspace/".length);
     }
   }
+  if (
+    p &&
+    p !== "." &&
+    !p.startsWith("repo/") &&
+    p !== "repo" &&
+    !p.startsWith(".home/") &&
+    !p.startsWith(".build/")
+  ) {
+    return `repo/${p}`;
+  }
   return p;
 }
 

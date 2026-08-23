@@ -171,10 +171,19 @@ export function SessionCodeColumn({
           return next;
         });
       } catch (error) {
+        const raw =
+          error instanceof Error ? error.message : "Could not load file";
+        const friendly =
+          /no devbox session|Cannot reach execution worker|rehydrate failed/i.test(
+            raw,
+          )
+            ? "Devbox file proxy unavailable — wait until sandbox is running, then reopen Changes"
+            : /no such file|ENOENT|HTTP 404/i.test(raw)
+              ? "File not found in the sandbox yet"
+              : raw;
         setErrors((prev) => ({
           ...prev,
-          [normalized]:
-            error instanceof Error ? error.message : "Could not load file",
+          [normalized]: friendly,
         }));
       } finally {
         inFlightRef.current.delete(normalized);

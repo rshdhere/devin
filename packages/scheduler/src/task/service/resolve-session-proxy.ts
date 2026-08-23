@@ -191,32 +191,60 @@ export async function brainDelegateOrRuntime(
   init?: RequestInit,
   options?: WorkerDelegateOptions,
 ): Promise<Response> {
-  const timeoutMs = options?.timeoutMs ?? workerPathTimeoutMs(workerPath);
-
-  if (svc.executionWorkerUrl?.trim()) {
-    try {
-      let upstream = await delegateRequestToWorker(svc, workerPath, init, {
-        timeoutMs,
-      });
-      if (upstream.status === 404) {
-        const rehydrated = await requestWorkerRehydrate(svc, taskId);
-        if (rehydrated.ok) {
-          upstream = await delegateRequestToWorker(svc, workerPath, init, {
-            timeoutMs,
-          });
-        }
-      }
-      if (upstream.ok || upstream.status !== 404) {
-        return upstream;
-      }
-    } catch (error) {
-      if (isWorkerDelegateTimeout(error)) {
-        return new Response("Devbox warming — retry shortly", { status: 504 });
-      }
-    }
+  if (!svc.executionWorkerUrl?.trim()) {
+    throw new Error(
+      "EXECUTION_WORKER_URL is not configured on brain — cannot reach the execution-host worker for files/desktop",
+    );
   }
 
-  throw new Error("no devbox session for task");
+  const timeoutMs = options?.timeoutMs ?? workerPathTimeoutMs(workerPath);
+
+  try {
+    let upstream = await delegateRequestToWorker(svc, workerPath, init, {
+      timeoutMs,
+    });
+
+    if (upstream.status === 404) {
+      const bodyText = await upstream.text();
+      const sessionMissing = /no devbox session/i.test(bodyText);
+      // Guest file-not-found is also HTTP 404 — do not treat it as a dead session.
+      if (!sessionMissing) {
+        return new Response(bodyText, {
+          status: 404,
+          headers: {
+            "Content-Type":
+              upstream.headers.get("content-type") ?? "application/json",
+          },
+        });
+      }
+
+      const rehydrated = await requestWorkerRehydrate(svc, taskId);
+      if (rehydrated.ok) {
+        upstream = await delegateRequestToWorker(svc, workerPath, init, {
+          timeoutMs,
+        });
+        return upstream;
+      }
+
+      throw new Error(
+        "Devbox session not found on the execution worker (rehydrate failed). Wait for sandbox ready, then retry.",
+      );
+    }
+
+    return upstream;
+  } catch (error) {
+    if (error instanceof Error && error.message.startsWith("Devbox session")) {
+      throw error;
+    }
+    if (isWorkerDelegateTimeout(error)) {
+      return new Response("Devbox warming — retry shortly", { status: 504 });
+    }
+    const detail =
+      error instanceof Error ? error.message : "worker unreachable";
+    throw new Error(
+      `Cannot reach execution worker for this task (${detail}). Check EXECUTION_WORKER_URL and worker health.`,
+    );
+  }
 }
 
 export { hydrateSessionFromOrchestrator } from "./orchestrator-session.js";

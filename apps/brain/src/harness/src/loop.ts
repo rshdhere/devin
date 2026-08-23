@@ -8,6 +8,7 @@ import {
 import {
   createDevboxToolsClient,
   executeTool,
+  resolveRepoPath,
   type ToolContext,
 } from "./tools.js";
 import type {
@@ -24,6 +25,7 @@ const COMPACT_AFTER = 24;
 export function toolProgressDetail(
   name: string,
   rawArgs: string,
+  workDir = "repo",
 ): { tool: string; detail: string; message: string } {
   let args: Record<string, unknown> = {};
   try {
@@ -32,12 +34,13 @@ export function toolProgressDetail(
     args = {};
   }
 
-  const path =
+  const rawPath =
     typeof args.path === "string"
       ? args.path
       : typeof args.file === "string"
         ? args.file
         : "";
+  const path = rawPath ? resolveRepoPath(workDir, rawPath) : "";
   const command = typeof args.command === "string" ? args.command : "";
   const summary = typeof args.summary === "string" ? args.summary : "";
   const message = typeof args.message === "string" ? args.message : "";
@@ -58,8 +61,8 @@ export function toolProgressDetail(
     case "list_dir":
       return {
         tool: "List",
-        detail: path || ".",
-        message: `List ${path || "."}`,
+        detail: path || resolveRepoPath(workDir, "."),
+        message: `List ${path || resolveRepoPath(workDir, ".")}`,
       };
     case "shell":
       return {
@@ -238,6 +241,7 @@ export async function runBrainHarness(
         const progress = toolProgressDetail(
           call.function.name,
           call.function.arguments,
+          workDir,
         );
         emit({
           type: "agent.tool",

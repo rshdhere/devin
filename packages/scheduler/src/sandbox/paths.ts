@@ -15,5 +15,17 @@ export function normalizeSandboxFilePath(path: string): string {
       p = p.slice("workspace/".length);
     }
   }
+  // UI/agent paths are usually repo-relative (app/page.tsx). Guest files live
+  // under /workspace/repo/… — prefix when missing so Changes reads succeed.
+  if (
+    p &&
+    p !== "." &&
+    !p.startsWith("repo/") &&
+    p !== "repo" &&
+    !p.startsWith(".home/") &&
+    !p.startsWith(".build/")
+  ) {
+    return `repo/${p}`;
+  }
   return p;
 }
