@@ -58,6 +58,25 @@ describe("ensureBotCommitMessage", () => {
     expect(msg).not.toMatch(/Cursor Agent/i);
     expect(msg).not.toMatch(/Claude/i);
     expect(msg).toContain("Co-authored-by: baby-devin-bot");
+    expect(msg.startsWith("feat: board\n\n")).toBe(true);
+  });
+
+  it("replaces trailer-only messages with a real subject", () => {
+    const msg = ensureBotCommitMessage(
+      "Co-authored-by: baby-devin-bot <baby-devin-bot@users.noreply.github.com>",
+    );
+    expect(msg.startsWith("devin: agent changes\n\n")).toBe(true);
+    expect(msg).toContain(
+      "Co-authored-by: baby-devin-bot <baby-devin-bot@users.noreply.github.com>",
+    );
+    expect(msg.split("Co-authored-by: baby-devin-bot").length - 1).toBe(1);
+  });
+
+  it("strips co-author from single-newline subject lines", () => {
+    const msg = ensureBotCommitMessage(
+      "feat: websocket hub\nCo-authored-by: baby-devin-bot <baby-devin-bot@users.noreply.github.com>",
+    );
+    expect(msg.startsWith("feat: websocket hub\n\n")).toBe(true);
   });
 });
 
@@ -79,5 +98,18 @@ describe("toolProgressDetail", () => {
     );
     expect(progress.tool).toBe("Shell");
     expect(progress.detail).toBe("bun run build");
+  });
+
+  it("uses only the commit subject in progress detail", () => {
+    const progress = toolProgressDetail(
+      "git_commit",
+      JSON.stringify({
+        message:
+          "feat: rooms\n\nCo-authored-by: baby-devin-bot <baby-devin-bot@users.noreply.github.com>",
+      }),
+    );
+    expect(progress.tool).toBe("Commit");
+    expect(progress.detail).toBe("feat: rooms");
+    expect(progress.message).not.toContain("Co-authored-by");
   });
 });

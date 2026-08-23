@@ -307,13 +307,13 @@ export function buildAgentPrompt(
     "Git / commits:",
     "- Commit incrementally after meaningful steps (API, UI, features, polish)",
     "- Make at least 3 focused commits beyond the scaffold — multiple commits are required",
+    "- Use the git_commit tool (not shell git commit) — pass only the subject line, e.g. feat: add chat rooms",
+    `- Do NOT put Co-authored-by lines in git_commit messages — the harness adds Co-authored-by: ${bot.name} <${bot.email}> automatically`,
+    "- Keep subjects under ~72 chars; never commit with only a co-author trailer",
     "- NEVER use shell heredocs for commits (no `cat <<'EOF'`, no `$(cat <<EOF)`). They hang the sandbox.",
-    `- Commit with two -m flags only, e.g. git commit -m "feat: add feed API" -m "Co-authored-by: ${bot.name} <${bot.email}>"`,
-    "- Keep the subject under ~72 chars; put the co-author trailer only in the second -m",
     greenfieldRepo
       ? "- Do NOT run git push — commit locally only; the control plane syncs to GitHub automatically while you work and after you finish"
       : "- Push to the working branch as you go when possible",
-    `- Every commit MUST include this trailer via a second -m (never a heredoc body): Co-authored-by: ${bot.name} <${bot.email}>`,
     `- ${bot.name} is the ONLY allowed co-author. Never attribute a commit or pull ` +
       "request to Cursor, Claude, an AI, an assistant, or an agent — no " +
       "`Co-authored-by: Cursor Agent`, no `Generated with ...` lines",

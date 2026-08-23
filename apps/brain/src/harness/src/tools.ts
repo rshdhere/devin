@@ -76,6 +76,12 @@ function truncate(value: string, max = MAX_OUTPUT_CHARS): string {
 const FORBIDDEN_COAUTHOR =
   /co-authored-by:\s*.*(cursor|claude|anthropic|openai|codex|copilot|gemini)/i;
 
+const ANY_COAUTHOR = /^co-authored-by:/i;
+
+function isCoAuthorTrailer(line: string): boolean {
+  return ANY_COAUTHOR.test(line.trim());
+}
+
 export function resolveBotCommitAuthor(): { name: string; email: string } {
   const name = process.env.GITHUB_BOT_NAME?.trim() || "baby-devin-bot";
   const email =
@@ -85,55 +91,34 @@ export function resolveBotCommitAuthor(): { name: string; email: string } {
 }
 
 /**
- * Ensure every Brain git_commit includes baby-devin-bot and drops vendor AI
- * co-authors the model may have invented.
+ * Ensure every Brain git_commit has a real subject line plus baby-devin-bot.
+ * Models often pass only a Co-authored-by trailer — never use that as the title.
  */
 export function ensureBotCommitMessage(raw: string): string {
   const bot = resolveBotCommitAuthor();
   const trailer = `Co-authored-by: ${bot.name} <${bot.email}>`;
-  const trimmed = raw.trim() || "devin: agent changes";
-  const parts = trimmed.split(/\n\n+/);
-  const subject = (parts[0] ?? "devin: agent changes")
-    .split("\n")
-    .map((line) => line.trim())
-    .filter((line) => line && !FORBIDDEN_COAUTHOR.test(line))
-    .join("\n")
-    .trim();
-  const bodyLines = parts
-    .slice(1)
-    .join("\n\n")
-    .split("\n")
-    .map((line) => line.trimEnd())
-    .filter((line) => {
-      const t = line.trim();
-      if (!t) {
-        return true;
-      }
-      if (FORBIDDEN_COAUTHOR.test(t)) {
-        return false;
-      }
-      // Drop duplicate baby-devin-bot trailers; we re-append once below.
-      if (/^co-authored-by:\s*baby-devin-bot\b/i.test(t)) {
-        return false;
-      }
-      if (
-        new RegExp(
-          `^co-authored-by:\\s*${bot.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`,
-          "i",
-        ).test(t)
-      ) {
-        return false;
-      }
-      return true;
-    });
-  while (
-    bodyLines.length > 0 &&
-    bodyLines[bodyLines.length - 1]?.trim() === ""
-  ) {
-    bodyLines.pop();
+  const trimmed = raw.trim();
+
+  const contentLines: string[] = [];
+  for (const line of trimmed.split("\n")) {
+    const t = line.trim();
+    if (!t || isCoAuthorTrailer(t) || FORBIDDEN_COAUTHOR.test(t)) {
+      continue;
+    }
+    contentLines.push(t);
   }
-  const body = [...bodyLines, trailer].join("\n").trim();
-  return `${subject}\n\n${body}`;
+
+  let subject = contentLines[0]?.trim() ?? "";
+  if (!subject || isCoAuthorTrailer(subject)) {
+    subject = "devin: agent changes";
+  }
+  // GitHub titles should be one line; extra lines belong in the body before trailer.
+  subject = subject.split("\n")[0]?.trim() || "devin: agent changes";
+  if (subject.length > 72) {
+    subject = `${subject.slice(0, 69).trim()}…`;
+  }
+
+  return `${subject}\n\n${trailer}`;
 }
 
 /**
@@ -283,7 +268,8 @@ export const OPENAI_TOOLS = [
     type: "function" as const,
     function: {
       name: "git_commit",
-      description: "Commit tracked changes in the Devbox repo.",
+      description:
+        "Commit tracked changes. Pass only the commit subject (e.g. feat: add chat rooms) — baby-devin-bot co-author is added automatically; do not include Co-authored-by lines.",
       parameters: {
         type: "object",
         properties: {
@@ -409,6 +395,19 @@ function toolErrorMessage(error: unknown): string {
   return `tool error: ${message.slice(0, 400)}`;
 }
 
+function isForegroundServerCommand(command: string): boolean {
+  const c = command.trim();
+  // Long-lived servers hang the harness (UI spinner stuck on Ran `bun start`).
+  return (
+    /\b(bun|npm|yarn|pnpm)\s+(run\s+)?(start|dev)\b/i.test(c) ||
+    /\b(bun|npm|yarn|pnpm)\s+start\b/i.test(c) ||
+    /\bnext(\s+dev|\s+start)\b/i.test(c) ||
+    /\bnpx\s+.*\b(next|vite|webpack-dev-server)\b/i.test(c) ||
+    /\b(uvicorn|gunicorn|flask\s+run)\b/i.test(c) ||
+    /\bpython(\d+(?:\.\d+)*)?\s+-m\s+(uvicorn|http\.server|flask)\b/i.test(c)
+  );
+}
+
 export async function executeTool(
   ctx: ToolContext,
   name: string,
@@ -433,6 +432,14 @@ export async function executeTool(
     switch (name) {
       case "shell": {
         const command = String(args.command ?? "");
+        if (isForegroundServerCommand(command)) {
+          return {
+            content:
+              `refused long-lived server command: ${command.slice(0, 120)}. ` +
+              "Do not run start/dev servers in the foreground — they hang the harness. " +
+              "Use a short timed smoke check (e.g. timeout 8s …) or call finish after builds/tests.",
+          };
+        }
         const res = await promisify<ExecResult>(
           ctx.client.Exec.bind(ctx.client),
           {

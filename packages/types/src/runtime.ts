@@ -36,8 +36,9 @@ const PROMPT_RULES: Array<{ runtime: StackRuntime; pattern: RegExp }> = [
   },
   {
     runtime: "go",
+    // Match "using go" / "golang" / "go api" — bare English "go" alone is ignored.
     pattern:
-      /\b(golang|go\s+(mod|module|api|server|service|microservice)|\bgin\b|\becho\b|\bfiber\b|chi\s+router)\b/i,
+      /\b(golang|go[\s._-]*lang|(?:using|in|with|via)\s+go|go\s+(?:mod|module|api|server|service|microservice|app|cli|http|chat|todo|web|rest|grpc|websocket|backend)|gin\b|gqlgen|\bfiber\b|chi\s+router)\b/i,
   },
   {
     runtime: "python",

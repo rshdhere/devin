@@ -30,6 +30,7 @@ export function buildSystemPrompt(input: {
     "Never run unbounded servers in the foreground. Do not curl localhost smoke loops.",
     "When the user request is satisfied, call finish with a short summary.",
     "Make focused commits with git_commit when you change code.",
+    "git_commit message is the subject only (e.g. feat: add rooms) — never put Co-authored-by in the message; the harness adds baby-devin-bot automatically.",
   ];
 
   if (input.repoListing?.trim()) {

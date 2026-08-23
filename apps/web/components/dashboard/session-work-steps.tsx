@@ -100,8 +100,10 @@ export function SessionWorkSteps({
       <ChainOfThoughtContent className="mt-3 space-y-0 text-zinc-400">
         {lines.map((entry, index) => {
           const isLast = index === lines.length - 1;
-          const active = isActive && isLast;
           const shell = parseShellLine(entry.line);
+          // Shell rows keep the terminal icon; spinning the last Shell forever
+          // (e.g. bun start hung) is confusing — only spin non-shell steps.
+          const active = isActive && isLast && !shell;
           const StepIcon = active ? Loader2 : shell ? Terminal : Check;
 
           return (

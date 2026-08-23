@@ -184,7 +184,7 @@ export function humanizeToolProgressLine(
     case "Commit":
     case "git_commit":
       return shortDetail
-        ? `Committed · ${shortDetail.length > 48 ? `${shortDetail.slice(0, 45)}…` : shortDetail}`
+        ? `Committed · ${shortDetail.split("\n")[0]!.length > 48 ? `${shortDetail.split("\n")[0]!.slice(0, 45)}…` : shortDetail.split("\n")[0]}`
         : "Committed changes";
     case "Push":
     case "git_push":

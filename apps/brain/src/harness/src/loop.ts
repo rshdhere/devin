@@ -71,12 +71,14 @@ export function toolProgressDetail(
         detail: command || "command",
         message: `Shell ${command || "command"}`.slice(0, 200),
       };
-    case "git_commit":
+    case "git_commit": {
+      const subject = (message || "commit").split("\n")[0]?.trim() || "commit";
       return {
         tool: "Commit",
-        detail: message || "commit",
-        message: `Commit ${message || ""}`.slice(0, 200),
+        detail: subject,
+        message: `Commit ${subject}`.slice(0, 200),
       };
+    }
     case "git_push":
       return {
         tool: "Push",

@@ -20,6 +20,12 @@ describe("inferStackFromPrompt", () => {
     expect(inferStackFromPrompt("make a go api with gin")).toBe("go");
   });
 
+  test("detects Go from using go / golang", () => {
+    expect(inferStackFromPrompt("make me a chat app using go")).toBe("go");
+    expect(inferStackFromPrompt("build a chat app in golang")).toBe("go");
+    expect(inferStackFromPrompt("make a golang websocket server")).toBe("go");
+  });
+
   test("detects Rust", () => {
     expect(inferStackFromPrompt("rust cli with cargo")).toBe("rust");
   });
