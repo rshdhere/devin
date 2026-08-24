@@ -16,6 +16,8 @@ export function createSchedulerRouter(
       mode: tasks.getMode(),
       preferredHost,
       durable: tasks.getTaskStore().isEnabled(),
+      harnessOnBrain: tasks.getMode() === "brain",
+      executionWorkerConfigured: Boolean(tasks.executionWorkerUrl?.trim()),
     });
   });
 
@@ -36,6 +38,39 @@ export function createSchedulerRouter(
       res.status(202).json({ status: "accepted", taskId: job.taskId });
     } catch (error) {
       sendError(res, 400, error, "invalid job");
+    }
+  });
+
+  router.post("/internal/v1/tasks/:id/sandbox-ready", async (req, res) => {
+    try {
+      const result = await tasks.handleSandboxReady({
+        ...(req.body as Record<string, unknown>),
+        taskId: req.params.id,
+      });
+      if (!result.accepted) {
+        res.status(400).json(result);
+        return;
+      }
+      res.status(202).json(result);
+    } catch (error) {
+      sendError(res, 500, error, "sandbox-ready failed");
+    }
+  });
+
+  router.post("/internal/v1/tasks/:id/agent-complete", async (req, res) => {
+    try {
+      const task = await tasks.handleAgentComplete(
+        req.params.id,
+        req.body as {
+          status: "completed" | "failed";
+          message: string;
+          output?: string;
+          requireReviewBeforePush?: boolean;
+        },
+      );
+      res.status(200).json(task);
+    } catch (error) {
+      sendError(res, 400, error, "agent-complete failed");
     }
   });
 

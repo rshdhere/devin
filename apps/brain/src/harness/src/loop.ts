@@ -113,15 +113,27 @@ export async function runBrainHarness(
   const stackRuntime = normalizeBrainStack(options.stackRuntime);
 
   const client = createOpenAIClient(options.openaiApiKey);
-  const toolsClient = createDevboxToolsClient(options.toolGatewayUrl);
+  const workerUrl = options.executionWorkerUrl?.trim();
   const toolCtx: ToolContext = {
     taskId: options.taskId,
-    runtimeBaseUrl: options.runtimeBaseUrl,
+    runtimeBaseUrl: options.runtimeBaseUrl?.trim() || "",
     workDir,
-    client: toolsClient,
+    client: workerUrl
+      ? undefined
+      : createDevboxToolsClient(options.toolGatewayUrl),
     requireProductImplementation: options.requireProductImplementation,
     stackRuntime,
+    executionWorkerUrl: workerUrl || undefined,
   };
+
+  if (!workerUrl && !toolCtx.runtimeBaseUrl) {
+    return {
+      status: "failed",
+      message:
+        "Brain harness requires runtimeBaseUrl (standalone) or executionWorkerUrl (Brain mode)",
+      agent: "brain",
+    };
+  }
 
   // Seed the real file tree so the model does not invent Next.js paths on
   // python/rust/go scaffolds (classic failure: read app/page.tsx → abort).

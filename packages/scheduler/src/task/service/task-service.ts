@@ -65,6 +65,16 @@ import {
 } from "./resolve-session-proxy.js";
 import { hydrateSessionFromOrchestrator } from "./orchestrator-session.js";
 import { syncTaskFromWorker as syncTaskFromWorkerImpl } from "./sync-task-from-worker.js";
+import { type SandboxReadyPayload } from "./publish-sandbox-ready.js";
+import { handleSandboxReady as handleSandboxReadyBrainImpl } from "./brain-harness-runner.js";
+import {
+  handleAgentComplete as handleAgentCompleteImpl,
+  type AgentCompleteRequest,
+} from "./agent-finalize.js";
+import {
+  proxyDevboxTool as proxyDevboxToolImpl,
+  type ToolProxyRequest,
+} from "./tool-proxy.js";
 import type {
   ReviewSession,
   TaskServiceHost,
@@ -384,6 +394,23 @@ export class TaskService implements TaskServiceHost {
     taskId: string,
   ): Promise<ReviewSession | undefined> {
     return hydrateSessionFromOrchestrator(this, taskId);
+  }
+
+  async handleSandboxReady(
+    payload: SandboxReadyPayload,
+  ): Promise<{ accepted: boolean; reason?: string }> {
+    return handleSandboxReadyBrainImpl(this, payload);
+  }
+
+  async handleAgentComplete(
+    taskId: string,
+    body: AgentCompleteRequest,
+  ): Promise<Task> {
+    return handleAgentCompleteImpl(this, taskId, body);
+  }
+
+  async proxyDevboxTool(taskId: string, body: ToolProxyRequest) {
+    return proxyDevboxToolImpl(this, taskId, body);
   }
 
   listTasks(): Task[] {

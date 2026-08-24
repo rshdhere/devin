@@ -280,10 +280,73 @@ export type ToolContext = {
   taskId: string;
   runtimeBaseUrl: string;
   workDir: string;
-  client: DevboxToolsClient;
+  client?: DevboxToolsClient;
   requireProductImplementation?: boolean;
   stackRuntime?: "nextjs" | "node" | "go" | "rust" | "python";
+  /** When set, Devbox tools are proxied via the execution worker (Brain mode). */
+  executionWorkerUrl?: string;
 };
+
+/**
+ * Call a Devbox tool through the worker HTTP proxy (Brain → worker → gateway).
+ * Worker resolves the live session by taskId — no guest IP on the Brain.
+ */
+export async function executeToolViaWorker(
+  ctx: Pick<
+    ToolContext,
+    | "taskId"
+    | "workDir"
+    | "executionWorkerUrl"
+    | "requireProductImplementation"
+    | "stackRuntime"
+  >,
+  name: string,
+  rawArgs: string,
+): Promise<{ content: string; done?: boolean; summary?: string }> {
+  const base = ctx.executionWorkerUrl?.replace(/\/$/, "");
+  if (!base) {
+    return { content: "tool error: EXECUTION_WORKER_URL is not configured" };
+  }
+
+  try {
+    const response = await fetch(
+      `${base}/api/v1/tasks/${encodeURIComponent(ctx.taskId)}/tools`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name,
+          arguments: rawArgs,
+          workDir: ctx.workDir,
+          stackRuntime: ctx.stackRuntime,
+          requireProductImplementation: ctx.requireProductImplementation,
+        }),
+        signal: AbortSignal.timeout(180_000),
+      },
+    );
+    const body = (await response.json().catch(() => ({}))) as {
+      content?: string;
+      done?: boolean;
+      summary?: string;
+      error?: string;
+    };
+    if (!response.ok) {
+      return {
+        content:
+          body.error ?? body.content ?? `tool proxy HTTP ${response.status}`,
+      };
+    }
+    return {
+      content: body.content ?? "",
+      done: body.done,
+      summary: body.summary,
+    };
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : "worker tool proxy failed";
+    return { content: `tool error: ${message}` };
+  }
+}
 
 export const OPENAI_TOOLS = [
   {
@@ -505,6 +568,29 @@ export async function executeTool(
     return { content: `invalid JSON arguments: ${rawArgs}` };
   }
 
+  // save_memory stays on Brain (HydraDB / session memory); never proxy it.
+  if (name === "save_memory") {
+    const facts = Array.isArray(args.facts)
+      ? args.facts.map(String).filter(Boolean)
+      : [];
+    if (onSaveMemory && facts.length > 0) {
+      await onSaveMemory(facts);
+    }
+    return { content: `saved ${facts.length} fact(s)` };
+  }
+
+  if (ctx.executionWorkerUrl?.trim()) {
+    return executeToolViaWorker(ctx, name, rawArgs);
+  }
+
+  if (!ctx.client) {
+    return {
+      content:
+        "tool error: no Devbox tools client (set toolGatewayUrl or executionWorkerUrl)",
+    };
+  }
+  const toolsClient = ctx.client;
+
   const base = {
     taskId: ctx.taskId,
     task_id: ctx.taskId,
@@ -525,7 +611,7 @@ export async function executeTool(
           };
         }
         const res = await promisify<ExecResult>(
-          ctx.client.Exec.bind(ctx.client),
+          toolsClient.Exec.bind(toolsClient),
           {
             ...base,
             command,
@@ -554,7 +640,7 @@ export async function executeTool(
           return { content: wrongStackMessage(ctx.stackRuntime!, path) };
         }
         const res = await promisify<{ content?: string }>(
-          ctx.client.ReadFile.bind(ctx.client),
+          toolsClient.ReadFile.bind(toolsClient),
           { ...base, path },
         );
         return { content: truncate(res.content ?? "") };
@@ -572,7 +658,7 @@ export async function executeTool(
           return { content: wrongStackMessage(ctx.stackRuntime!, path) };
         }
         const res = await promisify<{ status?: string; path?: string }>(
-          ctx.client.WriteFile.bind(ctx.client),
+          toolsClient.WriteFile.bind(toolsClient),
           {
             ...base,
             path,
@@ -594,7 +680,7 @@ export async function executeTool(
           };
         }
         const res = await promisify<{ entries?: string[] }>(
-          ctx.client.ListDir.bind(ctx.client),
+          toolsClient.ListDir.bind(toolsClient),
           { ...base, path },
         );
         return { content: truncate((res.entries ?? []).join("\n")) };
@@ -609,7 +695,7 @@ export async function executeTool(
         // Avoid empty / duplicate commits that spam Progress and undercount
         // greenfield progress when the model calls git_commit on a clean tree.
         const probe = await promisify<ExecResult>(
-          ctx.client.Exec.bind(ctx.client),
+          toolsClient.Exec.bind(toolsClient),
           {
             ...base,
             command: [
@@ -644,7 +730,7 @@ export async function executeTool(
         }
 
         const res = await promisify<GitResult>(
-          ctx.client.GitCommit.bind(ctx.client),
+          toolsClient.GitCommit.bind(toolsClient),
           {
             ...base,
             message: commitMessage,
@@ -656,7 +742,7 @@ export async function executeTool(
       }
       case "git_push": {
         const res = await promisify<GitResult>(
-          ctx.client.GitPush.bind(ctx.client),
+          toolsClient.GitPush.bind(toolsClient),
           {
             ...base,
             branch: String(args.branch ?? ""),
@@ -667,23 +753,14 @@ export async function executeTool(
       }
       case "browser_open": {
         const res = await promisify<{ status?: string }>(
-          ctx.client.BrowserOpen.bind(ctx.client),
+          toolsClient.BrowserOpen.bind(toolsClient),
           { ...base, url: String(args.url ?? "") },
         );
         return { content: res.status ?? "ok" };
       }
       case "desktop_screenshot": {
-        await promisify(ctx.client.DesktopScreenshot.bind(ctx.client), base);
+        await promisify(toolsClient.DesktopScreenshot.bind(toolsClient), base);
         return { content: "screenshot captured" };
-      }
-      case "save_memory": {
-        const facts = Array.isArray(args.facts)
-          ? args.facts.map(String).filter(Boolean)
-          : [];
-        if (onSaveMemory && facts.length > 0) {
-          await onSaveMemory(facts);
-        }
-        return { content: `saved ${facts.length} fact(s)` };
       }
       case "finish": {
         if (ctx.requireProductImplementation) {
@@ -692,7 +769,7 @@ export async function executeTool(
             stack === "nextjs" || stack === "node" || stack === undefined;
           if (isJs) {
             const probe = await promisify<ExecResult>(
-              ctx.client.Exec.bind(ctx.client),
+              toolsClient.Exec.bind(toolsClient),
               {
                 ...base,
                 command: [
@@ -762,7 +839,7 @@ export async function executeTool(
                   ? "src/main.rs"
                   : "main.go";
             const probe = await promisify<ExecResult>(
-              ctx.client.Exec.bind(ctx.client),
+              toolsClient.Exec.bind(toolsClient),
               {
                 ...base,
                 command: [

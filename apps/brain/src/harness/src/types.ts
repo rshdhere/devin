@@ -20,7 +20,8 @@ export type BrainHarnessResult = {
 export type BrainHarnessOptions = {
   taskId: string;
   prompt: string;
-  runtimeBaseUrl: string;
+  /** Guest runtime URL when harness is colocated with the Devbox (standalone). */
+  runtimeBaseUrl?: string;
   workDir?: string;
   followUp?: boolean;
   /** Greenfield stack so prompts/gates match the scaffold (python ≠ nextjs). */
@@ -32,7 +33,13 @@ export type BrainHarnessOptions = {
   maxSteps?: number;
   maxWaitMs?: number;
   model?: string;
+  /** Local tool-gateway when harness runs on the execution host (standalone). */
   toolGatewayUrl?: string;
+  /**
+   * Execution-worker base URL when harness runs on Brain (EKS).
+   * Tools go Brain → worker `/api/v1/tasks/:id/tools` → local gateway → guest.
+   */
+  executionWorkerUrl?: string;
   openaiApiKey?: string;
   onEvent?: (event: BrainHarnessEvent) => void;
   onSaveMemory?: (facts: string[]) => Promise<void>;

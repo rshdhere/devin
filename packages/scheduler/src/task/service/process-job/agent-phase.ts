@@ -185,7 +185,7 @@ export async function runAgentPhase(
     isTemplateGreenfield
       ? "Template execution started (OpenAI scaffold)"
       : task.agent === "brain"
-        ? "Brain harness starting on execution host"
+        ? "Brain harness starting (standalone)"
         : `${task.agent} agent started`,
     {
       prompt: task.prompt,
@@ -228,6 +228,11 @@ export async function runAgentPhase(
       }
 
       if (task.agent === "brain") {
+        if (svc.mode === "worker") {
+          throw new Error(
+            "Brain harness must run on the Brain control plane, not the execution worker",
+          );
+        }
         const recalled = await recallSessionMemory({
           taskId: task.id,
           userId: task.userId,

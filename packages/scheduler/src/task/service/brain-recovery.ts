@@ -2,6 +2,7 @@ import type { Task } from "../types.js";
 import { delegateJobToWorker } from "./session-lifecycle.js";
 import { ensurePendingJob } from "./resolve-task.js";
 import { syncTaskFromWorker } from "./sync-task-from-worker.js";
+import { runBrainHarnessOnBrain } from "./brain-harness-runner.js";
 import type { TaskService } from "./task-service.js";
 import { emit, updateTask } from "./task-state.js";
 
@@ -19,6 +20,17 @@ export async function recoverStuckQueuedTasks(svc: TaskService): Promise<void> {
 
   const cutoff = Date.now() - STUCK_QUEUED_GRACE_MS;
   for (const task of svc.tasks.values()) {
+    if (task.status === "runtime_ready" && task.agent === "brain") {
+      void runBrainHarnessOnBrain(svc, task.id).catch((error) => {
+        const message =
+          error instanceof Error
+            ? error.message
+            : "Brain harness recovery failed";
+        console.error(`[brain-recovery] ${task.id}: ${message}`);
+      });
+      continue;
+    }
+
     if (!isStuckDelegatableStatus(task.status)) {
       continue;
     }
@@ -33,6 +45,9 @@ export async function recoverStuckQueuedTasks(svc: TaskService): Promise<void> {
 
     const synced = await syncTaskFromWorker(svc, task.id);
     if (synced && !isStuckDelegatableStatus(synced.status)) {
+      if (synced.status === "runtime_ready" && synced.agent === "brain") {
+        void runBrainHarnessOnBrain(svc, synced.id).catch(() => undefined);
+      }
       continue;
     }
 

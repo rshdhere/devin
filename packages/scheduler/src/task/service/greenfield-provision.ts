@@ -75,10 +75,14 @@ export function validateGreenfieldDraftSecrets(
   }
 }
 
-export function validateAgentSecrets(svc: TaskService, task: Task): void {
+export function validateAgentSecrets(svc: { mode?: string }, task: Task): void {
+  // Brain harness + OpenAI key live on the Brain control plane, not the worker.
+  if (task.agent === "brain" && svc.mode === "worker") {
+    return;
+  }
   if (task.agent === "brain" && !process.env.OPENAI_API_KEY?.trim()) {
     throw new Error(
-      "OPENAI_API_KEY is not set for the Brain harness. Add it on the control plane / execution host.",
+      "OPENAI_API_KEY is not set for the Brain harness. Add it on the Brain control plane (EKS), not the execution host.",
     );
   }
 }

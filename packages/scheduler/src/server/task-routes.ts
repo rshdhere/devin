@@ -288,6 +288,24 @@ export function createTaskRouter(tasks: TaskService): Router {
     }
   });
 
+  router.post("/:id/tools", async (req, res) => {
+    try {
+      const result = await tasks.proxyDevboxTool(
+        req.params.id,
+        req.body as {
+          name: string;
+          arguments?: string;
+          workDir?: string;
+          stackRuntime?: "nextjs" | "node" | "go" | "rust" | "python";
+          requireProductImplementation?: boolean;
+        },
+      );
+      res.status(200).json(result);
+    } catch (error) {
+      sendError(res, 502, error, "tool proxy failed");
+    }
+  });
+
   router.get("/:id/desktop-vnc/assets/*assetPath", async (req, res) => {
     try {
       const assetPath = Array.isArray(req.params.assetPath)

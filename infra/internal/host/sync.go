@@ -83,13 +83,15 @@ func SyncPlatformConfig(ctx context.Context) error {
 		toolGatewayURL = "127.0.0.1:9095"
 	}
 	secrets := fmt.Sprintf(
-		"DEFAULT_AGENT=brain\nSERVICE_MODE=worker\nTOOL_GATEWAY_GRPC_URL=%s\nOPENAI_API_KEY=%s\nGITHUB_BOT_TOKEN=%s\nGITHUB_BOT_NAME=baby-devin-bot\nGITHUB_BOT_EMAIL=baby-devin-bot@users.noreply.github.com\nAGENT_RUN_TIMEOUT_MIN=60\nAGENT_MODEL=%s\nOPENAI_MODEL=%s\nDEVIN_SNAPSHOT_DIR=/var/lib/devin/task-snapshots\n",
+		"DEFAULT_AGENT=brain\nSERVICE_MODE=worker\nTOOL_GATEWAY_GRPC_URL=%s\nGITHUB_BOT_TOKEN=%s\nGITHUB_BOT_NAME=baby-devin-bot\nGITHUB_BOT_EMAIL=baby-devin-bot@users.noreply.github.com\nAGENT_RUN_TIMEOUT_MIN=60\nAGENT_MODEL=%s\nOPENAI_MODEL=%s\nDEVIN_SNAPSHOT_DIR=/var/lib/devin/task-snapshots\n",
 		toolGatewayURL,
-		read("openai_api_key"),
 		read("github_bot_token"),
 		agentModel,
 		agentModel,
 	)
+	if brainURL := read("brain_internal_url"); brainURL != "" {
+		secrets += "BRAIN_INTERNAL_URL=" + brainURL + "\n"
+	}
 	if db := read("database_url"); db != "" {
 		if postgresReachable(db) {
 			secrets += "DATABASE_URL=" + db + "\n"

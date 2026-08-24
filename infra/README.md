@@ -243,7 +243,8 @@ Store shared agent keys in **AWS SSM SecureString** parameters (not per-user). E
 | --- | --- |
 | `/devin-production/platform/cursor_api_key` | Cursor agent (`CURSOR_API_KEY`) |
 | `/devin-production/platform/anthropic_api_key` | Claude agent (`ANTHROPIC_API_KEY`) |
-| `/devin-production/platform/openai_api_key` | Draft planner (`OPENAI_API_KEY`) |
+| `/devin-production/platform/openai_api_key` | Brain harness (`OPENAI_API_KEY` on EKS Brain — not synced to execution hosts) |
+| `/devin-production/platform/brain_internal_url` | Worker → Brain sandbox-ready callback (`BRAIN_INTERNAL_URL`) |
 | `/devin-production/platform/github_bot_token` | `baby-devin-bot` repo creation |
 
 ```sh

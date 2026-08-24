@@ -8,6 +8,7 @@ import { emit, updateTask } from "../task-state.js";
 import { reapOrphanRunningTasks } from "../session-lifecycle.js";
 import { runAgentPhase } from "./agent-phase.js";
 import { runSandboxSetupPhase } from "./sandbox-phase.js";
+import { publishSandboxReady } from "../publish-sandbox-ready.js";
 import type { ProcessJobState } from "./state.js";
 
 export async function processJob(
@@ -85,6 +86,14 @@ export async function processJob(
 
   try {
     await runSandboxSetupPhase(svc, job, task, state);
+
+    // Devin split: worker owns Devbox only; Brain runs the OpenAI harness.
+    if (svc.mode === "worker" && task.agent === "brain") {
+      await publishSandboxReady(svc, job, task, state);
+      state.retainSandboxForPreview = true;
+      return;
+    }
+
     await runAgentPhase(svc, job, task, state);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Task failed";
@@ -159,7 +168,17 @@ export async function processJob(
     emit(svc, "task.failed", task.id, message);
     throw error;
   } finally {
-    svc.processingTasks.delete(job.taskId);
+    // Worker Brain tasks keep processingTasks until agent-complete so continue
+    // cannot race a second provision while harness runs on Brain.
+    if (
+      !(
+        svc.mode === "worker" &&
+        task.agent === "brain" &&
+        state.retainSandboxForPreview
+      )
+    ) {
+      svc.processingTasks.delete(job.taskId);
+    }
     if (
       state.sandboxName &&
       !state.retainSandboxForPreview &&

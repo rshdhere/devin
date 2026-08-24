@@ -21,7 +21,6 @@ umask 077
   tg="$(read_ssm "$SSM_PREFIX/tool_gateway_grpc_url")"
   if [ -z "$tg" ]; then tg="127.0.0.1:9095"; fi
   echo "TOOL_GATEWAY_GRPC_URL=$tg"
-  echo "OPENAI_API_KEY=$(read_ssm "$SSM_PREFIX/openai_api_key")"
   echo "GITHUB_BOT_TOKEN=$(read_ssm "$SSM_PREFIX/github_bot_token")"
   echo "GITHUB_BOT_NAME=baby-devin-bot"
   echo "GITHUB_BOT_EMAIL=baby-devin-bot@users.noreply.github.com"
@@ -31,6 +30,8 @@ umask 077
   echo "AGENT_MODEL=$model"
   echo "OPENAI_MODEL=$model"
   echo "DEVIN_SNAPSHOT_DIR=/var/lib/devin/task-snapshots"
+  brain="$(read_ssm "$SSM_PREFIX/brain_internal_url")"
+  if [ -n "$brain" ]; then echo "BRAIN_INTERNAL_URL=$brain"; fi
   db="$(read_ssm "$SSM_PREFIX/database_url")"
   if [ -n "$db" ]; then echo "DATABASE_URL=$db"; fi
 } >/etc/devin/scheduler-secrets.env

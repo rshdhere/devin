@@ -4,6 +4,7 @@ export {
   OPENAI_TOOLS,
   createDevboxToolsClient,
   executeTool,
+  executeToolViaWorker,
   ensureBotCommitMessage,
   normalizeConventionalSubject,
   resolveBotCommitAuthor,
