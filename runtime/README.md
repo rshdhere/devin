@@ -42,7 +42,7 @@ curl -fsSL -o /var/lib/devin/linux/vmlinux \
 | `node/`   | `devin-runtime-node:latest`   | Node 22, Cursor/Claude, Rust/GCC                          |
 | `python/` | `devin-runtime-python:latest` | Python 3.12, Cursor/Claude, Rust/GCC                      |
 
-Every runtime image installs **Rust/Cargo + GCC/build-essential** via `runtime/scripts/install-build-toolchain.sh`. The toolchain lives under `/usr/local/rustup` and `/usr/local/cargo` on the read-only rootfs. Writable caches use:
+Every runtime image installs **Rust/Cargo + GCC/build-essential** via `runtime/scripts/install-build-toolchain.sh`. Interactive desktop (Xvfb, x11vnc, noVNC, websockify) is installed via `runtime/scripts/install-desktop-stack.sh` on every stack image so Snapshot and Interactive work regardless of prompt runtime.
 
 ```text
 HOME=/workspace/.home

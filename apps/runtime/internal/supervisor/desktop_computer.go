@@ -304,8 +304,8 @@ import(desktopPath + '/assets/core/rfb.js').then(({ default: RFB }) => {
 }
 
 func (s *Server) handleDesktopVNCAsset(w http.ResponseWriter, r *http.Request) {
-	relative := filepath.Clean("/" + r.PathValue("path"))
-	if relative == "/" || strings.HasPrefix(relative, "/../") {
+	relative := strings.TrimPrefix(filepath.Clean("/"+r.PathValue("path")), "/")
+	if relative == "" || relative == "." || strings.HasPrefix(relative, "../") {
 		http.NotFound(w, r)
 		return
 	}

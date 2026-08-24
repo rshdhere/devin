@@ -19,6 +19,11 @@ RUN chmod +x /tmp/install-agent-tools.sh \
     && /tmp/install-agent-tools.sh \
     && rm -f /tmp/install-agent-tools.sh
 
+COPY runtime/scripts/install-desktop-stack.sh /tmp/install-desktop-stack.sh
+RUN chmod +x /tmp/install-desktop-stack.sh \
+    && /tmp/install-desktop-stack.sh \
+    && rm -f /tmp/install-desktop-stack.sh
+
 ENV RUSTUP_HOME=/usr/local/rustup
 ENV CARGO_HOME=/usr/local/cargo
 ENV PATH="/usr/local/cargo/bin:/root/.bun/bin:${PATH}"

@@ -5,7 +5,6 @@ FROM node:22-bookworm-slim
 # canonical binary (never /usr/local/bin/bash → itself).
 RUN apt-get update && apt-get install -y --no-install-recommends \
     bash ca-certificates curl git openssh-client unzip chromium \
-    xvfb x11vnc websockify novnc ffmpeg \
     && rm -rf /var/lib/apt/lists/* \
     && BASH_REAL="$(readlink -f /bin/bash 2>/dev/null || readlink -f /usr/bin/bash)" \
     && test -x "$BASH_REAL" \
@@ -17,6 +16,11 @@ COPY runtime/scripts/install-build-toolchain.sh /tmp/install-build-toolchain.sh
 RUN chmod +x /tmp/install-build-toolchain.sh \
     && /tmp/install-build-toolchain.sh \
     && rm -f /tmp/install-build-toolchain.sh
+
+COPY runtime/scripts/install-desktop-stack.sh /tmp/install-desktop-stack.sh
+RUN chmod +x /tmp/install-desktop-stack.sh \
+    && /tmp/install-desktop-stack.sh \
+    && rm -f /tmp/install-desktop-stack.sh
 
 RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
       | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg \
