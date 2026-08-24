@@ -27,24 +27,31 @@ export type RehydrateWorkerResult = {
 /**
  * Resolve a live devbox session for UI proxy routes (preview, files, desktop).
  * On brain, returns undefined — caller should delegate to worker + rehydrate.
+ * Sleeping sessions are not hydrated here — use resolveRuntimeSession / wakeSession.
  */
 export async function resolveSessionForProxy(
   svc: TaskService,
   taskId: string,
 ): Promise<ReviewSession | undefined> {
+  const persisted = await svc.taskStore.getSession(taskId);
+  if (persisted?.state === "sleeping") {
+    return undefined;
+  }
+
   const inMemory =
     svc.activeSessions.get(taskId) ?? svc.reviewSessions.get(taskId);
   if (inMemory) {
     return inMemory;
   }
 
-  const persisted = await svc.taskStore.getSession(taskId);
   if (
     persisted &&
-    (persisted.state === "active" ||
-      persisted.state === "review" ||
-      persisted.state === "sleeping")
+    (persisted.state === "active" || persisted.state === "review")
   ) {
+    if (!persisted.sandboxName.trim() || !persisted.runtimeBaseUrl.trim()) {
+      // Capacity-detached session — Interactive needs a follow-up recover.
+      return undefined;
+    }
     return hydrateSessionFromStore(svc, taskId, persisted);
   }
 
@@ -60,17 +67,34 @@ export async function resolveRuntimeSession(
   svc: TaskService,
   taskId: string,
 ): Promise<ReviewSession | undefined> {
+  if (svc.mode !== "brain") {
+    const persisted = await svc.taskStore.getSession(taskId);
+    if (persisted?.state === "sleeping") {
+      const woken = await wakeSession(svc, taskId);
+      if (woken) {
+        void svc.taskStore.touchSession(taskId);
+        return woken;
+      }
+    }
+  }
+
   const fromProxy = await resolveSessionForProxy(svc, taskId);
   if (fromProxy) {
+    void svc.taskStore.touchSession(taskId);
     return fromProxy;
   }
 
   if (svc.mode !== "brain") {
     const woken = await wakeSession(svc, taskId);
     if (woken) {
+      void svc.taskStore.touchSession(taskId);
       return woken;
     }
-    return hydrateSessionFromOrchestrator(svc, taskId);
+    const hydrated = await hydrateSessionFromOrchestrator(svc, taskId);
+    if (hydrated) {
+      void svc.taskStore.touchSession(taskId);
+    }
+    return hydrated;
   }
 
   return undefined;

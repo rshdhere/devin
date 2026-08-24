@@ -4,6 +4,10 @@ import {
   validateFirecrackerHostForRuntime,
 } from "../../diagnostics/collect.js";
 import { formatOrchestratorConnectionError } from "../../config/orchestrator-url.js";
+import {
+  isSessionWithinRetention,
+  resolveSessionRetentionMs,
+} from "../../context/session-context.js";
 import type { ScheduleJob, Task } from "../types.js";
 import type { TaskService } from "./task-service.js";
 import type { SandboxRecord } from "./types.js";
@@ -235,30 +239,60 @@ function isTerminalTaskStatus(status: Task["status"] | undefined): boolean {
   );
 }
 
-/** Sessions kept for Desktop preview must not block new sandboxes forever.
- *  Guest networking uses a shared static IP, so only one live microVM works. */
+function isLiveSandboxPhase(phase: string | undefined): boolean {
+  return (
+    phase === "Running" || phase === "Provisioning" || phase === "Suspended"
+  );
+}
+
+/**
+ * Protect microVMs whose sessions are still inside SESSION_RETENTION_DAYS
+ * (default 30d) so interactive desktop / continue reuse the same guest.
+ * Guest networking uses a shared static IP — capacity reclaim may still
+ * detach the oldest retained idle VM as a last resort.
+ */
 async function protectedLiveTaskIds(
   svc: TaskService,
   taskId: string,
 ): Promise<Set<string>> {
   const protectedIds = new Set<string>([taskId, ...svc.processingTasks]);
 
+  const persistedSessions = await svc.taskStore.loadActiveSessions();
+  for (const session of persistedSessions) {
+    if (
+      session.sandboxName.trim() &&
+      isSessionWithinRetention(session.lastActiveAt)
+    ) {
+      protectedIds.add(session.taskId);
+    }
+  }
+
   for (const id of [
     ...svc.activeSessions.keys(),
     ...svc.reviewSessions.keys(),
   ]) {
-    const owner = svc.tasks.get(id) ?? (await svc.taskStore.getTask(id));
-    if (!owner || isTerminalTaskStatus(owner.status)) {
-      // Drop stale preview sessions so reclaim can free the shared guest IP.
-      svc.activeSessions.delete(id);
-      svc.reviewSessions.delete(id);
-      void svc.taskStore.deleteSession(id);
-      if (owner) {
-        owner.sessionActive = false;
-      }
+    if (protectedIds.has(id)) {
       continue;
     }
-    protectedIds.add(id);
+
+    const owner = svc.tasks.get(id) ?? (await svc.taskStore.getTask(id));
+    const persisted = await svc.taskStore.getSession(id);
+    const anchor =
+      persisted?.lastActiveAt ?? owner?.updatedAt ?? owner?.createdAt;
+
+    if (isSessionWithinRetention(anchor)) {
+      protectedIds.add(id);
+      continue;
+    }
+
+    // Outside retention: drop in-memory handles so reclaim can free the IP.
+    // Postgres rows are pruned by deleteExpiredSessions.
+    svc.activeSessions.delete(id);
+    svc.reviewSessions.delete(id);
+    if (owner) {
+      owner.sessionActive = false;
+      owner.sessionSleeping = false;
+    }
   }
 
   return protectedIds;
@@ -297,7 +331,7 @@ export async function reclaimDevboxCapacity(
     if (!ownerTaskId || protectedTaskIds.has(ownerTaskId)) {
       continue;
     }
-    if (sandbox.phase !== "Running" && sandbox.phase !== "Provisioning") {
+    if (!isLiveSandboxPhase(sandbox.phase)) {
       continue;
     }
 
@@ -314,24 +348,7 @@ export async function reclaimDevboxCapacity(
   }
 
   if (reclaimed === 0 && requiredCpu > 0) {
-    // Last resort: delete an unprotected Running sandbox so a new task can
-    // start even when completed-session tracking is incomplete.
-    const candidate = sandboxes.find((entry) => {
-      const ownerTaskId = entry.taskId?.trim();
-      return (
-        !!ownerTaskId &&
-        !protectedTaskIds.has(ownerTaskId) &&
-        (entry.phase === "Running" || entry.phase === "Provisioning")
-      );
-    });
-    if (candidate?.taskId) {
-      await forceTerminateDevbox(svc, candidate.taskId, candidate.name, taskId);
-      reclaimed += 1;
-      protectedTaskIds.add(candidate.taskId);
-    }
-  }
-
-  if (reclaimed === 0 && requiredCpu > 0) {
+    // Prefer reclaiming sessions past SESSION_RETENTION_DAYS.
     const staleTaskId = await findStaleDevboxSessionTaskId(svc);
     if (staleTaskId && !protectedTaskIds.has(staleTaskId)) {
       const staleSandbox = sandboxes.find(
@@ -340,7 +357,52 @@ export async function reclaimDevboxCapacity(
       if (staleSandbox) {
         await forceTerminateDevbox(svc, staleTaskId, staleSandbox.name, taskId);
         reclaimed += 1;
+        protectedTaskIds.add(staleTaskId);
       }
+    }
+  }
+
+  if (reclaimed === 0 && requiredCpu > 0) {
+    // Last resort: detach the oldest retained idle microVM so a new task can
+    // start. Session metadata is kept for recoverSession within retention.
+    const excludeFromDetach = new Set<string>([taskId, ...svc.processingTasks]);
+    const victimTaskId = await findOldestRetainedIdleSessionTaskId(
+      svc,
+      excludeFromDetach,
+    );
+    if (victimTaskId) {
+      const victimSandbox = sandboxes.find(
+        (entry) =>
+          entry.taskId === victimTaskId && isLiveSandboxPhase(entry.phase),
+      );
+      if (victimSandbox) {
+        await forceTerminateDevbox(
+          svc,
+          victimTaskId,
+          victimSandbox.name,
+          taskId,
+          { keepSessionForRecovery: true },
+        );
+        reclaimed += 1;
+        protectedTaskIds.add(victimTaskId);
+      }
+    }
+  }
+
+  if (reclaimed === 0 && requiredCpu > 0) {
+    // Final fallback when session tracking is incomplete.
+    const candidate = sandboxes.find((entry) => {
+      const ownerTaskId = entry.taskId?.trim();
+      return (
+        !!ownerTaskId &&
+        !protectedTaskIds.has(ownerTaskId) &&
+        isLiveSandboxPhase(entry.phase)
+      );
+    });
+    if (candidate?.taskId) {
+      await forceTerminateDevbox(svc, candidate.taskId, candidate.name, taskId);
+      reclaimed += 1;
+      protectedTaskIds.add(candidate.taskId);
     }
   }
 
@@ -354,25 +416,64 @@ export async function reclaimDevboxCapacity(
   return reclaimed;
 }
 
+/** Sessions idle longer than SESSION_RETENTION_DAYS (default 30). */
 export async function findStaleDevboxSessionTaskId(
   svc: TaskService,
 ): Promise<string | undefined> {
-  const cutoff = Date.now() - 20 * 60 * 1000;
+  const cutoff = Date.now() - resolveSessionRetentionMs();
   let oldestTaskId: string | undefined;
   let oldestActiveAt = Number.POSITIVE_INFINITY;
 
-  for (const [taskId] of svc.activeSessions) {
-    const persisted = await svc.taskStore.getSession(taskId);
-    const task = svc.tasks.get(taskId) ?? (await svc.taskStore.getTask(taskId));
-    if (!task || task.status !== "completed") {
+  const sessions = await svc.taskStore.loadActiveSessions();
+  for (const persisted of sessions) {
+    if (!persisted.sandboxName.trim()) {
       continue;
     }
-    const lastActive = persisted
-      ? new Date(persisted.lastActiveAt).getTime()
-      : new Date(task.updatedAt ?? task.createdAt).getTime();
+    const task =
+      svc.tasks.get(persisted.taskId) ??
+      (await svc.taskStore.getTask(persisted.taskId));
+    if (!task || !isTerminalTaskStatus(task.status)) {
+      continue;
+    }
+    const lastActive = new Date(persisted.lastActiveAt).getTime();
     if (lastActive < cutoff && lastActive < oldestActiveAt) {
       oldestActiveAt = lastActive;
-      oldestTaskId = taskId;
+      oldestTaskId = persisted.taskId;
+    }
+  }
+
+  return oldestTaskId;
+}
+
+/** Oldest retained idle completed/sleeping session — last-resort capacity victim. */
+export async function findOldestRetainedIdleSessionTaskId(
+  svc: TaskService,
+  excludeTaskIds: Set<string>,
+): Promise<string | undefined> {
+  let oldestTaskId: string | undefined;
+  let oldestActiveAt = Number.POSITIVE_INFINITY;
+
+  const sessions = await svc.taskStore.loadActiveSessions();
+  for (const persisted of sessions) {
+    if (excludeTaskIds.has(persisted.taskId) || !persisted.sandboxName.trim()) {
+      continue;
+    }
+    if (!isSessionWithinRetention(persisted.lastActiveAt)) {
+      continue;
+    }
+    const task =
+      svc.tasks.get(persisted.taskId) ??
+      (await svc.taskStore.getTask(persisted.taskId));
+    if (!task || !isTerminalTaskStatus(task.status)) {
+      continue;
+    }
+    if (svc.processingTasks.has(persisted.taskId)) {
+      continue;
+    }
+    const lastActive = new Date(persisted.lastActiveAt).getTime();
+    if (lastActive < oldestActiveAt) {
+      oldestActiveAt = lastActive;
+      oldestTaskId = persisted.taskId;
     }
   }
 
@@ -384,11 +485,17 @@ export async function forceTerminateDevbox(
   ownerTaskId: string,
   sandboxName: string,
   requestingTaskId: string,
+  options?: { keepSessionForRecovery?: boolean },
 ): Promise<void> {
   await deleteSandbox(svc, sandboxName);
   svc.activeSessions.delete(ownerTaskId);
   svc.reviewSessions.delete(ownerTaskId);
-  await svc.taskStore.deleteSession(ownerTaskId);
+
+  if (options?.keepSessionForRecovery) {
+    await svc.taskStore.detachSessionSandbox(ownerTaskId);
+  } else {
+    await svc.taskStore.deleteSession(ownerTaskId);
+  }
 
   const owner = svc.tasks.get(ownerTaskId);
   if (owner) {
@@ -402,11 +509,16 @@ export async function forceTerminateDevbox(
     svc,
     "agent.log",
     requestingTaskId,
-    `Reclaimed devbox ${sandboxName} from task ${ownerTaskId}`,
+    options?.keepSessionForRecovery
+      ? `Detached retained devbox ${sandboxName} from task ${ownerTaskId} (session kept for recovery)`
+      : `Reclaimed devbox ${sandboxName} from task ${ownerTaskId}`,
     {
       reclaimedFrom: ownerTaskId,
       sandboxName,
-      reason: "capacity",
+      reason: options?.keepSessionForRecovery
+        ? "capacity_detach_retained"
+        : "capacity",
+      keepSessionForRecovery: options?.keepSessionForRecovery ?? false,
     },
   );
 }

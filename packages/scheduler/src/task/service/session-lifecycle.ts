@@ -111,8 +111,10 @@ export async function continueTask(
 
   const jobBase =
     session?.job ?? persisted?.job ?? (await ensurePendingJob(svc, taskId));
-  const runtimeBaseUrl = session?.runtimeBaseUrl ?? persisted?.runtimeBaseUrl;
-  const sandboxName = session?.sandboxName ?? persisted?.sandboxName;
+  const runtimeBaseUrl = (
+    session?.runtimeBaseUrl ?? persisted?.runtimeBaseUrl
+  )?.trim();
+  const sandboxName = (session?.sandboxName ?? persisted?.sandboxName)?.trim();
 
   if (!jobBase) {
     throw new Error("no active devbox session for this task");
@@ -231,49 +233,82 @@ export async function wakeSession(
   if (!persisted || persisted.state !== "sleeping") {
     return undefined;
   }
-
-  await wakeSandbox(svc, persisted.sandboxName);
-  const runtimeBaseUrl = await resolveRuntimeUrl(svc, persisted.sandboxName);
-  const runtime = new RuntimeClient(runtimeBaseUrl);
-  await waitForRuntime(svc, runtime, taskId, runtimeBaseUrl);
-
-  const session: ReviewSession = {
-    runtime,
-    sandboxName: persisted.sandboxName,
-    runtimeBaseUrl,
-    repoCwd: persisted.repoCwd,
-    job: persisted.job,
-    githubToken: persisted.githubToken,
-    createdNewRepo: persisted.createdNewRepo,
-    guestHost: persisted.guestHost,
-    devboxPreviewPort: persisted.previewPort,
-  };
-  session.lastDesktopScreenshot = await loadCachedDesktopSnapshot(svc, taskId);
-
-  svc.activeSessions.set(taskId, session);
-  const task = svc.tasks.get(taskId);
-  if (task) {
-    task.sessionActive = true;
-    task.sessionSleeping = false;
-    task.sandboxName = persisted.sandboxName;
-    await svc.taskStore.upsertTask(task);
+  if (!persisted.sandboxName.trim() || !persisted.runtimeBaseUrl.trim()) {
+    return undefined;
   }
 
-  await persistSession(svc, taskId, session, "active");
-  await svc.taskStore.touchSession(taskId);
-  emit(
-    svc,
-    "task.phase_changed",
-    taskId,
-    "Devbox session woke from idle sleep",
-    {
-      phase: "running",
-      sessionActive: true,
-      sandboxName: persisted.sandboxName,
-    },
-  );
+  try {
+    await wakeSandbox(svc, persisted.sandboxName);
+    const runtimeBaseUrl = await resolveRuntimeUrl(svc, persisted.sandboxName);
+    const runtime = new RuntimeClient(runtimeBaseUrl);
+    await waitForRuntime(svc, runtime, taskId, runtimeBaseUrl);
 
-  return session;
+    const session: ReviewSession = {
+      runtime,
+      sandboxName: persisted.sandboxName,
+      runtimeBaseUrl,
+      repoCwd: persisted.repoCwd,
+      job: persisted.job,
+      githubToken: persisted.githubToken,
+      createdNewRepo: persisted.createdNewRepo,
+      guestHost: persisted.guestHost,
+      devboxPreviewPort: persisted.previewPort,
+    };
+    session.lastDesktopScreenshot = await loadCachedDesktopSnapshot(
+      svc,
+      taskId,
+    );
+
+    svc.activeSessions.set(taskId, session);
+    const task = svc.tasks.get(taskId);
+    if (task) {
+      task.sessionActive = true;
+      task.sessionSleeping = false;
+      task.sandboxName = persisted.sandboxName;
+      await svc.taskStore.upsertTask(task);
+    }
+
+    await persistSession(svc, taskId, session, "active");
+    await svc.taskStore.touchSession(taskId);
+    emit(
+      svc,
+      "task.phase_changed",
+      taskId,
+      "Devbox session woke from idle sleep",
+      {
+        phase: "running",
+        sessionActive: true,
+        sandboxName: persisted.sandboxName,
+      },
+    );
+
+    return session;
+  } catch {
+    emit(
+      svc,
+      "agent.log",
+      taskId,
+      "Failed to wake sleeping devbox — send a follow-up to restore from repository",
+      {
+        sandboxName: persisted.sandboxName,
+        wakeFailed: true,
+      },
+    );
+    // Drop the dead binding so continueTask / Interactive can recoverSession.
+    try {
+      await svc.taskStore.detachSessionSandbox(taskId);
+      const task = svc.tasks.get(taskId);
+      if (task) {
+        task.sessionActive = false;
+        task.sessionSleeping = false;
+        task.sandboxName = undefined;
+        await svc.taskStore.upsertTask(task);
+      }
+    } catch {
+      // best-effort
+    }
+    return undefined;
+  }
 }
 
 export async function terminateSession(
@@ -426,7 +461,23 @@ export async function runIdleWatchdog(svc: TaskService): Promise<void> {
   }
 
   try {
-    await svc.taskStore.deleteExpiredSessions(resolveSessionRetentionMs());
+    const expired = await svc.taskStore.deleteExpiredSessions(
+      resolveSessionRetentionMs(),
+    );
+    for (const row of expired) {
+      svc.activeSessions.delete(row.taskId);
+      svc.reviewSessions.delete(row.taskId);
+      const task = svc.tasks.get(row.taskId);
+      if (task) {
+        task.sessionActive = false;
+        task.sessionSleeping = false;
+        task.sandboxName = undefined;
+        void svc.taskStore.upsertTask(task);
+      }
+      if (row.sandboxName.trim()) {
+        void deleteSandbox(svc, row.sandboxName);
+      }
+    }
   } catch {
     // Retention prune is best-effort.
   }

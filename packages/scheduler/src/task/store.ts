@@ -248,17 +248,57 @@ export class TaskStore {
       .where(eq(agentTasks.id, taskId));
   }
 
+  /**
+   * Clear microVM binding while keeping job/context for recoverSession.
+   * Used when capacity reclaim must free the shared guest IP inside retention.
+   */
+  async detachSessionSandbox(taskId: string): Promise<void> {
+    if (!this.enabled) {
+      return;
+    }
+
+    const now = new Date();
+    await db
+      .update(agentSessions)
+      .set({
+        sandboxName: "",
+        runtimeBaseUrl: "",
+        state: "active",
+        sleepingAt: null,
+        updatedAt: now,
+      })
+      .where(eq(agentSessions.taskId, taskId));
+
+    await db
+      .update(agentTasks)
+      .set({
+        sessionActive: false,
+        sessionSleeping: false,
+        sandboxName: null,
+        updatedAt: now,
+      })
+      .where(eq(agentTasks.id, taskId));
+  }
+
   /** Drop session rows idle longer than retention (default 30 days). */
-  async deleteExpiredSessions(retentionMs: number): Promise<number> {
+  async deleteExpiredSessions(
+    retentionMs: number,
+  ): Promise<Array<{ taskId: string; sandboxName: string }>> {
     if (!this.enabled || !Number.isFinite(retentionMs) || retentionMs <= 0) {
-      return 0;
+      return [];
     }
     const cutoff = new Date(Date.now() - retentionMs);
     const deleted = await db
       .delete(agentSessions)
       .where(lt(agentSessions.lastActiveAt, cutoff))
-      .returning({ taskId: agentSessions.taskId });
-    return deleted.length;
+      .returning({
+        taskId: agentSessions.taskId,
+        sandboxName: agentSessions.sandboxName,
+      });
+    return deleted.map((row) => ({
+      taskId: row.taskId,
+      sandboxName: row.sandboxName,
+    }));
   }
 
   async listTasks(userId?: string): Promise<Task[]> {

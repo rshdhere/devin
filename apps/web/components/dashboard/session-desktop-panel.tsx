@@ -247,6 +247,31 @@ export function SessionDesktopPanel({
     setInteractiveError(null);
     setInteractiveReady(false);
     try {
+      if (task.sessionSleeping) {
+        const wakeResponse = await fetch(
+          tasksApiUrl(`/${encodeURIComponent(task.id)}/wake`),
+          {
+            method: "POST",
+            credentials: "include",
+            signal: AbortSignal.timeout(120_000),
+          },
+        );
+        if (wakeResponse.status === 504) {
+          setInteractiveError(
+            "Devbox is still waking — try again in a moment.",
+          );
+          return;
+        }
+        if (!wakeResponse.ok && wakeResponse.status !== 404) {
+          const body = (await wakeResponse.text()).slice(0, 200);
+          setInteractiveError(
+            body.trim() ||
+              `Could not wake the devbox (HTTP ${wakeResponse.status}). Retry or send a follow-up.`,
+          );
+          return;
+        }
+      }
+
       const ensureResponse = await fetch(ensureDesktopSrc, {
         method: "POST",
         credentials: "include",
@@ -258,7 +283,7 @@ export function SessionDesktopPanel({
         );
         return;
       }
-      if (!ensureResponse.ok && ensureResponse.status !== 404) {
+      if (!ensureResponse.ok) {
         const body = (await ensureResponse.text()).slice(0, 200);
         setInteractiveError(
           body.trim() ||
@@ -315,7 +340,14 @@ export function SessionDesktopPanel({
     } finally {
       setInteractiveLoading(false);
     }
-  }, [canUse, ensureDesktopSrc, interactiveSrc, rfbAssetSrc]);
+  }, [
+    canUse,
+    ensureDesktopSrc,
+    interactiveSrc,
+    rfbAssetSrc,
+    task.id,
+    task.sessionSleeping,
+  ]);
 
   useEffect(() => {
     if (!canUse || view !== "snapshot") {

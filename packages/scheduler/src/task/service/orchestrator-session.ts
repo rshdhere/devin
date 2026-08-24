@@ -2,7 +2,7 @@ import { RuntimeClient } from "@devin/agent-sdk";
 import type { ScheduleJob, Task, TaskStatus } from "../types.js";
 import { ensurePendingJob, ensureTaskLoaded } from "./resolve-task.js";
 import { persistSession } from "./persistence.js";
-import { fetchSandbox } from "./sandbox-lifecycle.js";
+import { fetchSandbox, wakeSandbox } from "./sandbox-lifecycle.js";
 import type { TaskService } from "./task-service.js";
 import type { ReviewSession } from "./types.js";
 
@@ -11,13 +11,14 @@ const PROXYABLE_STATUSES = new Set<TaskStatus>([
   "runtime_ready",
   "running",
   "awaiting_review",
+  "completed",
 ]);
 
 function taskMayHaveLiveSandbox(task: Task): boolean {
   return Boolean(
     task.sessionActive ||
-    PROXYABLE_STATUSES.has(task.status) ||
-    task.sessionSleeping,
+    task.sessionSleeping ||
+    PROXYABLE_STATUSES.has(task.status),
   );
 }
 
@@ -36,7 +37,15 @@ export async function hydrateSessionFromOrchestrator(
   }
 
   const sandboxName = task?.sandboxName ?? `sbx-${taskId.slice(0, 8)}`;
-  const sandbox = await fetchSandbox(svc, sandboxName);
+  let sandbox = await fetchSandbox(svc, sandboxName);
+  if (sandbox?.status?.phase === "Suspended") {
+    try {
+      await wakeSandbox(svc, sandboxName);
+      sandbox = await fetchSandbox(svc, sandboxName);
+    } catch {
+      return undefined;
+    }
+  }
   if (sandbox?.status?.phase !== "Running") {
     return undefined;
   }
@@ -58,8 +67,13 @@ export async function hydrateSessionFromOrchestrator(
 
   const persisted = await svc.taskStore.getSession(taskId);
   const persistedSessionIsLive =
-    persisted?.state === "active" || persisted?.state === "review";
+    persisted?.state === "active" ||
+    persisted?.state === "review" ||
+    persisted?.state === "sleeping";
   if (!taskMayHaveLiveSandbox(task) && !persistedSessionIsLive) {
+    return undefined;
+  }
+  if (persisted && !persisted.sandboxName.trim()) {
     return undefined;
   }
 

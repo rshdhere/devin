@@ -77,6 +77,18 @@ async function proxyBrainDesktopVNCWebSocket(
   }
 }
 
+async function resolveDesktopSession(
+  svc: TaskService,
+  taskId: string,
+): Promise<Awaited<ReturnType<typeof resolveLiveSession>>> {
+  const session =
+    (await resolveLiveSession(svc, taskId)) ?? (await wakeSession(svc, taskId));
+  if (session) {
+    void svc.taskStore.touchSession(taskId);
+  }
+  return session;
+}
+
 export async function ensureDesktopComputer(
   svc: TaskService,
   taskId: string,
@@ -90,7 +102,7 @@ export async function ensureDesktopComputer(
       { method: "POST" },
     );
   }
-  const session = await resolveLiveSession(svc, taskId);
+  const session = await resolveDesktopSession(svc, taskId);
   if (!session) {
     return new Response(JSON.stringify({ error: "no devbox session" }), {
       status: 404,
@@ -112,7 +124,7 @@ export async function proxyDesktopVNCPage(
       "/desktop/vnc",
     );
   }
-  const session = await resolveLiveSession(svc, taskId);
+  const session = await resolveDesktopSession(svc, taskId);
   if (!session) {
     return new Response("No devbox session", { status: 404 });
   }
@@ -154,8 +166,7 @@ export async function proxyDesktopVNCAsset(
     }
   }
 
-  const session =
-    (await resolveLiveSession(svc, taskId)) ?? (await wakeSession(svc, taskId));
+  const session = await resolveDesktopSession(svc, taskId);
   if (!session) {
     return new Response(JSON.stringify({ error: "no devbox session" }), {
       status: 404,
@@ -188,8 +199,7 @@ export async function proxyRuntimeWebSocket(
     return;
   }
 
-  const session =
-    (await resolveLiveSession(svc, taskId)) ?? (await wakeSession(svc, taskId));
+  const session = await resolveDesktopSession(svc, taskId);
   if (!session) {
     clientWs.close(1011, "no devbox session");
     return;

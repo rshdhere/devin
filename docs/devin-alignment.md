@@ -21,10 +21,10 @@ How devin.baby maps to [Devin](https://devin.ai) concepts and where we intention
 
 1. **Boot** — Orchestrator creates `Sandbox` CR → firecracker starts microVM from snapshot (~warm pool).
 2. **Work** — Brain harness calls tools over gRPC; gateway hits runtime HTTP in the guest. Events stream to the web UI.
-3. **Persist** — Devbox stays alive after agent run for follow-ups until user ends session, idle sleep, or explicit terminate.
-4. **Idle sleep** — After `DEVBOX_IDLE_TIMEOUT_SECONDS` (default 30m), sandbox phase → `Suspended`; session row kept in Postgres; wake on continue or `POST /tasks/:id/wake`.
+3. **Persist** — Devbox stays alive after agent run for follow-ups until user ends session, idle sleep, or explicit terminate. Same microVM is retained for Interactive / continue for up to `SESSION_RETENTION_DAYS` (default **30**).
+4. **Idle sleep** — After `DEVBOX_IDLE_TIMEOUT_SECONDS` (default 30m), sandbox phase → `Suspended`; session row kept in Postgres; wake on Interactive desktop, continue, or `POST /tasks/:id/wake`.
 5. **Ship** — Default: auto-push + open PR. Optional: pause at review when user enables manual review in dashboard settings.
-6. **Teardown** — Explicit **End session** or post-commit finalize deletes orchestrator sandbox.
+6. **Teardown** — Explicit **End session**, post-commit finalize, or retention expiry deletes the orchestrator sandbox. Capacity pressure may detach an idle retained VM while keeping session metadata for recoverSession.
 
 ## Architecture: Brain vs execution host
 
