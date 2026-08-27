@@ -212,7 +212,8 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           repository: rshdhere/ops
-          token: ${{ secrets.OPS_REPO_TOKEN }}
+          # Deploy key (write) — PATs in OPS_REPO_TOKEN expire/revoke and break bumps.
+          ssh-key: ${{ secrets.OPS_REPO_DEPLOY_KEY }}
           path: ops
 
       - name: Bump image SHA
@@ -224,7 +225,8 @@ jobs:
           WEB_TAG="${{ steps.target.outputs.web_tag }}"
           sed -i -E "s|^([[:space:]]*newTag:).*|\1 ${SHA}|" "${OVERLAY}"
           if [[ "${{ steps.target.outputs.environment }}" == "staging" ]]; then
-            sed -i "/name: devin-web/{n; s/newTag: .*/newTag: ${WEB_TAG}/;}" "${OVERLAY}"
+            # newName sits between name and newTag — range-replace so web gets the staging tag.
+            sed -i -E "/name: devin-web/,/newTag:/ s|^([[:space:]]*newTag:).*|\1 ${WEB_TAG}|" "${OVERLAY}"
           fi
           echo "Updated ${OVERLAY}:"
           git --no-pager diff -- "${OVERLAY}"
