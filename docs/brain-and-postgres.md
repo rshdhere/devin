@@ -154,6 +154,34 @@ When staging shares the production EC2 execution host, the staging `FirecrackerH
 | Worker SSM sync | `devin-infra sync-platform-config` (see `infra/README-cli.md`) |
 | Alignment | `docs/devin-alignment.md` |
 
+### HydraDB session memory (optional)
+
+Brain can ingest/recall long-lived session context into HydraDB. Create a database (e.g. `devin-context`) in the HydraDB console, then put credentials on the Brain secret:
+
+```bash
+# Vault (preferred once ExternalSecret is synced)
+vault kv put secret/staging/brain \
+  OPENAI_API_KEY="sk-..." \
+  OPENAI_MODEL=gpt-4o-mini \
+  HYDRADB_API_KEY="..." \
+  HYDRADB_DATABASE=devin-context \
+  HYDRADB_TENANT_ID=devin-context \
+  HYDRADB_BASE_URL=https://api.hydradb.com
+
+# Or patch the live K8s secret directly
+kubectl -n devin-staging create secret generic devin-brain \
+  --from-literal=OPENAI_API_KEY="sk-..." \
+  --from-literal=OPENAI_MODEL=gpt-4o-mini \
+  --from-literal=HYDRADB_API_KEY="..." \
+  --from-literal=HYDRADB_DATABASE=devin-context \
+  --from-literal=HYDRADB_TENANT_ID=devin-context \
+  --from-literal=HYDRADB_BASE_URL=https://api.hydradb.com \
+  --dry-run=client -o yaml | kubectl apply -f -
+kubectl -n devin-staging rollout restart deploy/devin-brain
+```
+
+Without `HYDRADB_API_KEY`, follow-ups still work via Postgres event history only — the HydraDB console will stay at 0 memories.
+
 ---
 
 ## Rollback

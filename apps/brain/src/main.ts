@@ -1,4 +1,5 @@
 import { startSchedulerServer } from "@devin/scheduler/start-server";
+import { logHydraDbStatus } from "@devin/scheduler";
 
 export const main = async () => {
   const port = Number(process.env.BRAIN_PORT ?? process.env.PORT ?? 9092);
@@ -7,6 +8,8 @@ export const main = async () => {
   const runtimeUrl = process.env.RUNTIME_URL ?? "http://localhost:8081";
   const executionWorkerUrl =
     process.env.EXECUTION_WORKER_URL ?? "http://localhost:9091";
+
+  logHydraDbStatus();
 
   await startSchedulerServer({
     port,

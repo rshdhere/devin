@@ -26,6 +26,7 @@ import {
   persistTaskContextMemory,
   resolveSessionRetentionMs,
 } from "../../context/session-context.js";
+import { isHydraDbEnabled } from "../../context/hydradb.js";
 import { resolveAgentMaxWaitMs } from "./config.js";
 
 /** Grace period past agent max-wait before reclaiming an orphaned running task. */
@@ -140,6 +141,15 @@ export async function continueTask(
     events: sessionEvents,
     followUpPrompt: trimmed,
   });
+  if (!isHydraDbEnabled()) {
+    emit(
+      svc,
+      "agent.log",
+      taskId,
+      "HydraDB context disabled — Brain missing HYDRADB_API_KEY / HYDRADB_DATABASE",
+      { hydradb: false },
+    );
+  }
   void persistTaskContextMemory(
     task,
     sessionEvents,

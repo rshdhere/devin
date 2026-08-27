@@ -1,7 +1,12 @@
 /**
  * HydraDB client for long-lived session context (user memories + recall).
- * Disabled when HYDRADB_API_KEY / HYDRADB_TENANT_ID are unset — callers fall back
+ * Disabled when HYDRADB_API_KEY and database id are unset — callers fall back
  * to Postgres event history.
+ *
+ * Scoping (HydraDB v2):
+ * - database (alias tenant_id) → HYDRADB_DATABASE / HYDRADB_TENANT_ID
+ * - collection (alias sub_tenant_id) → HYDRADB_COLLECTION / HYDRADB_SUB_TENANT_ID
+ *   or per-task id when unset (one collection per Devin session)
  */
 
 const DEFAULT_BASE_URL = "https://api.hydradb.com";
@@ -10,31 +15,60 @@ export const HYDRADB_MEMORY_TTL_SECONDS = 30 * 24 * 60 * 60;
 
 export type HydraDbConfig = {
   apiKey: string;
-  tenantId: string;
+  /** Top-level HydraDB database (formerly tenant_id). */
+  database: string;
   baseUrl: string;
-  /** Optional sub-tenant; defaults to taskId at call sites. */
-  subTenantId?: string;
+  /** Optional fixed collection; defaults to taskId at call sites. */
+  collection?: string;
 };
+
+let loggedDisabled = false;
+let loggedEnabled = false;
 
 export function resolveHydraDbConfig(): HydraDbConfig | undefined {
   const apiKey = process.env.HYDRADB_API_KEY?.trim();
-  const tenantId = process.env.HYDRADB_TENANT_ID?.trim();
-  if (!apiKey || !tenantId) {
+  const database =
+    process.env.HYDRADB_DATABASE?.trim() ||
+    process.env.HYDRADB_TENANT_ID?.trim();
+  if (!apiKey || !database) {
     return undefined;
   }
   return {
     apiKey,
-    tenantId,
+    database,
     baseUrl: (process.env.HYDRADB_BASE_URL?.trim() || DEFAULT_BASE_URL).replace(
       /\/$/,
       "",
     ),
-    subTenantId: process.env.HYDRADB_SUB_TENANT_ID?.trim() || undefined,
+    collection:
+      process.env.HYDRADB_COLLECTION?.trim() ||
+      process.env.HYDRADB_SUB_TENANT_ID?.trim() ||
+      undefined,
   };
 }
 
 export function isHydraDbEnabled(): boolean {
   return resolveHydraDbConfig() !== undefined;
+}
+
+/** Log once at process start so missing wiring is obvious in Brain logs. */
+export function logHydraDbStatus(prefix = "[hydradb]"): void {
+  const config = resolveHydraDbConfig();
+  if (!config) {
+    if (!loggedDisabled) {
+      loggedDisabled = true;
+      console.warn(
+        `${prefix} disabled — set HYDRADB_API_KEY and HYDRADB_DATABASE (or HYDRADB_TENANT_ID) on Brain`,
+      );
+    }
+    return;
+  }
+  if (!loggedEnabled) {
+    loggedEnabled = true;
+    console.log(
+      `${prefix} enabled database=${config.database} collection=${config.collection ?? "<taskId>"} base=${config.baseUrl}`,
+    );
+  }
 }
 
 export type IngestSessionMemoryInput = {
@@ -54,6 +88,10 @@ export type RecallSessionMemoryInput = {
   topK?: number;
 };
 
+function resolveCollection(config: HydraDbConfig, taskId: string): string {
+  return config.collection?.trim() || taskId;
+}
+
 async function hydraFetch(
   config: HydraDbConfig,
   path: string,
@@ -64,15 +102,18 @@ async function hydraFetch(
     headers: {
       Authorization: `Bearer ${config.apiKey}`,
       "Content-Type": "application/json",
+      "API-Version": "2",
     },
     body: JSON.stringify(body),
-    signal: AbortSignal.timeout(3_000),
+    // Ingest/recall can be slow on cold collections.
+    signal: AbortSignal.timeout(15_000),
   });
 }
 
 export async function ingestSessionMemory(
   input: IngestSessionMemoryInput,
 ): Promise<boolean> {
+  logHydraDbStatus();
   const config = resolveHydraDbConfig();
   if (!config) {
     return false;
@@ -82,10 +123,14 @@ export async function ingestSessionMemory(
     return false;
   }
 
+  const collection = resolveCollection(config, input.taskId);
   try {
     const response = await hydraFetch(config, "/memories/add_memory", {
-      tenant_id: config.tenantId,
-      sub_tenant_id: config.subTenantId || input.taskId,
+      // v2 + legacy aliases so either middleware path works.
+      database: config.database,
+      tenant_id: config.database,
+      collection,
+      sub_tenant_id: collection,
       upsert: true,
       memories: [
         {
@@ -103,12 +148,26 @@ export async function ingestSessionMemory(
           },
           additional_metadata: {
             kind: "session_context",
+            task_id: input.taskId,
+            ...(input.userId ? { user_id: input.userId } : {}),
           },
         },
       ],
     });
-    return response.ok;
-  } catch {
+    if (!response.ok) {
+      const detail = (await response.text().catch(() => "")).slice(0, 240);
+      console.warn(
+        `[hydradb] ingest failed HTTP ${response.status} database=${config.database} collection=${collection}: ${detail}`,
+      );
+      return false;
+    }
+    console.log(
+      `[hydradb] ingest queued database=${config.database} collection=${collection} task=${input.taskId.slice(0, 8)}`,
+    );
+    return true;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.warn(`[hydradb] ingest error: ${message.slice(0, 240)}`);
     return false;
   }
 }
@@ -124,11 +183,21 @@ function extractRecallTexts(payload: unknown): string[] {
     return [];
   }
   const root = payload as Record<string, unknown>;
-  const chunks = Array.isArray(root.chunks)
-    ? root.chunks
-    : Array.isArray(root.results)
-      ? root.results
-      : [];
+  const data =
+    root.data && typeof root.data === "object"
+      ? (root.data as Record<string, unknown>)
+      : root;
+  const chunks = Array.isArray(data.chunks)
+    ? data.chunks
+    : Array.isArray(data.results)
+      ? data.results
+      : Array.isArray(data.memories)
+        ? data.memories
+        : Array.isArray(root.chunks)
+          ? root.chunks
+          : Array.isArray(root.results)
+            ? root.results
+            : [];
 
   const texts: string[] = [];
   for (const item of chunks) {
@@ -156,6 +225,7 @@ function extractRecallTexts(payload: unknown): string[] {
 export async function recallSessionMemory(
   input: RecallSessionMemoryInput,
 ): Promise<string> {
+  logHydraDbStatus();
   const config = resolveHydraDbConfig();
   if (!config) {
     return "";
@@ -165,19 +235,23 @@ export async function recallSessionMemory(
     return "";
   }
 
+  const collection = resolveCollection(config, input.taskId);
   try {
     const response = await hydraFetch(config, "/recall/recall_preferences", {
-      tenant_id: config.tenantId,
-      sub_tenant_id: config.subTenantId || input.taskId,
+      database: config.database,
+      tenant_id: config.database,
+      collection,
+      sub_tenant_id: collection,
       query,
       top_k: input.topK ?? 8,
       alpha: 0.7,
       graph_context: true,
-      metadata_filters: {
-        task_id: input.taskId,
-      },
     });
     if (!response.ok) {
+      const detail = (await response.text().catch(() => "")).slice(0, 240);
+      console.warn(
+        `[hydradb] recall failed HTTP ${response.status} database=${config.database} collection=${collection}: ${detail}`,
+      );
       return "";
     }
     const texts = extractRecallTexts(await response.json());
@@ -191,7 +265,9 @@ export async function recallSessionMemory(
       return body;
     }
     return `${body.slice(0, max)}\n[HydraDB context truncated]`;
-  } catch {
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.warn(`[hydradb] recall error: ${message.slice(0, 240)}`);
     return "";
   }
 }

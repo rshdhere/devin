@@ -1,5 +1,10 @@
 import { describe, expect, it } from "bun:test";
-import { mergeSessionContexts, HYDRADB_MEMORY_TTL_SECONDS } from "./hydradb.js";
+import {
+  mergeSessionContexts,
+  HYDRADB_MEMORY_TTL_SECONDS,
+  resolveHydraDbConfig,
+  isHydraDbEnabled,
+} from "./hydradb.js";
 import {
   isSessionWithinRetention,
   resolveSessionRetentionMs,
@@ -28,6 +33,39 @@ describe("mergeSessionContexts", () => {
     expect(merged).toContain("Initial user request: chess");
     expect(merged).toContain("HydraDB session memory");
     expect(merged).toContain("board UI");
+  });
+});
+
+describe("resolveHydraDbConfig", () => {
+  it("is disabled without credentials", () => {
+    const prevKey = process.env.HYDRADB_API_KEY;
+    const prevDb = process.env.HYDRADB_DATABASE;
+    const prevTenant = process.env.HYDRADB_TENANT_ID;
+    delete process.env.HYDRADB_API_KEY;
+    delete process.env.HYDRADB_DATABASE;
+    delete process.env.HYDRADB_TENANT_ID;
+    expect(isHydraDbEnabled()).toBe(false);
+    expect(resolveHydraDbConfig()).toBeUndefined();
+    if (prevKey !== undefined) process.env.HYDRADB_API_KEY = prevKey;
+    if (prevDb !== undefined) process.env.HYDRADB_DATABASE = prevDb;
+    if (prevTenant !== undefined) process.env.HYDRADB_TENANT_ID = prevTenant;
+  });
+
+  it("accepts HYDRADB_DATABASE alias for tenant", () => {
+    const prevKey = process.env.HYDRADB_API_KEY;
+    const prevDb = process.env.HYDRADB_DATABASE;
+    const prevTenant = process.env.HYDRADB_TENANT_ID;
+    process.env.HYDRADB_API_KEY = "test-key";
+    process.env.HYDRADB_DATABASE = "devin-context";
+    delete process.env.HYDRADB_TENANT_ID;
+    const config = resolveHydraDbConfig();
+    expect(config?.database).toBe("devin-context");
+    expect(isHydraDbEnabled()).toBe(true);
+    if (prevKey !== undefined) process.env.HYDRADB_API_KEY = prevKey;
+    else delete process.env.HYDRADB_API_KEY;
+    if (prevDb !== undefined) process.env.HYDRADB_DATABASE = prevDb;
+    else delete process.env.HYDRADB_DATABASE;
+    if (prevTenant !== undefined) process.env.HYDRADB_TENANT_ID = prevTenant;
   });
 });
 
