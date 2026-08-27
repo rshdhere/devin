@@ -39,6 +39,8 @@ export {
   ingestSessionMemory,
   recallSessionMemory,
   logHydraDbStatus,
+  resolveCollection,
+  resolveHydraDbConfig,
 } from "./context/hydradb.js";
 export {
   buildDurableSessionContext,

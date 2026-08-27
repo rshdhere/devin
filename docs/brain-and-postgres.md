@@ -182,7 +182,9 @@ kubectl -n devin-staging rollout restart deploy/devin-brain
 
 Without `HYDRADB_API_KEY`, follow-ups still work via Postgres event history only — the HydraDB console will stay at 0 memories.
 
-**Where ingest runs (Brain mode):** Brain owns `HYDRADB_*`. After each harness run, Brain calls `persistTaskContextMemory` (collection defaults to the **task UUID**). Worker `agent-complete` may also call ingest, but that is a no-op unless the execution host has the same secrets — do not rely on the worker.
+**Where ingest runs (Brain mode):** Brain owns `HYDRADB_*`. As soon as a harness starts, Brain seeds the user prompt into HydraDB, then upserts a fuller session snapshot after the harness finishes. Collection defaults to the Devin **user id** (or `task-<taskId>` if no user) unless `HYDRADB_COLLECTION` is set. Worker `agent-complete` may also call ingest, but that is a no-op unless the execution host has the same secrets — do not rely on the worker.
+
+**Important (HydraDB v2):** each memory item's `metadata` field must be a **JSON-encoded string**. Passing a nested object returns `400 INVALID_INPUT` and no context is stored.
 
 ### HydraDB + Interactive verification (staging)
 
@@ -192,9 +194,10 @@ kubectl -n devin-staging logs deploy/devin-brain --tail=80 | grep '\[hydradb\]'
 # expect: [hydradb] enabled database=devin-context …
 
 # 2. Run a short staging task in the UI. In session Progress, look for:
-#    - "HydraDB recall …" / "HydraDB session memory ingested after harness"
-# In HydraDB → Logs / Context, the collection name should be the real task id
-# (not only a one-off probe-* collection).
+#    - "HydraDB prompt memory seeded"
+#    - "HydraDB session memory ingested after harness"
+# In HydraDB → Context / Logs, open collection `<yourUserId>` (not only
+# an old probe-* collection). You should see new POST /context/ingest rows.
 
 # 3. Interactive: open a completed Next/Node session → Interactive.
 # Guest Chromium should navigate to http://127.0.0.1:3099/ (managed preview),

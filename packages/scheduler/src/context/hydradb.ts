@@ -10,7 +10,10 @@
  * Scoping (HydraDB v2):
  * - database (alias tenant_id) → HYDRADB_DATABASE / HYDRADB_TENANT_ID
  * - collection (alias sub_tenant_id) → HYDRADB_COLLECTION / HYDRADB_SUB_TENANT_ID
- *   or per-task id when unset (one collection per Devin session)
+ *   else user-<userId> (recommended), else task-<taskId>
+ *
+ * Memory item `metadata` MUST be a JSON-encoded string (HydraDB INVALID_INPUT
+ * if passed as a nested object). `additional_metadata` stays an object.
  */
 
 const DEFAULT_BASE_URL = "https://api.hydradb.com";
@@ -24,7 +27,7 @@ export type HydraDbConfig = {
   /** Top-level HydraDB database (formerly tenant_id). */
   database: string;
   baseUrl: string;
-  /** Optional fixed collection; defaults to taskId at call sites. */
+  /** Optional fixed collection; defaults to user-/task- scoped at call sites. */
   collection?: string;
 };
 
@@ -72,7 +75,7 @@ export function logHydraDbStatus(prefix = "[hydradb]"): void {
   if (!loggedEnabled) {
     loggedEnabled = true;
     console.log(
-      `${prefix} enabled database=${config.database} collection=${config.collection ?? "<taskId>"} base=${config.baseUrl}`,
+      `${prefix} enabled database=${config.database} collection=${config.collection ?? "user-<id>|task-<id>"} base=${config.baseUrl}`,
     );
   }
 }
@@ -94,8 +97,23 @@ export type RecallSessionMemoryInput = {
   topK?: number;
 };
 
-function resolveCollection(config: HydraDbConfig, taskId: string): string {
-  return config.collection?.trim() || taskId;
+/**
+ * Prefer fixed env collection, else user id (HydraDB B2C pattern), else task.
+ * Per-task collections made the HydraDB Logs UI look empty when browsing a probe.
+ */
+export function resolveCollection(
+  config: HydraDbConfig,
+  taskId: string,
+  userId?: string,
+): string {
+  if (config.collection?.trim()) {
+    return config.collection.trim();
+  }
+  const user = userId?.trim();
+  if (user) {
+    return user;
+  }
+  return `task-${taskId}`;
 }
 
 function authHeaders(config: HydraDbConfig): Record<string, string> {
@@ -187,7 +205,13 @@ export async function ingestSessionMemory(
     return false;
   }
 
-  const collection = resolveCollection(config, input.taskId);
+  const collection = resolveCollection(config, input.taskId, input.userId);
+  // HydraDB v2: metadata must be a JSON *string* inside each memory item.
+  const metadata = JSON.stringify({
+    task_id: input.taskId,
+    ...(input.userId ? { user_id: input.userId } : {}),
+    product: "devin.baby",
+  });
   const memories = [
     {
       id:
@@ -197,11 +221,7 @@ export async function ingestSessionMemory(
       text,
       infer: true,
       expiry_time: input.expirySeconds ?? HYDRADB_MEMORY_TTL_SECONDS,
-      metadata: {
-        task_id: input.taskId,
-        ...(input.userId ? { user_id: input.userId } : {}),
-        product: "devin.baby",
-      },
+      metadata,
       additional_metadata: {
         kind: "session_context",
         task_id: input.taskId,
@@ -333,7 +353,7 @@ export async function recallSessionMemory(
     return "";
   }
 
-  const collection = resolveCollection(config, input.taskId);
+  const collection = resolveCollection(config, input.taskId, input.userId);
   try {
     const response = await hydraJson(config, "/query", {
       database: config.database,

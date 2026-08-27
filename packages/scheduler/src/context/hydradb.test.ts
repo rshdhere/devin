@@ -1,5 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
-import { ingestSessionMemory, recallSessionMemory } from "./hydradb.js";
+import {
+  ingestSessionMemory,
+  recallSessionMemory,
+  resolveCollection,
+  resolveHydraDbConfig,
+} from "./hydradb.js";
 
 const ENV_KEYS = [
   "HYDRADB_API_KEY",
@@ -48,6 +53,17 @@ describe("HydraDB v2 client", () => {
         process.env[key] = previous;
       }
     }
+  });
+
+  it("scopes collection to user when env collection is unset", () => {
+    enableHydraEnv();
+    const config = resolveHydraDbConfig()!;
+    expect(resolveCollection(config, "task-1", "user-abc")).toBe("user-abc");
+    expect(resolveCollection(config, "task-1")).toBe("task-task-1");
+    process.env.HYDRADB_COLLECTION = "probe-fixed";
+    expect(resolveCollection(resolveHydraDbConfig()!, "task-1", "u")).toBe(
+      "probe-fixed",
+    );
   });
 
   it("skips ingest when credentials are missing", async () => {
@@ -102,25 +118,29 @@ describe("HydraDB v2 client", () => {
     const form = init?.body as FormData;
     expect(form.get("type")).toBe("memory");
     expect(form.get("database")).toBe("devin-context");
-    expect(form.get("collection")).toBe("task-abc12345");
+    expect(form.get("collection")).toBe("user-1");
     expect(form.get("upsert")).toBe("true");
     const memories = JSON.parse(String(form.get("memories"))) as Array<{
       id: string;
       text: string;
       infer: boolean;
-      metadata: { task_id: string; user_id: string; product: string };
-      additional_metadata: { kind: string };
+      metadata: string;
+      additional_metadata: { kind: string; task_id: string; user_id: string };
     }>;
     expect(memories).toHaveLength(1);
     expect(memories[0]?.id).toBe("devin-task-task-abc12345-snapshot");
     expect(memories[0]?.text).toBe("Prefers TypeScript and Next.js.");
     expect(memories[0]?.infer).toBe(true);
-    expect(memories[0]?.metadata).toEqual({
+    expect(JSON.parse(memories[0]!.metadata)).toEqual({
       task_id: "task-abc12345",
       user_id: "user-1",
       product: "devin.baby",
     });
-    expect(memories[0]?.additional_metadata.kind).toBe("session_context");
+    expect(memories[0]?.additional_metadata).toEqual({
+      kind: "session_context",
+      task_id: "task-abc12345",
+      user_id: "user-1",
+    });
   });
 
   it("treats ingest success:false as failure", async () => {
@@ -167,6 +187,7 @@ describe("HydraDB v2 client", () => {
 
     const recalled = await recallSessionMemory({
       taskId: "task-abc12345",
+      userId: "user-1",
       query: "What stack does the user prefer?",
       topK: 5,
     });
@@ -179,7 +200,7 @@ describe("HydraDB v2 client", () => {
     });
     expect(JSON.parse(String(init?.body))).toEqual({
       database: "devin-context",
-      collection: "task-abc12345",
+      collection: "user-1",
       query: "What stack does the user prefer?",
       type: "memory",
       query_by: "hybrid",

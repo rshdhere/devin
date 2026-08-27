@@ -4,6 +4,8 @@ import {
   ingestSessionMemory,
   isHydraDbEnabled,
   recallSessionMemory,
+  resolveCollection,
+  resolveHydraDbConfig,
 } from "../../context/hydradb.js";
 import { persistTaskContextMemory } from "../../context/session-context.js";
 import type { ScheduleJob, Task } from "../types.js";
@@ -162,6 +164,33 @@ export async function runBrainHarnessOnBrain(
       });
     }
 
+    // Seed memory as soon as the harness starts so Logs show real session
+    // context (not only a post-completion snapshot or a one-off probe).
+    if (isHydraDbEnabled()) {
+      const seedOk = await ingestSessionMemory({
+        taskId: task.id,
+        userId: task.userId,
+        title: `Prompt ${task.id.slice(0, 8)}`,
+        sourceId: `devin-task-${task.id}-prompt`,
+        text: [
+          `Task ${task.id}`,
+          task.repository ? `Repository: ${task.repository}` : "",
+          `User request: ${job.prompt.trim()}`,
+        ]
+          .filter(Boolean)
+          .join("\n"),
+      });
+      emit(
+        svc,
+        "agent.log",
+        taskId,
+        seedOk
+          ? "HydraDB prompt memory seeded"
+          : "HydraDB prompt memory seed failed",
+        { hydradb: seedOk, collection: task.userId || `task-${task.id}` },
+      );
+    }
+
     const harnessResult = await runBrainHarness({
       taskId: task.id,
       prompt: agentPrompt,
@@ -250,6 +279,9 @@ async function persistHarnessContextMemory(
     const stored = await svc.taskStore.loadEvents(task.id);
     const events = stored.length > 0 ? stored : svc.getEventHistory(task.id);
     const ok = await persistTaskContextMemory(task, events, note);
+    const collection =
+      resolveCollection(resolveHydraDbConfig()!, task.id, task.userId) ||
+      task.id;
     emit(
       svc,
       "agent.log",
@@ -257,7 +289,7 @@ async function persistHarnessContextMemory(
       ok
         ? "HydraDB session memory ingested after harness"
         : "HydraDB session memory ingest failed after harness",
-      { hydradb: ok, collection: task.id },
+      { hydradb: ok, collection },
     );
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
