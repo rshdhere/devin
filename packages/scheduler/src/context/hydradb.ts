@@ -3,6 +3,10 @@
  * Disabled when HYDRADB_API_KEY and database id are unset — callers fall back
  * to Postgres event history.
  *
+ * HydraDB v2 endpoints:
+ * - ingest → POST /context/ingest (multipart, type=memory)
+ * - recall → POST /query (JSON, type=memory)
+ *
  * Scoping (HydraDB v2):
  * - database (alias tenant_id) → HYDRADB_DATABASE / HYDRADB_TENANT_ID
  * - collection (alias sub_tenant_id) → HYDRADB_COLLECTION / HYDRADB_SUB_TENANT_ID
@@ -10,6 +14,8 @@
  */
 
 const DEFAULT_BASE_URL = "https://api.hydradb.com";
+const HYDRADB_API_VERSION = "2";
+const HYDRADB_TIMEOUT_MS = 15_000;
 /** 30 days in seconds — matches SESSION_RETENTION_DAYS default. */
 export const HYDRADB_MEMORY_TTL_SECONDS = 30 * 24 * 60 * 60;
 
@@ -92,7 +98,14 @@ function resolveCollection(config: HydraDbConfig, taskId: string): string {
   return config.collection?.trim() || taskId;
 }
 
-async function hydraFetch(
+function authHeaders(config: HydraDbConfig): Record<string, string> {
+  return {
+    Authorization: `Bearer ${config.apiKey}`,
+    "API-Version": HYDRADB_API_VERSION,
+  };
+}
+
+async function hydraJson(
   config: HydraDbConfig,
   path: string,
   body: Record<string, unknown>,
@@ -100,14 +113,65 @@ async function hydraFetch(
   return fetch(`${config.baseUrl}${path}`, {
     method: "POST",
     headers: {
-      Authorization: `Bearer ${config.apiKey}`,
+      ...authHeaders(config),
       "Content-Type": "application/json",
-      "API-Version": "2",
     },
     body: JSON.stringify(body),
-    // Ingest/recall can be slow on cold collections.
-    signal: AbortSignal.timeout(15_000),
+    signal: AbortSignal.timeout(HYDRADB_TIMEOUT_MS),
   });
+}
+
+async function hydraMultipart(
+  config: HydraDbConfig,
+  path: string,
+  fields: Record<string, string>,
+): Promise<Response> {
+  const form = new FormData();
+  for (const [key, value] of Object.entries(fields)) {
+    form.append(key, value);
+  }
+  return fetch(`${config.baseUrl}${path}`, {
+    method: "POST",
+    headers: authHeaders(config),
+    body: form,
+    signal: AbortSignal.timeout(HYDRADB_TIMEOUT_MS),
+  });
+}
+
+type HydraEnvelope = {
+  success?: boolean;
+  error?: { message?: string } | string | null;
+};
+
+async function readHydraResponse(response: Response): Promise<{
+  ok: boolean;
+  status: number;
+  payload: unknown;
+  detail: string;
+}> {
+  const text = await response.text().catch(() => "");
+  let payload: unknown;
+  try {
+    payload = text ? JSON.parse(text) : undefined;
+  } catch {
+    payload = undefined;
+  }
+  const envelope =
+    payload && typeof payload === "object"
+      ? (payload as HydraEnvelope)
+      : undefined;
+  const errorMessage =
+    typeof envelope?.error === "string"
+      ? envelope.error
+      : envelope?.error && typeof envelope.error === "object"
+        ? String(envelope.error.message ?? "")
+        : "";
+  return {
+    ok: response.ok && envelope?.success !== false,
+    status: response.status,
+    payload,
+    detail: (errorMessage || text).slice(0, 240),
+  };
 }
 
 export async function ingestSessionMemory(
@@ -124,40 +188,40 @@ export async function ingestSessionMemory(
   }
 
   const collection = resolveCollection(config, input.taskId);
+  const memories = [
+    {
+      id:
+        input.sourceId ??
+        `devin-task-${input.taskId}-${Date.now().toString(36)}`,
+      title: input.title ?? `Devin session ${input.taskId.slice(0, 8)}`,
+      text,
+      infer: true,
+      expiry_time: input.expirySeconds ?? HYDRADB_MEMORY_TTL_SECONDS,
+      metadata: {
+        task_id: input.taskId,
+        ...(input.userId ? { user_id: input.userId } : {}),
+        product: "devin.baby",
+      },
+      additional_metadata: {
+        kind: "session_context",
+        task_id: input.taskId,
+        ...(input.userId ? { user_id: input.userId } : {}),
+      },
+    },
+  ];
+
   try {
-    const response = await hydraFetch(config, "/memories/add_memory", {
-      // v2 + legacy aliases so either middleware path works.
+    const response = await hydraMultipart(config, "/context/ingest", {
+      type: "memory",
       database: config.database,
-      tenant_id: config.database,
       collection,
-      sub_tenant_id: collection,
-      upsert: true,
-      memories: [
-        {
-          source_id:
-            input.sourceId ??
-            `devin-task-${input.taskId}-${Date.now().toString(36)}`,
-          title: input.title ?? `Devin session ${input.taskId.slice(0, 8)}`,
-          text,
-          infer: true,
-          expiry_time: input.expirySeconds ?? HYDRADB_MEMORY_TTL_SECONDS,
-          metadata: {
-            task_id: input.taskId,
-            ...(input.userId ? { user_id: input.userId } : {}),
-            product: "devin.baby",
-          },
-          additional_metadata: {
-            kind: "session_context",
-            task_id: input.taskId,
-            ...(input.userId ? { user_id: input.userId } : {}),
-          },
-        },
-      ],
+      upsert: "true",
+      memories: JSON.stringify(memories),
     });
-    if (!response.ok) {
-      const detail = (await response.text().catch(() => "")).slice(0, 240);
+    const result = await readHydraResponse(response);
+    if (!result.ok) {
       console.warn(
-        `[hydradb] ingest failed HTTP ${response.status} database=${config.database} collection=${collection}: ${detail}`,
+        `[hydradb] ingest failed HTTP ${result.status} database=${config.database} collection=${collection}: ${result.detail}`,
       );
       return false;
     }
@@ -176,7 +240,32 @@ type RecallChunk = {
   text?: string;
   content?: string;
   chunk?: string;
+  chunk_content?: string;
 };
+
+function pushText(texts: string[], value: unknown): void {
+  if (typeof value === "string" && value.trim()) {
+    texts.push(value.trim());
+  }
+}
+
+function collectGraphTexts(graph: unknown, texts: string[]): void {
+  if (!graph || typeof graph !== "object") {
+    return;
+  }
+  const rows = graph as Record<string, unknown>;
+  for (const key of ["query_paths", "chunk_relations"] as const) {
+    const list = rows[key];
+    if (!Array.isArray(list)) {
+      continue;
+    }
+    for (const item of list) {
+      if (item && typeof item === "object") {
+        pushText(texts, (item as Record<string, unknown>).combined_context);
+      }
+    }
+  }
+}
 
 function extractRecallTexts(payload: unknown): string[] {
   if (!payload || typeof payload !== "object") {
@@ -201,24 +290,33 @@ function extractRecallTexts(payload: unknown): string[] {
 
   const texts: string[] = [];
   for (const item of chunks) {
-    if (typeof item === "string" && item.trim()) {
-      texts.push(item.trim());
+    if (typeof item === "string") {
+      pushText(texts, item);
       continue;
     }
     if (!item || typeof item !== "object") {
       continue;
     }
     const row = item as RecallChunk & Record<string, unknown>;
-    const candidate =
-      (typeof row.text === "string" && row.text) ||
-      (typeof row.content === "string" && row.content) ||
-      (typeof row.chunk === "string" && row.chunk) ||
-      "";
-    if (candidate.trim()) {
-      texts.push(candidate.trim());
+    pushText(
+      texts,
+      row.chunk_content || row.text || row.content || row.chunk || "",
+    );
+  }
+  pushText(texts, data.additional_context);
+  if (
+    data.additional_context &&
+    typeof data.additional_context === "object" &&
+    !Array.isArray(data.additional_context)
+  ) {
+    for (const value of Object.values(
+      data.additional_context as Record<string, unknown>,
+    )) {
+      pushText(texts, value);
     }
   }
-  return texts;
+  collectGraphTexts(data.graph_context, texts);
+  return [...new Set(texts)];
 }
 
 /** Recall HydraDB memories for a task; returns a bounded context string or "". */
@@ -237,24 +335,23 @@ export async function recallSessionMemory(
 
   const collection = resolveCollection(config, input.taskId);
   try {
-    const response = await hydraFetch(config, "/recall/recall_preferences", {
+    const response = await hydraJson(config, "/query", {
       database: config.database,
-      tenant_id: config.database,
       collection,
-      sub_tenant_id: collection,
       query,
-      top_k: input.topK ?? 8,
-      alpha: 0.7,
-      graph_context: true,
+      type: "memory",
+      query_by: "hybrid",
+      mode: "fast",
+      max_results: input.topK ?? 8,
     });
-    if (!response.ok) {
-      const detail = (await response.text().catch(() => "")).slice(0, 240);
+    const result = await readHydraResponse(response);
+    if (!result.ok) {
       console.warn(
-        `[hydradb] recall failed HTTP ${response.status} database=${config.database} collection=${collection}: ${detail}`,
+        `[hydradb] recall failed HTTP ${result.status} database=${config.database} collection=${collection}: ${result.detail}`,
       );
       return "";
     }
-    const texts = extractRecallTexts(await response.json());
+    const texts = extractRecallTexts(result.payload);
     if (texts.length === 0) {
       return "";
     }
