@@ -89,6 +89,11 @@ export function isLikelyBlankScreenshot(buffer: Buffer): boolean {
 
   const mean = sum / count;
   const variance = sumSq / count - mean * mean;
+  // Near-white frames with almost no structure (mux "404 page not found",
+  // about:blank, empty Chromium chrome) must never be dumped as Desktop.
+  if (mean > 245 && variance < 40) {
+    return true;
+  }
   return mean > 235 && variance < 120;
 }
 

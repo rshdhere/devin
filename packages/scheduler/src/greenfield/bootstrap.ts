@@ -150,6 +150,21 @@ func main() {
     w.Header().Set("Content-Type", "application/json")
     _ = json.NewEncoder(w).Encode(map[string]bool{"ok": true})
   })
+  mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+    if r.URL.Path != "/" {
+      http.NotFound(w, r)
+      return
+    }
+    w.Header().Set("Content-Type", "text/html; charset=utf-8")
+    _, _ = w.Write([]byte(\`<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Scaffold ready</title></head>
+<body>
+  <h1>Scaffold ready</h1>
+  <p>Implement the full app.</p>
+</body>
+</html>\`))
+  })
 
   port := os.Getenv("PORT")
   if port == "" {

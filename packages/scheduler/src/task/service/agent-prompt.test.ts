@@ -142,4 +142,20 @@ describe("buildAgentPrompt", () => {
     expect(prompt).toContain("thin Rust Cargo scaffold");
     expect(prompt).toContain("do NOT create Next.js or Node files");
   });
+
+  it("requires Go apps to serve HTML at GET /", () => {
+    const prompt = buildAgentPrompt(
+      "make me a chat-app using go",
+      "acme/chat-go",
+      "repo",
+      undefined,
+      "go",
+      true,
+    );
+
+    expect(prompt).toContain("thin Go scaffold");
+    expect(prompt).toContain("GET / must serve a real user-facing HTML UI");
+    expect(prompt).toContain("Smoke-check GET / (HTML 200) and /health");
+    expect(prompt).not.toContain("App Router");
+  });
 });

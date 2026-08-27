@@ -830,8 +830,8 @@ export async function executeTool(
               };
             }
           } else {
-            // Non-JS stacks: only refuse finish if the thin health-only scaffold
-            // is still the only product code (entry file barely changed).
+            // Non-JS stacks: refuse finish if thin health-only scaffold remains,
+            // or if GET / is still a 404 (Desktop dumps that frame otherwise).
             const entry =
               stack === "python"
                 ? "app.py"
@@ -846,14 +846,30 @@ export async function executeTool(
                   "set +e",
                   `wc -l < '${entry}' 2>/dev/null || echo 0`,
                   "git rev-list --count HEAD 2>/dev/null || echo 0",
+                  "echo '---ROOT---'",
+                  "ROOT_OK=no",
+                  "if command -v ss >/dev/null 2>&1; then",
+                  "  for p in 3000 3099 8000 8080 5000; do",
+                  "    code=$(curl -s -o /tmp/devin-root-body -w '%{http_code}' -H 'Accept: text/html,*/*' --max-time 2 \"http://127.0.0.1:$p/\" 2>/dev/null || true)",
+                  '    if [ "$code" = "200" ]; then',
+                  "      body=$(head -c 512 /tmp/devin-root-body 2>/dev/null || true)",
+                  "      if echo \"$body\" | grep -qiE '404 page not found|Cannot GET /'; then continue; fi",
+                  "      if echo \"$body\" | grep -qiE '<!doctype html|<html|<body|<div|<h1|<form|Scaffold ready'; then ROOT_OK=yes; break; fi",
+                  "      ROOT_OK=yes; break",
+                  "    fi",
+                  "  done",
+                  "fi",
+                  'echo "$ROOT_OK"',
+                  "echo '---HANDLER---'",
+                  `grep -E 'HandleFunc\\(\"/\"|Handle\\(\"/\"|@app\\.(get|route)\\(\"/\"|route\\(\"/\"|\\(\"/\"\\)' '${entry}' 2>/dev/null | head -3 || true`,
                 ].join("\n"),
                 cwd: ctx.workDir,
-                timeoutSec: 20,
-                timeout_sec: 20,
+                timeoutSec: 30,
+                timeout_sec: 30,
               },
             );
-            const lines = (probe.stdout ?? "")
-              .trim()
+            const out = (probe.stdout ?? "").trim();
+            const lines = out
               .split("\n")
               .map((l) => l.trim())
               .filter(Boolean);
@@ -863,6 +879,19 @@ export async function executeTool(
                 content:
                   `Cannot finish yet — ${entry} still looks like the thin scaffold (~${entryLines} lines). ` +
                   "Implement the full product in this stack, make focused commits, then finish.",
+              };
+            }
+            const rootIdx = lines.indexOf("---ROOT---");
+            const rootOk = rootIdx >= 0 ? (lines[rootIdx + 1] ?? "no") : "no";
+            const handlerIdx = lines.indexOf("---HANDLER---");
+            const hasRootHandler =
+              handlerIdx >= 0 &&
+              lines.slice(handlerIdx + 1).some((l) => l.includes("/"));
+            if (rootOk !== "yes" && !hasRootHandler) {
+              return {
+                content:
+                  "Cannot finish yet — GET / does not serve a user-facing page (Desktop would show 404). " +
+                  "Add an HTML UI at `/` (keep `/health`), smoke-check it, commit, then finish.",
               };
             }
           }

@@ -56,6 +56,7 @@ export function stackGuidanceLines(stack?: BrainStackRuntime): string[] {
         `Start from these scaffold files: ${entries}.`,
         "Edit Go sources only. Do not create package.json, app/page.tsx, or Python files.",
         "Use go mod / go run; never bun or npm.",
+        "Serve a real HTML UI at GET / in addition to /health — Desktop preview opens /.",
       ];
     case "rust":
       return [

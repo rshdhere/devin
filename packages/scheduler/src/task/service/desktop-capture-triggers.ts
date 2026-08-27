@@ -62,9 +62,12 @@ export function maybeRememberPreviewPortFromText(
   }
   session.devboxPreviewPort = port;
   void svc.taskStore.setPreviewPort(taskId, port);
-  const previewPath = `/api/v1/tasks/${encodeURIComponent(taskId)}/devbox-preview?path=/`;
-  svc.patchTask(taskId, { previewUrl: previewPath });
-  void navigateDesktopBrowserForTask(svc, taskId, port);
+  void navigateDesktopBrowserForTask(
+    svc,
+    taskId,
+    port,
+    session.devboxPreviewPath ?? "/",
+  );
 }
 
 export async function triggerDesktopSnapshot(

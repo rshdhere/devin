@@ -1,22 +1,17 @@
-import { usesRuntimeAgent } from "../../agent/defaults.js";
 import {
   buildDesktopScreenshotScript,
   buildDiscoverDevboxPortScript,
+  buildDiscoverPreviewPathScript,
   buildStartDevServerForSnapshotScript,
   buildStopDevServerForSnapshotScript,
   buildWaitForDevServerScript,
-  buildSnapshotSmokeStartScript,
   buildWaitForPortScript,
+  RUNTIME_SUPERVISOR_PORTS,
   snapshotWaitSecondsForStartCommand,
 } from "../../devbox/preview.js";
-import {
-  loadTaskDesktopSnapshot,
-  saveTaskDesktopSnapshot,
-} from "../../devbox/snapshot-store.js";
 import { sanitizeProxyResponseHeaders } from "../../devbox/proxy-headers.js";
 import { maybeRewriteDevboxPreviewBody } from "../../devbox/preview-html.js";
 import type { IncomingMessage, ServerResponse } from "node:http";
-import type { Task } from "../types.js";
 import type { TaskService } from "./task-service.js";
 import type { ReviewSession } from "./types.js";
 import {
@@ -25,9 +20,7 @@ import {
 } from "./desktop-capture-fetch.js";
 import {
   delegateRequestToWorker,
-  hydrateSessionFromStore,
   isWorkerDelegateTimeout,
-  wakeSession,
   WORKER_DELEGATE_PREVIEW_TIMEOUT_MS,
 } from "./session-lifecycle.js";
 import {
@@ -131,6 +124,35 @@ export async function runDesktopScreenshotWithDevServer(
   return buffer;
 }
 
+function previewApiPath(taskId: string, guestPath: string): string {
+  const normalized = guestPath.startsWith("/") ? guestPath : `/${guestPath}`;
+  return `/api/v1/tasks/${encodeURIComponent(taskId)}/devbox-preview?path=${encodeURIComponent(normalized)}`;
+}
+
+export async function resolveDevboxPreviewPath(
+  svc: TaskService,
+  session: ReviewSession,
+  taskId: string,
+  port: number,
+): Promise<string | undefined> {
+  try {
+    const result = await session.runtime.terminalAllowFailure({
+      taskId,
+      cwd: session.repoCwd,
+      command: buildDiscoverPreviewPathScript(port),
+    });
+    const path = result.stdout.trim().split("\n").pop()?.trim() ?? "";
+    if (!path.startsWith("/") || result.exitCode !== 0) {
+      return undefined;
+    }
+    session.devboxPreviewPath = path;
+    patchTask(svc, taskId, { previewUrl: previewApiPath(taskId, path) });
+    return path;
+  } catch {
+    return session.devboxPreviewPath;
+  }
+}
+
 export async function captureDesktopScreenshot(
   svc: TaskService,
   session: ReviewSession,
@@ -148,15 +170,34 @@ export async function captureDesktopScreenshot(
     );
   }
 
-  const ports = [session.devboxPreviewPort];
+  const port = session.devboxPreviewPort;
+  const guestPath =
+    (await resolveDevboxPreviewPath(svc, session, taskId, port)) ??
+    session.devboxPreviewPath;
+  if (!guestPath) {
+    emit(
+      svc,
+      "agent.log",
+      taskId,
+      "Skipped desktop snapshot — no usable preview path",
+      {
+        desktop: true,
+        desktopSnapshot: true,
+        port,
+        reason: "all probed paths returned 404 or error",
+      },
+    );
+    return (
+      session.lastDesktopScreenshot ??
+      (await fetchRuntimePersistedScreenshot(svc, taskId))
+    );
+  }
 
-  let buffer: Buffer | undefined;
-  for (const port of ports) {
-    const target = `http://127.0.0.1:${port}/`;
-    buffer = await fetchRuntimeLiveScreenshot(svc, taskId, target);
-    if (buffer) {
-      break;
-    }
+  const target = `http://127.0.0.1:${port}${guestPath === "/" ? "/" : guestPath}`;
+  await navigateDesktopBrowserToPort(svc, session, taskId, port, guestPath);
+
+  let buffer = await fetchRuntimeLiveScreenshot(svc, taskId, target);
+  if (!buffer) {
     try {
       await session.runtime.terminalAllowFailure({
         taskId,
@@ -170,9 +211,6 @@ export async function captureDesktopScreenshot(
       // playwright/chromium may be missing in older snapshots
     }
     buffer = await fetchRuntimePersistedScreenshot(svc, taskId);
-    if (buffer) {
-      break;
-    }
   }
 
   if (buffer) {
@@ -273,16 +311,22 @@ export async function refreshDevboxPreviewPort(
     session.devboxPreviewPort = port;
     if (portChanged) {
       void svc.taskStore.setPreviewPort(taskId, port);
-      const previewPath = `/api/v1/tasks/${encodeURIComponent(taskId)}/devbox-preview?path=/`;
-      patchTask(svc, taskId, { previewUrl: previewPath });
       emit(svc, "agent.log", taskId, "Devbox localhost preview available", {
         port,
         guestHost: session.guestHost,
         desktop: true,
       });
     }
-    // Keep Chromium on the live preview URL so snapshots show the app, not about:blank.
-    void navigateDesktopBrowserToPort(svc, session, taskId, port);
+    const guestPath = await resolveDevboxPreviewPath(
+      svc,
+      session,
+      taskId,
+      port,
+    );
+    // Keep Chromium on a live non-404 URL so snapshots show the app, not mux 404.
+    if (guestPath) {
+      void navigateDesktopBrowserToPort(svc, session, taskId, port, guestPath);
+    }
     if (shouldCapturePreviewOnPortChange(svc, taskId, portChanged)) {
       void captureDesktopScreenshot(svc, session, taskId);
     }
@@ -338,13 +382,20 @@ export async function ensureDevboxAppForPreview(
   if (Number.isFinite(port) && port > 0) {
     session.devboxPreviewPort = port;
     void svc.taskStore.setPreviewPort(taskId, port);
-    const previewPath = `/api/v1/tasks/${encodeURIComponent(taskId)}/devbox-preview?path=/`;
-    patchTask(svc, taskId, { previewUrl: previewPath });
+    const guestPath = await resolveDevboxPreviewPath(
+      svc,
+      session,
+      taskId,
+      port,
+    );
     emit(svc, "agent.log", taskId, "Devbox app ready for preview", {
       port,
+      path: guestPath,
       desktop: true,
     });
-    void navigateDesktopBrowserToPort(svc, session, taskId, port);
+    if (guestPath) {
+      void navigateDesktopBrowserToPort(svc, session, taskId, port, guestPath);
+    }
     return port;
   }
 
@@ -367,12 +418,13 @@ export function startDevboxPreviewWatcher(
       return;
     }
     await refreshDevboxPreviewPort(svc, session, taskId);
-    if (session.devboxPreviewPort) {
+    if (session.devboxPreviewPort && session.devboxPreviewPath) {
       await navigateDesktopBrowserToPort(
         svc,
         session,
         taskId,
         session.devboxPreviewPort,
+        session.devboxPreviewPath,
       );
     }
     // Do not capture while the agent is working. The final screenshot is

@@ -286,6 +286,43 @@ export function buildWaitForPortScript(port: number, maxSeconds = 90): string {
   ].join("\n");
 }
 
+/**
+ * Pick the best in-guest preview path for Desktop capture.
+ * Prefers HTML UI at `/` over JSON `/health` so Chromium never lands on mux 404.
+ */
+export function buildDiscoverPreviewPathScript(port: number): string {
+  const safePort = Math.trunc(port);
+  return [
+    "set +e",
+    `P=${safePort}`,
+    "BODY=/tmp/devin-preview-body",
+    "best=''",
+    "best_score=0",
+    "for path in / /index.html /app /ui /chat /static/index.html /public/index.html; do",
+    '  code=$(curl -s -o "$BODY" -w "%{http_code}" -H "Accept: text/html,application/xhtml+xml,*/*" -H "Accept-Encoding: identity" --max-time 2 "http://127.0.0.1:$P$path" 2>/dev/null || true)',
+    '  case "$code" in 200|301|302|303|307|308) ;; *) continue ;; esac',
+    '  body=$(head -c 2048 "$BODY" 2>/dev/null || true)',
+    "  score=2",
+    '  if echo "$body" | grep -qiE "404 page not found|Cannot GET /|Not Found</title>|<title>404|nginx/.*404"; then score=0; fi',
+    '  if echo "$body" | grep -qiE "<!doctype html|<html|<body|<div|<main|<h1|<form"; then score=20; fi',
+    '  if [ "$path" = "/" ] && [ "$score" -ge 2 ]; then score=$((score + 5)); fi',
+    '  if [ "$score" -gt "$best_score" ]; then best_score=$score; best=$path; fi',
+    "done",
+    'if [ -n "$best" ] && [ "$best_score" -gt 0 ]; then printf "%s\\n" "$best"; exit 0; fi',
+    "for path in /health /api/health; do",
+    '  code=$(curl -s -o /dev/null -w "%{http_code}" -H "Accept-Encoding: identity" --max-time 2 "http://127.0.0.1:$P$path" 2>/dev/null || true)',
+    '  case "$code" in 200|301|302|303|307|308) printf "%s\\n" "$path"; exit 0 ;; esac',
+    "done",
+    // No usable path — print nothing so callers can refuse to capture a 404 frame.
+    "exit 1",
+  ].join("\n");
+}
+
+/** True when an HTTP status should not be dumped into Desktop snapshot storage. */
+export function isUnusablePreviewHttpStatus(status: number): boolean {
+  return status === 404 || status === 502 || status === 503 || status === 504;
+}
+
 /** Playwright + Chromium fallback screenshot script for scheduler terminal path. */
 export function buildDesktopScreenshotScript(
   url: string,

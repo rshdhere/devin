@@ -22,6 +22,7 @@ import type { ReviewSession } from "./types.js";
 import {
   captureDesktopScreenshot,
   captureDesktopScreenshotWithDevServer,
+  resolveDevboxPreviewPath,
   resolveLiveSession,
 } from "./desktop-capture-render.js";
 import {
@@ -31,7 +32,7 @@ import {
 } from "./session-lifecycle.js";
 import { requestWorkerRehydrate } from "./resolve-session-proxy.js";
 import { isLikelyBlankScreenshot } from "./desktop-snapshot-blank.js";
-import { emit, patchTask } from "./task-state.js";
+import { emit } from "./task-state.js";
 
 export async function fetchDesktopScreenshot(
   svc: TaskService,
@@ -360,8 +361,25 @@ export async function smokeAndCaptureDevboxPreview(
   }
   shotSession.devboxPreviewPort = port;
   void svc.taskStore.setPreviewPort(task.id, port);
-  const previewPath = `/api/v1/tasks/${encodeURIComponent(task.id)}/devbox-preview?path=/`;
-  patchTask(svc, task.id, { previewUrl: previewPath });
+  const guestPath = await resolveDevboxPreviewPath(
+    svc,
+    shotSession,
+    task.id,
+    port,
+  );
+  if (!guestPath) {
+    emit(
+      svc,
+      "agent.log",
+      task.id,
+      "Smoke port up but no non-404 preview path — skipping desktop dump",
+      {
+        port,
+        desktop: true,
+      },
+    );
+    return;
+  }
   void captureDesktopScreenshotWithDevServer(svc, shotSession, task.id, {
     allowSpin: false,
     keepServer: true,

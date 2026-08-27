@@ -22,6 +22,7 @@ export {
   fetchRuntimeLiveScreenshot,
   fetchRuntimePersistedScreenshot,
   refreshDevboxPreviewPort,
+  resolveDevboxPreviewPath,
   resolveLiveSession,
   startDevboxPreviewWatcher,
   proxyDevboxPreview,

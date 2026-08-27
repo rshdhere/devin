@@ -4,11 +4,13 @@ import {
   DEVIN_SNAPSHOT_SERVER_PORT,
   RUNTIME_SUPERVISOR_PORTS,
   buildDiscoverDevboxPortScript,
+  buildDiscoverPreviewPathScript,
   buildSnapshotSmokeStartScript,
   buildStartDevServerForSnapshotScript,
   buildWaitForDevServerScript,
   buildDesktopScreenshotScript,
   buildPruneWorkspaceDiskScript,
+  isUnusablePreviewHttpStatus,
 } from "./preview.js";
 
 describe("buildDiscoverDevboxPortScript", () => {
@@ -111,6 +113,18 @@ describe("buildDesktopScreenshotScript", () => {
       "/workspace/.home/desktop-preview.png",
     );
     expect(script).toContain("--disable-dev-shm-usage");
+  });
+});
+
+describe("buildDiscoverPreviewPathScript", () => {
+  it("prefers HTML UI paths and rejects mux-style 404 bodies", () => {
+    const script = buildDiscoverPreviewPathScript(3000);
+    expect(script).toContain("P=3000");
+    expect(script).toContain("404 page not found");
+    expect(script).toContain("/index.html");
+    expect(script).toContain("/health");
+    expect(isUnusablePreviewHttpStatus(404)).toBe(true);
+    expect(isUnusablePreviewHttpStatus(200)).toBe(false);
   });
 });
 

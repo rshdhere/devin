@@ -45,6 +45,9 @@ describe("greenfieldShellScaffoldFiles", () => {
       "go.mod",
       "main.go",
     ]);
+    const mainGo = files.find((file) => file.path === "main.go")?.content ?? "";
+    expect(mainGo).toContain('HandleFunc("/",');
+    expect(mainGo).toContain("Scaffold ready");
     expect(files.some((file) => /\.(?:js|jsx|ts|tsx)$/.test(file.path))).toBe(
       false,
     );

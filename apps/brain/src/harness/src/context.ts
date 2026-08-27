@@ -69,6 +69,7 @@ export function buildSystemPrompt(input: {
     } else if (stack === "go") {
       lines.push(
         "Extend main.go into the full product. Do not invent a Next.js or Node tree.",
+        "GET / must return user-facing HTML (200) — never finish with only /health or /chat APIs that leave / as 404.",
       );
     }
     lines.push(

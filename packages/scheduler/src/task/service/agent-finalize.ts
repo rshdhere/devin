@@ -262,17 +262,14 @@ export async function finalizeAgentRun(
     patchTask(svc, task.id, { sessionActive: true });
     state.retainSandboxForPreview = true;
 
-    if (pushedToGitHub) {
-      const shotSession = svc.activeSessions.get(task.id)!;
-      schedulePostCompletionDesktopCapture(
-        svc,
-        shotSession,
-        task,
-        state.repoCwd,
-        runtimeAgentTask,
-      );
-    }
-  } else if (sessionBeforeComplete && pushedToGitHub) {
+    schedulePostCompletionDesktopCapture(
+      svc,
+      svc.activeSessions.get(task.id)!,
+      task,
+      state.repoCwd,
+      runtimeAgentTask,
+    );
+  } else if (sessionBeforeComplete) {
     schedulePostCompletionDesktopCapture(
       svc,
       sessionBeforeComplete,

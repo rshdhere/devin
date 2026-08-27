@@ -53,6 +53,8 @@ export type ReviewSession = {
   createdNewRepo: boolean;
   guestHost?: string;
   devboxPreviewPort?: number;
+  /** Best in-guest path for Desktop (e.g. `/` or `/app`) — never a known 404. */
+  devboxPreviewPath?: string;
   /** Last successful headless capture while the devbox session is alive. */
   lastDesktopScreenshot?: Buffer;
 };

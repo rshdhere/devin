@@ -266,9 +266,10 @@ export function buildAgentPrompt(
       : stackRuntime === "python"
         ? [
             "- Extend app.py into the full product (Flask/FastAPI/etc.) — do NOT create Next.js files (no app/page.tsx, no package.json)",
+            "- GET / must serve a real user-facing HTML UI — never leave only /health JSON",
             "- Keep /health returning JSON { ok: true }",
             "- Add Python deps to requirements.txt and install with pip when needed",
-            "- Smoke-check the Python server endpoints before finishing",
+            "- Smoke-check GET / (HTML 200) and /health before finishing",
           ]
         : stackRuntime === "rust"
           ? [
@@ -279,8 +280,10 @@ export function buildAgentPrompt(
           : stackRuntime === "go"
             ? [
                 "- Extend main.go into the full product — do NOT create Next.js or Node files",
+                "- GET / must serve a real user-facing HTML UI — never leave mux/net/http '404 page not found'",
                 "- Keep /health returning JSON { ok: true }",
                 "- Use go run / go test; do not invent package.json or app/page.tsx",
+                "- Smoke-check GET / (HTML 200) and /health before finishing",
               ]
             : [
                 "- Replace the placeholder with a real UI + API for the user's request",
