@@ -154,7 +154,20 @@ export async function continueTask(
     task,
     sessionEvents,
     `Follow-up queued: ${trimmed.slice(0, 240)}`,
-  );
+  ).then((ok) => {
+    if (!isHydraDbEnabled()) {
+      return;
+    }
+    emit(
+      svc,
+      "agent.log",
+      taskId,
+      ok
+        ? "HydraDB session memory ingested on follow-up"
+        : "HydraDB session memory ingest failed on follow-up",
+      { hydradb: ok, collection: taskId },
+    );
+  });
   const followUpJob: ScheduleJob = {
     ...jobBase,
     prompt: trimmed,

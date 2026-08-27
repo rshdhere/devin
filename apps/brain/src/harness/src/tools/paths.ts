@@ -74,13 +74,24 @@ export function wrongStackMessage(stack: string, path: string): string {
 
 export function isForegroundServerCommand(command: string): boolean {
   const c = command.trim();
+  // Only allow explicitly backgrounded servers — `timeout Ns bun …` still kills
+  // the process before a follow-up curl can succeed (classic smoke-loop trap).
+  if (/\bnohup\b/i.test(c) || /(?:^|[\s;])&(?:\s|$)/.test(c)) {
+    return false;
+  }
   // Long-lived servers hang the harness (UI spinner stuck on Ran `bun start`).
   return (
     /\b(bun|npm|yarn|pnpm)\s+(run\s+)?(start|dev)\b/i.test(c) ||
     /\b(bun|npm|yarn|pnpm)\s+start\b/i.test(c) ||
+    // Direct entry points (node/bun src/index.js) also hang without &/nohup.
+    /\b(bun|node|tsx|ts-node)\s+(\S+\/)?(src\/)?(index|server|main|app)\.(js|ts|mjs|cjs)\b/i.test(
+      c,
+    ) ||
     /\bnext(\s+dev|\s+start)\b/i.test(c) ||
     /\bnpx\s+.*\b(next|vite|webpack-dev-server)\b/i.test(c) ||
     /\b(uvicorn|gunicorn|flask\s+run)\b/i.test(c) ||
-    /\bpython(\d+(?:\.\d+)*)?\s+-m\s+(uvicorn|http\.server|flask)\b/i.test(c)
+    /\bpython(\d+(?:\.\d+)*)?\s+-m\s+(uvicorn|http\.server|flask)\b/i.test(c) ||
+    /\bgo\s+run\b/i.test(c) ||
+    /\bcargo\s+run\b/i.test(c)
   );
 }

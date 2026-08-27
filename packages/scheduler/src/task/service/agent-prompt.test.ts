@@ -155,7 +155,9 @@ describe("buildAgentPrompt", () => {
 
     expect(prompt).toContain("thin Go scaffold");
     expect(prompt).toContain("GET / must serve a real user-facing HTML UI");
-    expect(prompt).toContain("Smoke-check GET / (HTML 200) and /health");
+    expect(prompt).toContain(
+      "Optional single smoke of GET / (HTML 200) and /health",
+    );
     expect(prompt).not.toContain("App Router");
   });
 });

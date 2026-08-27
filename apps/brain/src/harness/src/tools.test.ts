@@ -2,6 +2,7 @@ import { describe, expect, it } from "bun:test";
 import { toolProgressDetail } from "./loop.js";
 import {
   ensureBotCommitMessage,
+  isForegroundServerCommand,
   normalizeConventionalSubject,
   resolveRepoPath,
 } from "./tools.js";
@@ -31,6 +32,33 @@ describe("resolveRepoPath", () => {
   it("defaults empty path to workDir", () => {
     expect(resolveRepoPath("repo", "")).toBe("repo");
     expect(resolveRepoPath("repo", ".")).toBe("repo");
+  });
+});
+
+describe("isForegroundServerCommand", () => {
+  it("refuses package-manager start/dev and direct entry points", () => {
+    expect(isForegroundServerCommand("bun run start")).toBe(true);
+    expect(isForegroundServerCommand("npm start")).toBe(true);
+    expect(isForegroundServerCommand("bun src/index.js")).toBe(true);
+    expect(isForegroundServerCommand("node src/index.js")).toBe(true);
+    expect(isForegroundServerCommand("timeout 8s bun src/index.js")).toBe(true);
+  });
+
+  it("allows backgrounded servers and non-server commands", () => {
+    expect(
+      isForegroundServerCommand("nohup bun src/index.js >/tmp/s.log 2>&1 &"),
+    ).toBe(false);
+    expect(
+      isForegroundServerCommand(
+        "bun src/index.js & curl --max-time 5 http://127.0.0.1:3000/",
+      ),
+    ).toBe(false);
+    expect(isForegroundServerCommand("bun install")).toBe(false);
+    expect(
+      isForegroundServerCommand(
+        "curl --max-time 5 http://127.0.0.1:3000/health",
+      ),
+    ).toBe(false);
   });
 });
 

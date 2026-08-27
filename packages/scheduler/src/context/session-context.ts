@@ -71,9 +71,9 @@ export async function persistTaskContextMemory(
   task: Task,
   events: TaskEvent[],
   note?: string,
-): Promise<void> {
+): Promise<boolean> {
   if (!isHydraDbEnabled()) {
-    return;
+    return false;
   }
 
   const summary = buildFollowUpSessionContext(task.prompt, events, 8_000);
@@ -87,7 +87,7 @@ export async function persistTaskContextMemory(
     summary,
   ].filter((line) => line !== undefined);
 
-  await ingestSessionMemory({
+  return ingestSessionMemory({
     taskId: task.id,
     userId: task.userId,
     title: task.title ?? task.prompt.slice(0, 80),

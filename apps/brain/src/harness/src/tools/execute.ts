@@ -37,7 +37,8 @@ async function executeShell(
       content:
         `refused long-lived server command: ${command.slice(0, 120)}. ` +
         "Do not run start/dev servers in the foreground — they hang the harness. " +
-        "Use a short timed smoke check (e.g. timeout 8s …) or call finish after builds/tests.",
+        "At most one background smoke (`nohup … &` then `curl --max-time 5`), " +
+        "then call finish. Do not loop start/curl/timeout retries — Desktop preview is managed separately.",
     };
   }
   const res = await promisify<ExecResult>(toolsClient.Exec.bind(toolsClient), {

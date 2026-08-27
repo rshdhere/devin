@@ -12,7 +12,7 @@ export {
   resolveBotCommitAuthor,
 } from "./commit-message.js";
 
-export { resolveRepoPath } from "./paths.js";
+export { resolveRepoPath, isForegroundServerCommand } from "./paths.js";
 
 export { createDevboxToolsClient } from "./grpc-client.js";
 

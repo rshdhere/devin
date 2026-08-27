@@ -41,9 +41,9 @@ export function nextjsPromptGuidance(stackRuntime?: StackRuntime): string[] {
     ...agentSkillGuidance(),
     "- Verify `bun run build` succeeds before finishing",
     "- Run local CLIs with `bun x <tool>` (not `bunx`); if Bun is unavailable, use `npx --yes <tool>`.",
-    "- For smoke tests: if `npm run start` fails with EADDRINUSE on port 3000, " +
-      "the app may already be running — curl --max-time 5 `http://127.0.0.1:3000/` instead of " +
-      "starting a second server (or use `PORT=3001 npm run start`)",
+    "- Smoke at most once: if port 3000 is already up, curl --max-time 5 `http://127.0.0.1:3000/` once. " +
+      "Do not start a second server, and never loop `timeout 8s` start/curl retries.",
+    "- After one successful smoke (or if smoke is flaky), commit and call finish — Desktop preview is managed by the platform.",
     "",
     "Work efficiently — the run has a hard timeout:",
     "- Ship a working product first, then polish if time remains",
@@ -260,8 +260,8 @@ export function buildAgentPrompt(
           "- GET / must be user-facing — never leave the scaffold placeholder text",
           "- Keep /health or app/health returning JSON { ok: true }",
           "- Do not finish while the page still shows scaffold placeholder copy",
-          "- Add dependencies only when needed; if you do, run bun install and verify start still works",
-          "- Smoke-check GET / and /health before finishing",
+          "- Add dependencies only when needed; if you do, run bun install once",
+          "- Optional single smoke of GET / and /health, then finish — do not start/curl loops",
         ]
       : stackRuntime === "python"
         ? [
@@ -269,21 +269,21 @@ export function buildAgentPrompt(
             "- GET / must serve a real user-facing HTML UI — never leave only /health JSON",
             "- Keep /health returning JSON { ok: true }",
             "- Add Python deps to requirements.txt and install with pip when needed",
-            "- Smoke-check GET / (HTML 200) and /health before finishing",
+            "- Optional single smoke of GET / (HTML 200) and /health, then finish — no start/curl loops",
           ]
         : stackRuntime === "rust"
           ? [
               "- Extend the Cargo project (src/main.rs) into the full product — do NOT create Next.js or Node files",
               "- Keep a health/ready check if the app is a server",
-              "- Use cargo build (debug) for smoke tests; do not invent package.json",
+              "- Prefer cargo build (debug) once; do not invent package.json or loop cargo run",
             ]
           : stackRuntime === "go"
             ? [
                 "- Extend main.go into the full product — do NOT create Next.js or Node files",
                 "- GET / must serve a real user-facing HTML UI — never leave mux/net/http '404 page not found'",
                 "- Keep /health returning JSON { ok: true }",
-                "- Use go run / go test; do not invent package.json or app/page.tsx",
-                "- Smoke-check GET / (HTML 200) and /health before finishing",
+                "- Prefer go build / go test; do not invent package.json or app/page.tsx",
+                "- Optional single smoke of GET / (HTML 200) and /health, then finish — no start/curl loops",
               ]
             : [
                 "- Replace the placeholder with a real UI + API for the user's request",
@@ -291,8 +291,8 @@ export function buildAgentPrompt(
                 "- Keep /health returning JSON { ok: true }",
                 "- Do not finish while the page still says 'Scaffold is running'",
                 "- Do not create a Next.js App Router tree unless the user asked for Next.js",
-                "- Add dependencies only when needed; if you do, run bun install and verify start still works",
-                "- Smoke-check GET / and /health before finishing",
+                "- Add dependencies only when needed; if you do, run bun install once",
+                "- Optional single smoke of GET / and /health, then finish — do not start/curl loops",
               ];
 
   return [

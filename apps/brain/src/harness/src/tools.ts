@@ -11,6 +11,7 @@ export {
   normalizeConventionalSubject,
   resolveBotCommitAuthor,
   resolveRepoPath,
+  isForegroundServerCommand,
 } from "./tools/index.js";
 export type {
   DevboxToolsClient,

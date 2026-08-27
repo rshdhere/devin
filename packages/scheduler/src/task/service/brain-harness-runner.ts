@@ -2,8 +2,10 @@ import { runBrainHarness } from "@devin/brain-harness";
 import { resolveBrainAgentModel } from "@devin/types";
 import {
   ingestSessionMemory,
+  isHydraDbEnabled,
   recallSessionMemory,
 } from "../../context/hydradb.js";
+import { persistTaskContextMemory } from "../../context/session-context.js";
 import type { ScheduleJob, Task } from "../types.js";
 import type { TaskService } from "./task-service.js";
 import { buildAgentPrompt } from "./agent-prompt.js";
@@ -140,6 +142,25 @@ export async function runBrainHarnessOnBrain(
       query: job.prompt,
       topK: 8,
     });
+    if (!isHydraDbEnabled()) {
+      emit(
+        svc,
+        "agent.log",
+        taskId,
+        "HydraDB context disabled — Brain missing HYDRADB_API_KEY / HYDRADB_DATABASE",
+        { hydradb: false },
+      );
+    } else if (recalled.trim()) {
+      emit(svc, "agent.log", taskId, "HydraDB recall attached to harness", {
+        hydradb: true,
+        recallChars: recalled.length,
+      });
+    } else {
+      emit(svc, "agent.log", taskId, "HydraDB recall empty for this session", {
+        hydradb: true,
+        recallChars: 0,
+      });
+    }
 
     const harnessResult = await runBrainHarness({
       taskId: task.id,
@@ -160,14 +181,30 @@ export async function runBrainHarnessOnBrain(
         emit(svc, event.type, task.id, event.message, event.data);
       },
       onSaveMemory: async (facts) => {
-        await ingestSessionMemory({
+        const ok = await ingestSessionMemory({
           taskId: task.id,
           userId: task.userId,
           text: facts.join("\n"),
           title: `Brain memory ${task.id.slice(0, 8)}`,
         });
+        emit(
+          svc,
+          "agent.log",
+          task.id,
+          ok
+            ? "HydraDB save_memory ingest ok"
+            : "HydraDB save_memory ingest skipped or failed",
+          { hydradb: ok, facts: facts.length },
+        );
       },
     });
+
+    // Persist on Brain (where HYDRADB_* lives). Worker agent-complete may no-op.
+    await persistHarnessContextMemory(
+      svc,
+      task,
+      harnessResult.message || harnessResult.status,
+    );
 
     await notifyWorkerAgentComplete(svc, task, job, {
       status: harnessResult.status,
@@ -191,6 +228,43 @@ export async function runBrainHarnessOnBrain(
   } finally {
     harnessInFlight.delete(taskId);
     svc.processingTasks.delete(taskId);
+  }
+}
+
+async function persistHarnessContextMemory(
+  svc: TaskService,
+  task: Task,
+  note: string,
+): Promise<void> {
+  if (!isHydraDbEnabled()) {
+    emit(
+      svc,
+      "agent.log",
+      task.id,
+      "HydraDB context disabled — skipping post-harness ingest",
+      { hydradb: false },
+    );
+    return;
+  }
+  try {
+    const stored = await svc.taskStore.loadEvents(task.id);
+    const events = stored.length > 0 ? stored : svc.getEventHistory(task.id);
+    const ok = await persistTaskContextMemory(task, events, note);
+    emit(
+      svc,
+      "agent.log",
+      task.id,
+      ok
+        ? "HydraDB session memory ingested after harness"
+        : "HydraDB session memory ingest failed after harness",
+      { hydradb: ok, collection: task.id },
+    );
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    emit(svc, "agent.log", task.id, "HydraDB session memory ingest error", {
+      hydradb: false,
+      detail: detail.slice(0, 240),
+    });
   }
 }
 

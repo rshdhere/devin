@@ -19,6 +19,7 @@ export {
   captureDesktopScreenshotWithDevServer,
   runDesktopScreenshotWithDevServer,
   captureDesktopScreenshot,
+  ensureDevboxAppForPreview,
   fetchRuntimeLiveScreenshot,
   fetchRuntimePersistedScreenshot,
   refreshDevboxPreviewPort,

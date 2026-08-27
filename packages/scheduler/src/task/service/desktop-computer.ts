@@ -1,7 +1,10 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import WebSocket, { WebSocketServer } from "ws";
 import type { TaskService } from "./task-service.js";
-import { resolveLiveSession } from "./desktop-capture-render.js";
+import {
+  ensureDevboxAppForPreview,
+  resolveLiveSession,
+} from "./desktop-capture-render.js";
 import {
   brainDelegateOrRuntime,
   requestWorkerRehydrate,
@@ -11,6 +14,7 @@ import {
   contentTypeForVncAsset,
   rewriteDesktopVncHtml,
 } from "./desktop-vnc-html.js";
+import { emit } from "./task-state.js";
 
 function bridgeWebSockets(client: WebSocket, upstream: WebSocket): void {
   client.on("message", (data, isBinary) => {
@@ -94,6 +98,7 @@ export async function ensureDesktopComputer(
   taskId: string,
 ): Promise<Response> {
   if (svc.mode === "brain") {
+    // Worker path below starts the product app + navigates Chromium after VNC.
     return brainDelegateOrRuntime(
       svc,
       taskId,
@@ -109,7 +114,33 @@ export async function ensureDesktopComputer(
       headers: { "Content-Type": "application/json" },
     });
   }
-  return fetch(`${session.runtimeBaseUrl}/desktop/ensure`, { method: "POST" });
+  const ensureResponse = await fetch(
+    `${session.runtimeBaseUrl}/desktop/ensure`,
+    { method: "POST" },
+  );
+  if (!ensureResponse.ok) {
+    return ensureResponse;
+  }
+
+  // Interactive CDP browser defaults to localhost:3000; product preview is on
+  // the managed snapshot port (3099). Start/rediscover and navigate Chromium.
+  try {
+    const port = await ensureDevboxAppForPreview(svc, session, taskId);
+    emit(svc, "agent.log", taskId, "Interactive desktop app ready", {
+      desktop: true,
+      interactive: true,
+      previewPort: port ?? session.devboxPreviewPort ?? null,
+    });
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    emit(svc, "agent.log", taskId, "Interactive app preview ensure failed", {
+      desktop: true,
+      interactive: true,
+      detail: detail.slice(0, 240),
+    });
+  }
+
+  return ensureResponse;
 }
 
 export async function proxyDesktopVNCPage(

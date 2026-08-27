@@ -182,6 +182,26 @@ kubectl -n devin-staging rollout restart deploy/devin-brain
 
 Without `HYDRADB_API_KEY`, follow-ups still work via Postgres event history only — the HydraDB console will stay at 0 memories.
 
+**Where ingest runs (Brain mode):** Brain owns `HYDRADB_*`. After each harness run, Brain calls `persistTaskContextMemory` (collection defaults to the **task UUID**). Worker `agent-complete` may also call ingest, but that is a no-op unless the execution host has the same secrets — do not rely on the worker.
+
+### HydraDB + Interactive verification (staging)
+
+```bash
+# 1. Brain must log HydraDB enabled at startup (not "disabled")
+kubectl -n devin-staging logs deploy/devin-brain --tail=80 | grep '\[hydradb\]'
+# expect: [hydradb] enabled database=devin-context …
+
+# 2. Run a short staging task in the UI. In session Progress, look for:
+#    - "HydraDB recall …" / "HydraDB session memory ingested after harness"
+# In HydraDB → Logs / Context, the collection name should be the real task id
+# (not only a one-off probe-* collection).
+
+# 3. Interactive: open a completed Next/Node session → Interactive.
+# Guest Chromium should navigate to http://127.0.0.1:3099/ (managed preview),
+# not sit on localhost:3000 with ERR_CONNECTION_REFUSED. Snapshot thumbnail
+# and Interactive should both show the product UI.
+```
+
 ---
 
 ## Rollback

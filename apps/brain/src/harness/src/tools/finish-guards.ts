@@ -51,7 +51,9 @@ async function guardJsFinish(
         "echo '---STUB---'",
         "grep -RIl -E 'Play .+ online with friends|View Leaderboard|Start Game|coming soon' --include='*.js' --include='*.ts' --include='*.tsx' --include='*.jsx' --include='*.html' . 2>/dev/null | head -8",
         "echo '---BOARD---'",
-        "grep -RIl -E 'chessboard|Chessboard|game-board|GameBoard|grid-cols-8|squares\\.map' --include='*.js' --include='*.ts' --include='*.tsx' --include='*.jsx' --include='*.css' . 2>/dev/null | head -5",
+        // Keep in sync with packages/scheduler/.../git-operations-watchers.ts —
+        // "Start Game" is a stub marker, so real games must also match board/canvas.
+        "grep -RIl -E 'chessboard|Chessboard|game-board|GameBoard|flappy|canvas|grid-cols-8|squares\\.map|square\\[' --include='*.js' --include='*.ts' --include='*.tsx' --include='*.jsx' --include='*.css' . 2>/dev/null | head -5",
         "echo '---COMMITS---'",
         "git rev-list --count HEAD 2>/dev/null || echo 0",
       ].join("\n"),
