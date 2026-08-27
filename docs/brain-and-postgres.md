@@ -205,6 +205,15 @@ kubectl -n devin-staging logs deploy/devin-brain --tail=80 | grep '\[hydradb\]'
 # and Interactive should both show the product UI.
 ```
 
+### Host ENOSPC vs guest tmpfs
+
+| Symptom | Where | What to do |
+|---------|--------|------------|
+| `clone golden rootfs` / `No space left` while copying to `/var/lib/devin/vms/...` | **Execution host** disk | Free `/var/lib/devin` (stale VM dirs). Redeploy/restart firecracker (prunes orphans on start). Ops: `sudo devin-infra free-disk` when available. |
+| ENOSPC mid-run inside the guest (pip/npm/cargo caches) | Guest **workspace tmpfs** | Retry after runtime with 8G tmpfs + cache pruning; do not confuse with rootfs clone failures. |
+
+HydraDB will not show new prompt ingest rows for tasks that die at sandbox create (host ENOSPC) — Brain only seeds memory after `sandbox-ready`. Fix host disk first, then confirm Progress shows `HydraDB prompt memory seeded` and open the **user id** collection in HydraDB Logs (not `probe-*`).
+
 ---
 
 ## Rollback

@@ -60,7 +60,23 @@ export function DiagnosticsPanel({
               remove stale sandboxes, and retry. This is not a web or API bug.
             </p>
           ) : null}
-          {/enospc|no space left on device/i.test(task.message) ? (
+          {/clone golden rootfs|host disk full under/i.test(
+            task.message ?? "",
+          ) ? (
+            <p className="text-[12px] leading-relaxed text-amber-200/90">
+              The execution host ran out of disk while copying the golden rootfs
+              into{" "}
+              <span className="font-mono text-amber-100">
+                /var/lib/devin/vms
+              </span>{" "}
+              (not guest tmpfs). Free host space, restart firecracker so orphan
+              VM dirs are pruned, then retry. Ops:{" "}
+              <span className="font-mono text-amber-100">
+                sudo devin-infra free-disk
+              </span>{" "}
+              on the execution host when available.
+            </p>
+          ) : /enospc|no space left on device/i.test(task.message) ? (
             <p className="text-[12px] leading-relaxed text-amber-200/90">
               The sandbox workspace tmpfs filled up (pip/npm caches, build
               artifacts). Retry the session — redeploy the runtime worker so

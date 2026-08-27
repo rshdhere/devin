@@ -80,6 +80,15 @@ func NewManager(cfg config.Config) (*Manager, error) {
 
 	store := snapshot.NewStore(cfg.SnapshotDir, cfg.KernelPath, cfg.RuntimePort, cfg.WarmVCPU, cfg.WarmMemoryMiB)
 	m.launcher = vm.NewLauncher(cfg, store)
+	m.launcher.SetActiveIDs(func() map[string]struct{} {
+		m.mu.RLock()
+		defer m.mu.RUnlock()
+		keep := make(map[string]struct{}, len(m.vms))
+		for id := range m.vms {
+			keep[id] = struct{}{}
+		}
+		return keep
+	})
 	return m, nil
 }
 
@@ -97,6 +106,14 @@ func (m *Manager) Start(ctx context.Context) {
 		slog.Warn("failed to prepare cni environment on startup", "error", err)
 	} else {
 		slog.Info("prepared cni environment on startup")
+	}
+
+	// Drop leftover per-VM rootfs copies from prior process crashes / restarts
+	// so golden rootfs clones do not fail with host ENOSPC.
+	if removed, err := vm.PruneOrphanVMDirs(m.cfg.VMMDir, nil); err != nil {
+		slog.Warn("failed to prune orphan vm dirs on startup", "error", err)
+	} else if removed > 0 {
+		slog.Info("pruned orphan vm dirs on startup", "removed", removed, "vmmDir", m.cfg.VMMDir)
 	}
 
 	runtimes, err := m.snapshotStore().ListRuntimes()

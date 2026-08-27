@@ -411,6 +411,8 @@ docker run -d --name firecracker --restart unless-stopped \
 
 > Default execution hosts (`c7i.2xlarge`, 16 GiB) can run **one** 8 GiB guest safely. Raise `FIRECRACKER_CAPACITY_CPU` and use `c7i.4xlarge` (32 GiB) or larger when you need concurrent sandboxes.
 
+If sandbox create fails with `clone golden rootfs` / `No space left on device`, the **host** volume under `/var/lib/devin/vms` is full (each VM copies the golden `rootfs.ext4`). Restart firecracker to prune orphan VM dirs, or run `sudo devin-infra free-disk`. This is not guest workspace tmpfs.
+
 Install CNI config on the host before starting (from repo):
 
 ```sh

@@ -28,6 +28,12 @@ export function formatAgentFailureMessage(
     if (/database or disk is full/i.test(core)) {
       return "Cursor agent failed: sandbox disk or agent database is full on the execution host. Free disk space (or remove old sandboxes), then retry the task.";
     }
+    if (
+      /clone golden rootfs|host disk full under/i.test(core) ||
+      /clone golden rootfs|host disk full under/i.test(text)
+    ) {
+      return "Execution host disk is full while cloning the golden rootfs under /var/lib/devin/vms. Free host disk (or prune stale VM dirs), redeploy firecracker, then retry.";
+    }
     if (/enospc|no space left on device/i.test(core)) {
       return "Sandbox workspace ran out of disk (ENOSPC). Retry the task — the platform now prunes caches and uses a larger workspace tmpfs.";
     }
@@ -39,6 +45,10 @@ export function formatAgentFailureMessage(
 
   if (/database or disk is full/i.test(text)) {
     return "Sandbox disk or agent database is full on the execution host. Free disk space and retry.";
+  }
+
+  if (/clone golden rootfs|host disk full under/i.test(text)) {
+    return "Execution host disk is full while cloning the golden rootfs under /var/lib/devin/vms. Free host disk (or prune stale VM dirs), redeploy firecracker, then retry.";
   }
 
   if (/enospc|no space left on device/i.test(text)) {

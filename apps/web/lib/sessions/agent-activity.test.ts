@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { Task, TaskEvent } from "@devin/types";
 import {
   buildConversationMessages,
+  formatAgentFailureMessage,
   humanizeToolProgressLine,
   isToolMetadataName,
   progressActivityLines,
@@ -36,6 +37,21 @@ describe("isToolMetadataName", () => {
   it("flags toolCallId and similar metadata keys", () => {
     expect(isToolMetadataName("toolCallId")).toBe(true);
     expect(isToolMetadataName("Write")).toBe(false);
+  });
+});
+
+describe("formatAgentFailureMessage", () => {
+  it("distinguishes host rootfs clone ENOSPC from guest tmpfs ENOSPC", () => {
+    expect(
+      formatAgentFailureMessage(
+        "sandbox sbx-1 failed: clone golden rootfs: copy /var/lib/devin/snapshots/rust/rootfs.ext4 -> /var/lib/devin/vms/x/rootfs.ext4: No space left on device",
+      ),
+    ).toMatch(/Execution host disk is full while cloning the golden rootfs/);
+    expect(
+      formatAgentFailureMessage(
+        "ENOSPC: no space left on device writing cache",
+      ),
+    ).toMatch(/Sandbox workspace ran out of disk/);
   });
 });
 

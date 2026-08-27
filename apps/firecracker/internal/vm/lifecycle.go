@@ -22,12 +22,31 @@ import (
 var restoreNetworkMu sync.Mutex
 
 type Launcher struct {
-	cfg      config.Config
-	snapshot *snapshot.Store
+	cfg       config.Config
+	snapshot  *snapshot.Store
+	activeIDs func() map[string]struct{}
 }
 
 func NewLauncher(cfg config.Config, snapshotStore *snapshot.Store) *Launcher {
 	return &Launcher{cfg: cfg, snapshot: snapshotStore}
+}
+
+// SetActiveIDs registers a callback of in-use VM ids so orphan prune keeps them.
+func (l *Launcher) SetActiveIDs(fn func() map[string]struct{}) {
+	l.activeIDs = fn
+}
+
+func (l *Launcher) keepIDsPlus(vmID string) map[string]struct{} {
+	keep := map[string]struct{}{}
+	if l.activeIDs != nil {
+		for id := range l.activeIDs() {
+			keep[id] = struct{}{}
+		}
+	}
+	if vmID != "" {
+		keep[vmID] = struct{}{}
+	}
+	return keep
 }
 
 func (l *Launcher) Restore(ctx context.Context, vmID, name, runtime string, cpu int32, memory string) (*Instance, error) {
@@ -62,10 +81,32 @@ func (l *Launcher) Restore(ctx context.Context, vmID, name, runtime string, cpu 
 		return nil, err
 	}
 
-	rootfsClone := filepath.Join(vmDir, "rootfs.ext4")
-	if err := cloneRootfs(meta.RootfsPath, rootfsClone); err != nil {
+	keep := l.keepIDsPlus(vmID)
+	if err := ensureSpaceForRootfsClone(l.cfg.VMMDir, meta.RootfsPath, keep); err != nil {
 		_ = os.RemoveAll(vmDir)
 		return nil, fmt.Errorf("clone golden rootfs: %w", err)
+	}
+
+	rootfsClone := filepath.Join(vmDir, "rootfs.ext4")
+	if err := cloneRootfs(meta.RootfsPath, rootfsClone); err != nil {
+		if isENOSPC(err) {
+			slog.Warn("rootfs clone hit ENOSPC; pruning orphans and retrying",
+				"vmId", vmID, "vmmDir", l.cfg.VMMDir, "error", err)
+			_, _ = PruneOrphanVMDirs(l.cfg.VMMDir, keep)
+			_ = os.Remove(rootfsClone)
+			err = cloneRootfs(meta.RootfsPath, rootfsClone)
+		}
+		if err != nil {
+			_ = os.RemoveAll(vmDir)
+			if isENOSPC(err) {
+				return nil, fmt.Errorf(
+					"host disk full under %s while cloning golden rootfs: %w",
+					l.cfg.VMMDir,
+					err,
+				)
+			}
+			return nil, fmt.Errorf("clone golden rootfs: %w", err)
+		}
 	}
 
 	socketPath := filepath.Join(vmDir, "firecracker.sock")
