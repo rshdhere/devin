@@ -60,7 +60,7 @@ export function DiagnosticsPanel({
               remove stale sandboxes, and retry. This is not a web or API bug.
             </p>
           ) : null}
-          {/clone golden rootfs|host disk full under/i.test(
+          {/clone golden rootfs|host disk full under|host disk guardrail/i.test(
             task.message ?? "",
           ) ? (
             <p className="text-[12px] leading-relaxed text-amber-200/90">
@@ -69,12 +69,21 @@ export function DiagnosticsPanel({
               <span className="font-mono text-amber-100">
                 /var/lib/devin/vms
               </span>{" "}
-              (not guest tmpfs). Free host space, restart firecracker so orphan
-              VM dirs are pruned, then retry. Ops:{" "}
+              (not guest tmpfs). Free host space; firecracker also prunes orphan
+              VM dirs on start and periodically. Ops:{" "}
               <span className="font-mono text-amber-100">
                 sudo devin-infra free-disk
               </span>{" "}
               on the execution host when available.
+            </p>
+          ) : /host active VM guardrail/i.test(task.message ?? "") ? (
+            <p className="text-[12px] leading-relaxed text-amber-200/90">
+              This execution host is at its microVM concurrency limit. Wait for
+              an active sandbox to finish, or raise{" "}
+              <span className="font-mono text-amber-100">
+                FIRECRACKER_MAX_ACTIVE_VMS
+              </span>{" "}
+              / add another host.
             </p>
           ) : /enospc|no space left on device/i.test(task.message) ? (
             <p className="text-[12px] leading-relaxed text-amber-200/90">
@@ -391,7 +400,19 @@ export function DiagnosticsPanel({
             {host?.activeVMs !== undefined ? (
               <div className="flex justify-between gap-3">
                 <dt className="text-gray-500">Active microVMs</dt>
-                <dd className="text-gray-300">{host.activeVMs}</dd>
+                <dd className="text-gray-300">
+                  {host.activeVMs}
+                  {host.maxActiveVMs ? ` / ${host.maxActiveVMs}` : ""}
+                </dd>
+              </div>
+            ) : null}
+            {host?.freeDiskGiB !== undefined ? (
+              <div className="flex justify-between gap-3">
+                <dt className="text-gray-500">Host free disk</dt>
+                <dd className="text-gray-300">
+                  {host.freeDiskGiB.toFixed(1)} GiB
+                  {host.minFreeDiskGiB ? ` (min ${host.minFreeDiskGiB})` : ""}
+                </dd>
               </div>
             ) : null}
             {host?.error ? (

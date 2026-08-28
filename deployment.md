@@ -411,7 +411,7 @@ docker run -d --name firecracker --restart unless-stopped \
 
 > Default execution hosts (`c7i.2xlarge`, 16 GiB) can run **one** 8 GiB guest safely. Raise `FIRECRACKER_CAPACITY_CPU` and use `c7i.4xlarge` (32 GiB) or larger when you need concurrent sandboxes.
 
-If sandbox create fails with `clone golden rootfs` / `No space left on device`, the **host** volume under `/var/lib/devin/vms` is full (each VM copies the golden `rootfs.ext4`). Restart firecracker to prune orphan VM dirs, or run `sudo devin-infra free-disk`. This is not guest workspace tmpfs.
+If sandbox create fails with `clone golden rootfs` / `No space left on device`, the **host** volume under `/var/lib/devin/vms` is full (each VM copies the golden `rootfs.ext4`). Firecracker prunes orphan VM dirs on start and on a timer (`FIRECRACKER_ORPHAN_PRUNE_INTERVAL_SEC`), and refuses new creates/warms when free space is below `FIRECRACKER_MIN_FREE_DISK_GIB`. You can also run `sudo devin-infra free-disk`. This is not guest workspace tmpfs.
 
 Install CNI config on the host before starting (from repo):
 
@@ -816,6 +816,9 @@ docker logs -f scheduler
 | `FIRECRACKER_WARM_VCPU` | Warm / snapshot vCPUs (default `2`) |
 | `FIRECRACKER_WARM_MEMORY_MIB` | Warm / snapshot RAM in MiB (default `8192`) |
 | `FIRECRACKER_CAPACITY_MEMORY` | Host capacity advertisement (default `16Gi` on 2xlarge hosts) |
+| `FIRECRACKER_MAX_ACTIVE_VMS` | Concurrent microVM cap per host (default `2`) |
+| `FIRECRACKER_MIN_FREE_DISK_GIB` | Min free GiB under VMM dir before create/warm (default `12`) |
+| `FIRECRACKER_ORPHAN_PRUNE_INTERVAL_SEC` | Periodic orphan VM dir prune (default `300`) |
 
 ### FirecrackerHost CR
 

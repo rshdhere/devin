@@ -66,3 +66,16 @@ func TestIsENOSPC(t *testing.T) {
 		t.Fatal("did not expect ENOSPC")
 	}
 }
+
+func TestGuardMinFreeDisk(t *testing.T) {
+	dir := t.TempDir()
+	if err := GuardMinFreeDisk(dir, 0); err != nil {
+		t.Fatalf("minGiB=0 should no-op: %v", err)
+	}
+	if err := GuardMinFreeDisk(dir, 1); err != nil {
+		t.Fatalf("expected temp dir to have ≥1GiB free: %v", err)
+	}
+	if err := GuardMinFreeDisk(dir, 1<<30); err == nil {
+		t.Fatal("expected guardrail failure for huge minGiB")
+	}
+}

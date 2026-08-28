@@ -31,16 +31,19 @@ type VM struct {
 }
 
 type StatusResponse struct {
-	Host              string `json:"host"`
-	CapacityCPU       int32  `json:"capacityCPU"`
-	CapacityMemory    string `json:"capacityMemory"`
-	UsedCPU           int32  `json:"usedCPU"`
-	UsedMemory        string `json:"usedMemory"`
-	ReadyVMs          int    `json:"readyVMs"`
-	ActiveVMs         int    `json:"activeVMs"`
-	DefaultRuntime    string `json:"defaultRuntime"`
+	Host              string   `json:"host"`
+	CapacityCPU       int32    `json:"capacityCPU"`
+	CapacityMemory    string   `json:"capacityMemory"`
+	UsedCPU           int32    `json:"usedCPU"`
+	UsedMemory        string   `json:"usedMemory"`
+	ReadyVMs          int      `json:"readyVMs"`
+	ActiveVMs         int      `json:"activeVMs"`
+	MaxActiveVMs      int      `json:"maxActiveVMs,omitempty"`
+	FreeDiskGiB       *float64 `json:"freeDiskGiB,omitempty"`
+	MinFreeDiskGiB    int      `json:"minFreeDiskGiB,omitempty"`
+	DefaultRuntime    string   `json:"defaultRuntime"`
 	AvailableRuntimes []string `json:"availableRuntimes,omitempty"`
-	LastWarmError     string `json:"lastWarmError,omitempty"`
+	LastWarmError     string   `json:"lastWarmError,omitempty"`
 }
 
 type Client struct {

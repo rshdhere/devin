@@ -27,6 +27,12 @@ type Config struct {
 	WarmMemoryMiB  int64
 	CapacityCPU    int32
 	CapacityMemory string
+	// MaxActiveVMs caps concurrent microVMs on this host (0 = CapacityCPU-based only).
+	MaxActiveVMs int
+	// MinFreeDiskGiB refuses new clones/warms when host free space is below this.
+	MinFreeDiskGiB int
+	// OrphanPruneIntervalSec runs periodic orphan VMMDir cleanup (0 disables).
+	OrphanPruneIntervalSec int
 }
 
 func LoadFromEnv() Config {
@@ -45,10 +51,13 @@ func LoadFromEnv() Config {
 		CNIConfDir:      envString("FIRECRACKER_CNI_CONF_DIR", "/etc/cni/conf.d"),
 		CNIBinPath:      envString("FIRECRACKER_CNI_BIN_PATH", "/opt/cni/bin"),
 		RuntimePort:     envInt("FIRECRACKER_RUNTIME_PORT", 8081),
-		WarmVCPU:        int32(envInt("FIRECRACKER_WARM_VCPU", 2)),
-		WarmMemoryMiB:   int64(envInt("FIRECRACKER_WARM_MEMORY_MIB", 8192)),
-		CapacityCPU:     int32(envInt("FIRECRACKER_CAPACITY_CPU", 32)),
-		CapacityMemory:  envString("FIRECRACKER_CAPACITY_MEMORY", "64Gi"),
+		WarmVCPU:               int32(envInt("FIRECRACKER_WARM_VCPU", 2)),
+		WarmMemoryMiB:          int64(envInt("FIRECRACKER_WARM_MEMORY_MIB", 8192)),
+		CapacityCPU:            int32(envInt("FIRECRACKER_CAPACITY_CPU", 32)),
+		CapacityMemory:         envString("FIRECRACKER_CAPACITY_MEMORY", "64Gi"),
+		MaxActiveVMs:           envInt("FIRECRACKER_MAX_ACTIVE_VMS", 2),
+		MinFreeDiskGiB:         envInt("FIRECRACKER_MIN_FREE_DISK_GIB", 12),
+		OrphanPruneIntervalSec: envInt("FIRECRACKER_ORPHAN_PRUNE_INTERVAL_SEC", 300),
 	}
 }
 

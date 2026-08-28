@@ -18,6 +18,9 @@ export interface FirecrackerHostStatus {
   host?: string;
   readyVMs?: number;
   activeVMs?: number;
+  maxActiveVMs?: number;
+  freeDiskGiB?: number;
+  minFreeDiskGiB?: number;
   capacityCPU?: number;
   usedCPU?: number;
   defaultRuntime?: string;

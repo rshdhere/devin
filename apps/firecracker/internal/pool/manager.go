@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"sync"
+	"time"
 
 	"github.com/rshdhere/devin/apps/firecracker/internal/cnihelper"
 	"github.com/rshdhere/devin/apps/firecracker/internal/config"
@@ -36,6 +37,9 @@ type HostStatus struct {
 	UsedMemory        string              `json:"usedMemory"`
 	ReadyVMs          int                 `json:"readyVMs"`
 	ActiveVMs         int                 `json:"activeVMs"`
+	MaxActiveVMs      int                 `json:"maxActiveVMs,omitempty"`
+	FreeDiskGiB       *float64            `json:"freeDiskGiB,omitempty"`
+	MinFreeDiskGiB    int                 `json:"minFreeDiskGiB,omitempty"`
 	DefaultRun        string              `json:"defaultRuntime"`
 	AvailableRuntimes []string            `json:"availableRuntimes,omitempty"`
 	WarmRuntimes      []WarmRuntimeStatus `json:"warmRuntimes,omitempty"`
@@ -116,6 +120,10 @@ func (m *Manager) Start(ctx context.Context) {
 		slog.Info("pruned orphan vm dirs on startup", "removed", removed, "vmmDir", m.cfg.VMMDir)
 	}
 
+	if m.cfg.OrphanPruneIntervalSec > 0 {
+		go m.pruneOrphansLoop(ctx, time.Duration(m.cfg.OrphanPruneIntervalSec)*time.Second)
+	}
+
 	runtimes, err := m.snapshotStore().ListRuntimes()
 	if err != nil {
 		slog.Error("failed to list snapshot runtimes", "error", err)
@@ -141,6 +149,31 @@ func (m *Manager) Start(ctx context.Context) {
 	slog.Info("warming microvm pool", "runtime", warmRuntime, "poolSize", m.cfg.PoolSize)
 }
 
+func (m *Manager) pruneOrphansLoop(ctx context.Context, every time.Duration) {
+	ticker := time.NewTicker(every)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			m.mu.RLock()
+			keep := make(map[string]struct{}, len(m.vms))
+			for id := range m.vms {
+				keep[id] = struct{}{}
+			}
+			m.mu.RUnlock()
+			removed, err := vm.PruneOrphanVMDirs(m.cfg.VMMDir, keep)
+			if err != nil {
+				slog.Warn("periodic orphan vm prune failed", "error", err)
+				continue
+			}
+			if removed > 0 {
+				slog.Info("periodic orphan vm prune", "removed", removed, "vmmDir", m.cfg.VMMDir)
+			}
+		}
+	}
+}
 
 func (m *Manager) Get(vmID string) (*VMRecord, error) {
 	m.mu.RLock()
@@ -209,6 +242,12 @@ func (m *Manager) Status() HostStatus {
 
 	available := append([]string(nil), m.availableRuntimes...)
 
+	var freeDiskGiB *float64
+	if free, err := vm.FreeBytes(m.cfg.VMMDir); err == nil {
+		v := float64(free) / (1024 * 1024 * 1024)
+		freeDiskGiB = &v
+	}
+
 	return HostStatus{
 		Host:              m.hostName,
 		CapacityCPU:       m.cfg.CapacityCPU,
@@ -217,6 +256,9 @@ func (m *Manager) Status() HostStatus {
 		UsedMemory:        formatUsedMemoryMiB(m.estimatedUsedMemoryMiB()),
 		ReadyVMs:          m.readyCount,
 		ActiveVMs:         len(m.assigned),
+		MaxActiveVMs:      m.cfg.MaxActiveVMs,
+		FreeDiskGiB:       freeDiskGiB,
+		MinFreeDiskGiB:    m.cfg.MinFreeDiskGiB,
 		DefaultRun:        m.cfg.DefaultRuntime,
 		AvailableRuntimes: available,
 		WarmRuntimes:      warmRuntimes,

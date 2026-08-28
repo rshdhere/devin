@@ -60,7 +60,7 @@ Restart=always
 RestartSec=5
 ExecStartPre=/bin/rm -rf /var/lib/cni/networks/fcnet
 ExecStartPre=-/usr/bin/docker rm -f firecracker
-ExecStart=/usr/bin/docker run --rm --name firecracker --privileged --network host -v /dev/kvm:/dev/kvm -v /var/lib/devin:/var/lib/devin -e FIRECRACKER_DRY_RUN=false -e FIRECRACKER_HOST_PORT=9092 -e FIRECRACKER_HOST_NAME=%s -e FIRECRACKER_POOL_SIZE=1 -e FIRECRACKER_DEFAULT_RUNTIME=agent -e FIRECRACKER_SNAPSHOT_DIR=/var/lib/devin/snapshots -e FIRECRACKER_KERNEL_PATH=/var/lib/devin/linux/vmlinux -e FIRECRACKER_VMM_DIR=/var/lib/devin/vms -e FIRECRACKER_RUNTIME_PORT=8081 -e FIRECRACKER_WARM_VCPU=2 -e FIRECRACKER_WARM_MEMORY_MIB=8192 -e FIRECRACKER_CNI_NETWORK=fcnet -e FIRECRACKER_CNI_CONF_DIR=/etc/cni/conf.d -e FIRECRACKER_CNI_BIN_PATH=/opt/cni/bin %s
+ExecStart=/usr/bin/docker run --rm --name firecracker --privileged --network host -v /dev/kvm:/dev/kvm -v /var/lib/devin:/var/lib/devin -e FIRECRACKER_DRY_RUN=false -e FIRECRACKER_HOST_PORT=9092 -e FIRECRACKER_HOST_NAME=%s -e FIRECRACKER_POOL_SIZE=1 -e FIRECRACKER_DEFAULT_RUNTIME=agent -e FIRECRACKER_SNAPSHOT_DIR=/var/lib/devin/snapshots -e FIRECRACKER_KERNEL_PATH=/var/lib/devin/linux/vmlinux -e FIRECRACKER_VMM_DIR=/var/lib/devin/vms -e FIRECRACKER_RUNTIME_PORT=8081 -e FIRECRACKER_WARM_VCPU=2 -e FIRECRACKER_WARM_MEMORY_MIB=8192 -e FIRECRACKER_MAX_ACTIVE_VMS=2 -e FIRECRACKER_MIN_FREE_DISK_GIB=12 -e FIRECRACKER_ORPHAN_PRUNE_INTERVAL_SEC=300 -e FIRECRACKER_CNI_NETWORK=fcnet -e FIRECRACKER_CNI_CONF_DIR=/etc/cni/conf.d -e FIRECRACKER_CNI_BIN_PATH=/opt/cni/bin %s
 ExecStop=/usr/bin/docker stop firecracker
 [Install]
 WantedBy=multi-user.target

@@ -20,6 +20,41 @@ func freeBytes(path string) (uint64, error) {
 	return st.Bavail * uint64(st.Bsize), nil
 }
 
+// FreeBytes reports available bytes on the filesystem that backs path.
+func FreeBytes(path string) (uint64, error) {
+	return freeBytes(path)
+}
+
+// GuardMinFreeDisk refuses work when free space on path is below minGiB.
+func GuardMinFreeDisk(path string, minGiB int) error {
+	if minGiB <= 0 {
+		return nil
+	}
+	free, err := freeBytes(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			if mkErr := os.MkdirAll(path, 0o755); mkErr != nil {
+				return mkErr
+			}
+			free, err = freeBytes(path)
+		}
+		if err != nil {
+			slog.Warn("could not measure free disk for guardrail", "path", path, "error", err)
+			return nil
+		}
+	}
+	need := uint64(minGiB) * 1024 * 1024 * 1024
+	if free >= need {
+		return nil
+	}
+	return fmt.Errorf(
+		"host disk guardrail: free=%dGiB under %s (need ≥%dGiB) — free /var/lib/devin or prune stale vms",
+		free/(1024*1024*1024),
+		path,
+		minGiB,
+	)
+}
+
 func isENOSPC(err error) bool {
 	if err == nil {
 		return false

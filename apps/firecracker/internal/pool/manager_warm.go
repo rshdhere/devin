@@ -45,6 +45,25 @@ func (m *Manager) warmRuntimePool(ctx context.Context, runtime string, queue cha
 			continue
 		}
 
+		if err := vm.GuardMinFreeDisk(m.cfg.VMMDir, m.cfg.MinFreeDiskGiB); err != nil {
+			slog.Warn("skipping warm microVM; host disk guardrail", "runtime", runtime, "error", err)
+			time.Sleep(15 * time.Second)
+			continue
+		}
+
+		if m.cfg.MaxActiveVMs > 0 {
+			m.mu.RLock()
+			tracked := len(m.vms)
+			ready := m.readyCount
+			max := m.cfg.MaxActiveVMs
+			m.mu.RUnlock()
+			// Warm VMs consume rootfs clones; keep tracked+queued under the active cap.
+			if tracked+ready >= max {
+				time.Sleep(time.Second)
+				continue
+			}
+		}
+
 		instance, err := m.launchWarm(ctx, runtime)
 		if err != nil {
 			slog.Error("failed to warm microVM", "runtime", runtime, "error", err)

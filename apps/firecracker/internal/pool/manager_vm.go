@@ -31,6 +31,10 @@ func (m *Manager) Create(name, runtime, taskID string, cpu int32, memory string)
 		return existing, nil
 	}
 
+	if err := m.guardCreateCapacity(); err != nil {
+		return nil, err
+	}
+
 	if warm, ok := m.takeWarm(runtime, name); ok {
 		// Warm snapshots are pinned to WarmVCPU; charge that instead of the
 		// caller-requested CPU so capacity matches real vCPU usage.
@@ -55,6 +59,20 @@ func (m *Manager) Create(name, runtime, taskID string, cpu int32, memory string)
 			return existing, nil
 		}
 		if err := m.reserveCPULocked(chargeCPU); err != nil {
+			if queue := m.ready[runtime]; queue != nil {
+				select {
+				case queue <- warm:
+					m.readyCount++
+				default:
+					go func() { _ = warm.Shutdown(context.Background()) }()
+				}
+			} else {
+				go func() { _ = warm.Shutdown(context.Background()) }()
+			}
+			m.mu.Unlock()
+			return nil, err
+		}
+		if err := m.reserveActiveVMLocked(); err != nil {
 			if queue := m.ready[runtime]; queue != nil {
 				select {
 				case queue <- warm:
@@ -96,6 +114,10 @@ func (m *Manager) Create(name, runtime, taskID string, cpu int32, memory string)
 		return existing, nil
 	}
 	if err := m.reserveCPULocked(chargeCPU); err != nil {
+		m.mu.Unlock()
+		return nil, err
+	}
+	if err := m.reserveActiveVMLocked(); err != nil {
 		m.mu.Unlock()
 		return nil, err
 	}
@@ -142,6 +164,37 @@ func (m *Manager) reserveCPULocked(cpu int32) error {
 			m.usedCPU,
 			available,
 			len(m.assigned),
+		)
+	}
+	return nil
+}
+
+func (m *Manager) guardCreateCapacity() error {
+	if err := vm.GuardMinFreeDisk(m.cfg.VMMDir, m.cfg.MinFreeDiskGiB); err != nil {
+		return err
+	}
+	if m.cfg.MaxActiveVMs <= 0 {
+		return nil
+	}
+	m.mu.RLock()
+	n := len(m.vms)
+	max := m.cfg.MaxActiveVMs
+	m.mu.RUnlock()
+	if n >= max {
+		return fmt.Errorf("host active VM guardrail: %d/%d microVMs in use", n, max)
+	}
+	return nil
+}
+
+func (m *Manager) reserveActiveVMLocked() error {
+	if m.cfg.MaxActiveVMs <= 0 {
+		return nil
+	}
+	if len(m.vms) >= m.cfg.MaxActiveVMs {
+		return fmt.Errorf(
+			"host active VM guardrail: %d/%d microVMs in use",
+			len(m.vms),
+			m.cfg.MaxActiveVMs,
 		)
 	}
 	return nil

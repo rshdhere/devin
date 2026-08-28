@@ -49,6 +49,16 @@ describe("formatAgentFailureMessage", () => {
     ).toMatch(/Execution host disk is full while cloning the golden rootfs/);
     expect(
       formatAgentFailureMessage(
+        "host disk guardrail: free=3GiB under /var/lib/devin/vms (need ≥12GiB)",
+      ),
+    ).toMatch(/Execution host disk is full while cloning the golden rootfs/);
+    expect(
+      formatAgentFailureMessage(
+        "host active VM guardrail: 2/2 microVMs in use",
+      ),
+    ).toMatch(/microVM concurrency limit/);
+    expect(
+      formatAgentFailureMessage(
         "ENOSPC: no space left on device writing cache",
       ),
     ).toMatch(/Sandbox workspace ran out of disk/);
