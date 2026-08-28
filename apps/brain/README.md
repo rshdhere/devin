@@ -60,7 +60,7 @@ Default listen port: **9092** (`BRAIN_PORT`).
 
 Worker hosts need `BRAIN_INTERNAL_URL` (this service) so they can `POST .../sandbox-ready`, plus local `TOOL_GATEWAY_GRPC_URL=127.0.0.1:9095`. They do **not** need `OPENAI_API_KEY` for product brain tasks.
 
-See `.env.sample` for a starter file. Operational guide below. Concept mapping: [README.md](../../README.md#concept-mapping).
+See `.env.sample` for a starter file. Operational guide below. Concept mapping: [README.md](../../README.md#architecture).
 
 ---
 

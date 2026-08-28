@@ -85,4 +85,4 @@ Production images ship Firecracker, CNI plugins, and `tc-redirect-tap` — see `
 | `FIRECRACKER_CNI_*` | CNI network name, conf dir, bin path |
 | `FIRECRACKER_CAPACITY_*` / `FIRECRACKER_WARM_*` | Host capacity and warm VM sizing |
 
-See `.env.sample` for a starter file. **Guardrails** (disk floor, concurrency cap, orphan prune): [docs/microvm-guardrails.md](../../docs/microvm-guardrails.md). Concept mapping: [README.md](../../README.md#concept-mapping). Host ops: [infra/README.md](../../infra/README.md).
+See `.env.sample` for a starter file. **Guardrails** (disk floor, concurrency cap, orphan prune): [docs/microvm-guardrails.md](../../docs/microvm-guardrails.md). Concept mapping: [README.md](../../README.md#architecture). Host ops: [infra/README.md](../../infra/README.md).
