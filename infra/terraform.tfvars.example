@@ -21,7 +21,7 @@ eks_node_max_size       = 4
 container_registry  = "docker.io/youruser"
 container_image_tag = "latest"
 
-# Path B — external Firecracker execution hosts (deployment.md)
+# Path B — external Firecracker execution hosts (infra/deployment.md)
 execution_host_count          = 1
 execution_host_instance_type  = "c7i.2xlarge"
 execution_host_root_volume_size = 200

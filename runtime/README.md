@@ -107,4 +107,4 @@ Every stack snapshot contains the agent CLIs, so Cursor/Claude can use the compi
 
 Agent and git operations use **`/workspace`**, backed by a **tmpfs** mount created at supervisor startup. Firecracker restores the root drive read-only, so the writable tmpfs layer must be present in the golden snapshot memory image.
 
-After changing `apps/runtime/` or `runtime/*`, rebuild rootfs and snapshots on each execution host (see `deployment.md` § snapshot rebuild).
+After changing `apps/runtime/` or `runtime/*`, rebuild rootfs and snapshots on each execution host (see [infra/deployment.md](../infra/deployment.md) § snapshot rebuild).

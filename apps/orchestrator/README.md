@@ -88,4 +88,4 @@ Point `ORCHESTRATOR_URL` on brain / scheduler at `http://localhost:9090`.
 | `FIRECRACKER_NODE_LABEL` | Node label for in-cluster host discovery |
 | `ORCHESTRATOR_EXTERNAL_HOSTS` / `_FILE` | Path B external EC2 host list |
 
-See `.env.sample` for a full starter file. Concept mapping: [docs/devin-alignment.md](../../docs/devin-alignment.md). Host ops: [infra/README.md](../../infra/README.md).
+See `.env.sample` for a full starter file. Concept mapping: [README.md](../../README.md#concept-mapping). Host ops: [infra/README.md](../../infra/README.md).

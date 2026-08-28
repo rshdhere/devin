@@ -9,7 +9,7 @@ output "instance_ids" {
 }
 
 output "private_ips" {
-  description = "Map of host key to private IP — use in FirecrackerHost CRs (deployment.md section 4.3)."
+  description = "Map of host key to private IP — use in FirecrackerHost CRs (infra/deployment.md section 4.3)."
   value       = { for k, v in aws_instance.execution_host : k => v.private_ip }
 }
 

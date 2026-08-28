@@ -84,4 +84,4 @@ Point `RUNTIME_URL` on brain / scheduler / firecracker at `http://localhost:8081
 | `AGENT_MODEL` | Optional model override |
 | `AGENT_RUN_TIMEOUT_MIN` | Agent run timeout (minutes) |
 
-See `.env.sample` for a starter file. Concept mapping: [docs/devin-alignment.md](../../docs/devin-alignment.md).
+See `.env.sample` for a starter file. Concept mapping: [README.md](../../README.md#concept-mapping).

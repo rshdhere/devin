@@ -64,4 +64,4 @@ Default listen port: **9091** (`SCHEDULER_PORT`).
 
 Agent credentials (`CURSOR_API_KEY`, `ANTHROPIC_API_KEY`) and GitHub bot tokens belong on the execution host — see `.env.sample`.
 
-Concept mapping: [docs/devin-alignment.md](../../docs/devin-alignment.md). Ops: [docs/brain-and-postgres.md](../../docs/brain-and-postgres.md), [infra/README.md](../../infra/README.md).
+Concept mapping: [README.md](../../README.md#concept-mapping). Ops: [apps/brain/README.md](../brain/README.md#operations), [infra/README.md](../../infra/README.md).

@@ -1,9 +1,9 @@
 {
   "name": "@devin/integration",
-  "module": "index.ts",
   "type": "module",
   "private": true,
   "devDependencies": {
+    "@playwright/test": "^1.60.0",
     "@types/bun": "latest"
   },
   "peerDependencies": {

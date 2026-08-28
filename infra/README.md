@@ -1,6 +1,6 @@
 # Terraform — devin.baby AWS infrastructure
 
-Terraform provisions the **AWS foundation** for [deployment.md](../deployment.md) **Path B** (EKS control plane + external EC2 Firecracker execution hosts). Postgres can be **Neon** (external) or **self-hosted in EKS** — see [docs/brain-and-postgres.md](../docs/brain-and-postgres.md).
+Terraform provisions the **AWS foundation** for [deployment.md](deployment.md) **Path B** (EKS control plane + external EC2 Firecracker execution hosts). Postgres can be **Neon** (external) or **self-hosted in EKS** — see [apps/brain/README.md](../apps/brain/README.md#operations).
 
 Container images are expected on **Docker Hub** (not ECR). Configure `imagePullSecrets` in your GitOps repo for private repos on EKS.
 
@@ -80,7 +80,7 @@ kubectl get nodes
 
 ## Container images (Docker Hub)
 
-Set `container_registry` in `terraform.tfvars` (e.g. `docker.io/youruser`). Image names match deployment.md:
+Set `container_registry` in `terraform.tfvars` (e.g. `docker.io/youruser`). Image names match [deployment.md](deployment.md):
 
 | Image | Pull reference |
 | --- | --- |
@@ -220,7 +220,7 @@ For staging orchestrator NLB (fixes `orchestrator rejected sandbox: 500` on stag
 
 ---
 
-1. **Postgres** — self-hosted in EKS (manifests in [ops repo](https://github.com/rshdhere/ops)) or Neon; see [docs/brain-and-postgres.md](../docs/brain-and-postgres.md)
+1. **Postgres** — self-hosted in EKS (manifests in [ops repo](https://github.com/rshdhere/ops)) or Neon; see [apps/brain/README.md](../apps/brain/README.md#operations)
 2. **Build & push images** to Docker Hub
 3. **Execution hosts** — Terraform writes SSM platform URLs and runs SSM bootstrap; verify `curl http://127.0.0.1:9091/health` on the host
 4. **GitOps** — sync `infra/generated/firecracker-hosts.yaml` (or `terraform output execution_hosts`) into your ops repo `firecracker-hosts.yaml`
@@ -320,7 +320,7 @@ After apply: `terraform output nat_gateway_public_ips`
 
 ## Security groups
 
-Aligned with deployment.md §4.5:
+Aligned with [deployment.md](deployment.md) §4.5:
 
 | Direction | Port | Source / dest |
 | --- | --- | --- |

@@ -84,8 +84,5 @@ Production images ship Firecracker, CNI plugins, and `tc-redirect-tap` — see `
 | `FIRECRACKER_RUNTIME_PORT` | Guest runtime port (default `8081`) |
 | `FIRECRACKER_CNI_*` | CNI network name, conf dir, bin path |
 | `FIRECRACKER_CAPACITY_*` / `FIRECRACKER_WARM_*` | Host capacity and warm VM sizing |
-| `FIRECRACKER_MAX_ACTIVE_VMS` | Cap concurrent microVMs on this host (default `2`; `0` disables) |
-| `FIRECRACKER_MIN_FREE_DISK_GIB` | Refuse create/warm when free space under `VMM_DIR` is below this (default `12`) |
-| `FIRECRACKER_ORPHAN_PRUNE_INTERVAL_SEC` | Periodic prune of stale VM dirs (default `300`; `0` disables) |
 
-See `.env.sample` for a starter file. Concept mapping: [docs/devin-alignment.md](../../docs/devin-alignment.md). Host ops: [infra/README.md](../../infra/README.md).
+See `.env.sample` for a starter file. **Guardrails** (disk floor, concurrency cap, orphan prune): [docs/microvm-guardrails.md](../../docs/microvm-guardrails.md). Concept mapping: [README.md](../../README.md#concept-mapping). Host ops: [infra/README.md](../../infra/README.md).

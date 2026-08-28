@@ -1,15 +1,25 @@
-# integration
+# Integration tests
 
-To install dependencies:
+Playwright journeys against the web app and platform APIs.
+
+Install dependencies from the repository root:
 
 ```bash
 bun install
 ```
 
-To run:
+Run the local session journey:
 
 ```bash
-bun run index.ts
+bunx playwright test tests/integration/tests/session-journey.spec.ts --config tests/integration/playwright.config.ts
 ```
 
-This project was created using `bun init` in bun v1.2.3. [Bun](https://bun.sh) is a fast all-in-one JavaScript runtime.
+Run against staging with an authenticated Playwright storage state:
+
+```bash
+E2E_BASE_URL=https://staging.devin.baby \
+E2E_STORAGE_STATE=tests/integration/.auth/staging.json \
+bunx playwright test tests/integration/tests/session-journey.spec.ts --config tests/integration/playwright.config.ts
+```
+
+The test records video for the complete task journey. Authentication is intentionally supplied through `E2E_STORAGE_STATE`; do not commit that file.

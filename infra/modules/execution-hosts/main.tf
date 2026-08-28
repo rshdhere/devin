@@ -22,7 +22,7 @@ locals {
 
 resource "aws_security_group" "execution_host" {
   name_prefix = "${var.name_prefix}-fc-host-"
-  description = "Firecracker execution host (deployment.md section 4.5)"
+  description = "Firecracker execution host (infra/deployment.md section 4.5)"
   vpc_id      = var.vpc_id
 
   ingress {

@@ -25,6 +25,9 @@ export function formatAgentFailureMessage(
   if (/host active VM guardrail/i.test(text)) {
     return "Execution host is at its microVM concurrency limit. Wait for an active sandbox to finish, or raise FIRECRACKER_MAX_ACTIVE_VMS / add hosts.";
   }
+  if (/enospc|no space left on device/i.test(text)) {
+    return "Sandbox workspace ran out of disk (ENOSPC). Retry the task after redeploying the runtime — caches are pruned automatically and tmpfs is larger.";
+  }
 
   if (!looksLikeCursorStreamJson(text) && text.length <= 480) {
     return text;
@@ -63,10 +66,6 @@ export function formatAgentFailureMessage(
 
   if (/database or disk is full/i.test(text)) {
     return "Sandbox disk or agent database is full on the execution host. Free disk space and retry.";
-  }
-
-  if (/enospc|no space left on device/i.test(text)) {
-    return "Sandbox workspace ran out of disk (ENOSPC). Retry the task after redeploying the runtime — caches are pruned automatically and tmpfs is larger.";
   }
 
   if (/resource_exhausted/i.test(text)) {
