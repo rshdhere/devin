@@ -3,9 +3,12 @@ import { schema } from "@devin/drizzle/schema";
 import { sendMagicLinkEmail, sendVerificationEmail } from "@devin/email";
 import { betterAuth } from "better-auth";
 import type { BetterAuthPlugin } from "better-auth";
-import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { genericOAuth, magicLink } from "better-auth/plugins";
 import { oAuthProxy } from "better-auth/plugins/oauth-proxy";
+import {
+  accountTokenDatabaseHooks,
+  createEncryptedDrizzleAdapter,
+} from "./encrypted-drizzle-adapter.js";
 import { resolveOAuthProductionUrl, shouldUseOAuthProxy } from "./auth-url.js";
 import { getAllowedOrigins } from "./cors.js";
 import { deliverVerificationEmail } from "./verification-email.js";
@@ -175,7 +178,8 @@ export const auth = betterAuth({
   },
   socialProviders,
   plugins: authPlugins,
-  database: drizzleAdapter(db, {
+  databaseHooks: accountTokenDatabaseHooks,
+  database: createEncryptedDrizzleAdapter(db, {
     provider: "pg",
     schema: schema,
   }),

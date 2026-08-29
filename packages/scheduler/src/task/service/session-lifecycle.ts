@@ -1,7 +1,8 @@
 import { RuntimeClient } from "@devin/agent-sdk";
+import { serializeJobForDelegation } from "@devin/secrets";
 import type { ScheduleJob, Task } from "../types.js";
 import type { PersistedSession } from "../store.js";
-import type { TaskService } from "./task-service.js";
+import { serializeJobForDelegation } from "@devin/secrets";
 import type { ReviewSession } from "./types.js";
 import { loadCachedDesktopSnapshot } from "./desktop-capture.js";
 import {
@@ -614,7 +615,7 @@ export async function delegateJobToWorker(
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(job),
+      body: JSON.stringify(await serializeJobForDelegation(job)),
       signal: AbortSignal.timeout(WORKER_DELEGATE_TIMEOUT_MS),
     },
   ).catch((error: unknown) => {

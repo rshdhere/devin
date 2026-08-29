@@ -25,3 +25,8 @@ output "hosts" {
     }
   }
 }
+
+output "iam_role_arn" {
+  description = "IAM role ARN attached to execution hosts (null when SSM IAM disabled)."
+  value       = try(aws_iam_role.execution_host[0].arn, null)
+}

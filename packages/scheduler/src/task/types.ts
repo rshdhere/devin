@@ -64,6 +64,7 @@ export interface CreateTaskInput {
   requireReviewBeforePush?: boolean;
   cloneUrl?: string;
   githubToken?: string;
+  githubTokenEncrypted?: string;
   permissions?: GitHubPermissions;
   testCommand?: string;
   issueTitle?: string;
@@ -93,6 +94,7 @@ export interface ScheduleJob {
   requireReviewBeforePush?: boolean;
   cloneUrl?: string;
   githubToken?: string;
+  githubTokenEncrypted?: string;
   permissions?: GitHubPermissions;
   testCommand?: string;
   issueTitle?: string;

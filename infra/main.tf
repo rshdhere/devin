@@ -160,3 +160,30 @@ module "vault" {
 
   depends_on = [module.eks]
 }
+
+module "secrets_kms" {
+  source = "./modules/secrets-kms"
+
+  name_prefix              = local.name_prefix
+  aws_region               = var.aws_region
+  tags                     = var.tags
+  eks_oidc_provider_arn    = module.eks.oidc_provider_arn
+  eks_oidc_provider_url    = module.eks.oidc_provider_url
+  execution_host_role_arn      = local.enable_execution_hosts ? module.execution_hosts[0].iam_role_arn : ""
+  enable_execution_host_access = local.enable_execution_hosts
+  enable_irsa              = true
+
+  depends_on = [module.eks, module.execution_hosts]
+}
+
+resource "aws_ssm_parameter" "secrets_kms_key_id" {
+  count = var.manage_ssm_parameters ? 1 : 0
+
+  name  = "${local.ssm_parameter_prefix}/secrets_kms_key_id"
+  type  = "String"
+  value = module.secrets_kms.kms_key_id
+
+  tags = merge(var.tags, {
+    Name = "${local.name_prefix}-secrets-kms-key-id"
+  })
+}

@@ -10,6 +10,7 @@ type TaskRequestBody = {
   repository?: string;
   cloneUrl?: string;
   githubToken?: string;
+  githubTokenEncrypted?: string;
   permissions?: {
     canCommit: boolean;
     canCreatePr: boolean;
@@ -49,6 +50,7 @@ export function createTaskRouter(tasks: TaskService): Router {
         requireReviewBeforePush: body.requireReviewBeforePush,
         cloneUrl: body.cloneUrl,
         githubToken: body.githubToken,
+        githubTokenEncrypted: body.githubTokenEncrypted,
         permissions: body.permissions,
         testCommand: body.testCommand,
         issueTitle: body.issueTitle,

@@ -1,0 +1,19 @@
+{
+  "name": "@devin/e2e",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "test": "playwright test",
+    "test:ui": "playwright test --ui",
+    "test:headed": "playwright test --headed",
+    "report": "playwright show-report"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.60.0",
+    "@types/bun": "latest",
+    "typescript": "5.9.2"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  }
+}

@@ -8,8 +8,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint --max-warnings 0",
-    "check-types": "next typegen && tsc --noEmit",
-    "test": "vitest run"
+    "check-types": "next typegen && tsc --noEmit"
   },
   "dependencies": {
     "@base-ui/react": "^1.7.0",

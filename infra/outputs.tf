@@ -139,3 +139,28 @@ output "vault_init_commands" {
   value       = try(module.vault[0].init_commands, null)
   sensitive   = true
 }
+
+output "secrets_kms_key_id" {
+  description = "KMS key ID for OAuth/session token envelope encryption."
+  value       = module.secrets_kms.kms_key_id
+}
+
+output "secrets_kms_key_arn" {
+  description = "KMS key ARN for OAuth/session token envelope encryption."
+  value       = module.secrets_kms.kms_key_arn
+}
+
+output "secrets_kms_key_alias" {
+  description = "KMS alias for OAuth/session token envelope encryption."
+  value       = module.secrets_kms.kms_key_alias
+}
+
+output "server_secrets_irsa_role_arn" {
+  description = "IRSA role ARN for devin-server KMS secrets access."
+  value       = module.secrets_kms.server_irsa_role_arn
+}
+
+output "brain_secrets_irsa_role_arn" {
+  description = "IRSA role ARN for devin-brain KMS secrets access."
+  value       = module.secrets_kms.brain_irsa_role_arn
+}

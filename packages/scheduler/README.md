@@ -66,5 +66,5 @@ src/
 ## Develop
 
 ```bash
-bun test packages/scheduler/src
+bun run test --filter @devin/integration
 ```

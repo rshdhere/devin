@@ -1,4 +1,5 @@
 import { EventBus } from "@devin/events";
+import { normalizeIngestedJob } from "@devin/secrets";
 import { createQueue, type TaskQueue } from "@devin/queue";
 import { resolveRuntimeForTask } from "@devin/types";
 import { resolveDefaultAgent } from "../../agent/defaults.js";
@@ -268,6 +269,7 @@ export class TaskService implements TaskServiceHost {
       autoStartSandbox: input.autoStartSandbox ?? true,
       cloneUrl: input.cloneUrl,
       githubToken: input.githubToken,
+      githubTokenEncrypted: input.githubTokenEncrypted,
       permissions: input.permissions,
       testCommand: input.testCommand,
       issueTitle: input.issueTitle,
@@ -279,6 +281,9 @@ export class TaskService implements TaskServiceHost {
     this.pendingJobs.set(task.id, job);
 
     void (async () => {
+      const resolvedJob = await normalizeIngestedJob(job);
+      this.pendingJobs.set(task.id, resolvedJob);
+
       await this.taskStore.upsertTask(task);
       this.emit("task.created", task.id, "Task accepted", {
         agent: task.agent,
@@ -289,7 +294,7 @@ export class TaskService implements TaskServiceHost {
 
       if (this.mode === "brain") {
         try {
-          await delegateJobToWorkerImpl(this, job);
+          await delegateJobToWorkerImpl(this, resolvedJob);
           this.emit(
             "task.scheduled",
             task.id,
@@ -308,7 +313,7 @@ export class TaskService implements TaskServiceHost {
       }
 
       try {
-        await this.queue.enqueue(job);
+        await this.queue.enqueue(resolvedJob);
       } catch (error) {
         const message =
           error instanceof Error ? error.message : "Failed to enqueue task";
@@ -321,14 +326,15 @@ export class TaskService implements TaskServiceHost {
   }
 
   async ingestWorkerJob(job: ScheduleJob): Promise<void> {
-    let task = await syncTaskFromStore(this, job.taskId);
+    const normalized = await normalizeIngestedJob(job);
+    let task = await syncTaskFromStore(this, normalized.taskId);
     if (!task) {
-      task = materializeTaskFromJob(job);
+      task = materializeTaskFromJob(normalized);
       this.tasks.set(task.id, task);
       await this.taskStore.upsertTask(task);
     }
-    this.pendingJobs.set(job.taskId, job);
-    await this.queue.enqueue(job);
+    this.pendingJobs.set(normalized.taskId, normalized);
+    await this.queue.enqueue(normalized);
   }
 
   async startExecution(taskId: string): Promise<Task> {

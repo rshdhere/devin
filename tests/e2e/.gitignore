@@ -1,0 +1,11 @@
+node_modules
+
+/test-results
+/playwright-report
+/.auth
+
+.env
+.env.local
+.env.*.local
+
+.DS_Store

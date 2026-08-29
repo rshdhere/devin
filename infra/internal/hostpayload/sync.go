@@ -32,6 +32,8 @@ umask 077
   echo "DEVIN_SNAPSHOT_DIR=/var/lib/devin/task-snapshots"
   brain="$(read_ssm "$SSM_PREFIX/brain_internal_url")"
   if [ -n "$brain" ]; then echo "BRAIN_INTERNAL_URL=$brain"; fi
+  kms="$(read_ssm "$SSM_PREFIX/secrets_kms_key_id")"
+  if [ -n "$kms" ]; then echo "SECRETS_KMS_KEY_ID=$kms"; fi
   db="$(read_ssm "$SSM_PREFIX/database_url")"
   if [ -n "$db" ]; then echo "DATABASE_URL=$db"; fi
 } >/etc/devin/scheduler-secrets.env

@@ -1,5 +1,6 @@
 import { db } from "@devin/drizzle";
 import { account } from "@devin/drizzle/schema";
+import { decryptAccountTokenField } from "@devin/secrets";
 import { and, eq } from "drizzle-orm";
 
 export interface GitHubRepo {
@@ -26,7 +27,16 @@ export async function getGitHubAccount(userId: string) {
     .where(and(eq(account.userId, userId), eq(account.providerId, "github")))
     .limit(1);
 
-  return acct;
+  if (!acct) {
+    return acct;
+  }
+
+  return {
+    ...acct,
+    accessToken: await decryptAccountTokenField(acct.accessToken),
+    refreshToken: await decryptAccountTokenField(acct.refreshToken),
+    idToken: await decryptAccountTokenField(acct.idToken),
+  };
 }
 
 export function parseScopes(scope: string | null | undefined): string[] {

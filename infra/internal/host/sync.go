@@ -92,6 +92,9 @@ func SyncPlatformConfig(ctx context.Context) error {
 	if brainURL := read("brain_internal_url"); brainURL != "" {
 		secrets += "BRAIN_INTERNAL_URL=" + brainURL + "\n"
 	}
+	if kmsKeyID := read("secrets_kms_key_id"); kmsKeyID != "" {
+		secrets += "SECRETS_KMS_KEY_ID=" + kmsKeyID + "\n"
+	}
 	if db := read("database_url"); db != "" {
 		if postgresReachable(db) {
 			secrets += "DATABASE_URL=" + db + "\n"

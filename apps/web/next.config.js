@@ -18,7 +18,8 @@ const nextConfig = {
   turbopack: hasLocalDevLogin
     ? {
         resolveAlias: {
-          "@/components/auth/local-dev-login": localDevLoginPath,
+          "@/components/auth/local-dev-login":
+            "./components/auth/local-dev-login.local.tsx",
         },
       }
     : {},

@@ -1,14 +1,19 @@
 # Integration tests
 
-Playwright journeys against the web app and platform APIs.
+Unit tests (Bun + Vitest) and Playwright journeys live in this package.
 
-Install dependencies from the repository root:
+## Unit tests
+
+From the repository root:
 
 ```bash
 bun install
+cd tests/integration && bun run test
 ```
 
-Run the local session journey:
+Unit tests mirror the repository layout under `tests/integration/packages/` and `tests/integration/apps/`.
+
+## Playwright
 
 ```bash
 bunx playwright test tests/integration/tests/session-journey.spec.ts --config tests/integration/playwright.config.ts

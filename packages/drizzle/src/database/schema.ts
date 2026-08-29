@@ -57,9 +57,9 @@ export const account = pgTable(
     userId: text("user_id")
       .notNull()
       .references(() => user.id, { onDelete: "cascade" }),
-    accessToken: text("access_token"),
-    refreshToken: text("refresh_token"),
-    idToken: text("id_token"),
+    accessToken: bytea("access_token"),
+    refreshToken: bytea("refresh_token"),
+    idToken: bytea("id_token"),
     accessTokenExpiresAt: timestamp("access_token_expires_at"),
     refreshTokenExpiresAt: timestamp("refresh_token_expires_at"),
     scope: text("scope"),
@@ -207,7 +207,7 @@ export const agentSessions = pgTable(
     repoCwd: text("repo_cwd").notNull(),
     state: text("state").notNull().default("active"),
     jobJson: text("job_json").notNull(),
-    githubToken: text("github_token"),
+    githubToken: bytea("github_token"),
     createdNewRepo: boolean("created_new_repo").default(false).notNull(),
     guestHost: text("guest_host"),
     previewPort: integer("preview_port"),

@@ -5,6 +5,12 @@ import {
   agentTasks,
 } from "@devin/drizzle/schema";
 import type { TaskEvent } from "@devin/events";
+import {
+  decryptSessionGithubToken,
+  encryptSessionGithubToken,
+  resolveJobGithubToken,
+  stripSecretsFromPersistedJob,
+} from "@devin/secrets";
 import { and, desc, eq, gt, inArray, lt, sql } from "drizzle-orm";
 import type { ScheduleJob, Task, TaskStatus } from "./types.js";
 
@@ -117,6 +123,11 @@ export class TaskStore {
         ? Math.trunc(session.previewPort)
         : null;
 
+    const persistedJob = stripSecretsFromPersistedJob(session.job);
+    const encryptedGithubToken = await encryptSessionGithubToken(
+      session.githubToken,
+    );
+
     await db
       .insert(agentSessions)
       .values({
@@ -125,8 +136,8 @@ export class TaskStore {
         runtimeBaseUrl: session.runtimeBaseUrl,
         repoCwd: session.repoCwd,
         state: session.state,
-        jobJson: JSON.stringify(session.job),
-        githubToken: session.githubToken,
+        jobJson: JSON.stringify(persistedJob),
+        githubToken: encryptedGithubToken,
         createdNewRepo: session.createdNewRepo,
         guestHost: session.guestHost,
         previewPort,
@@ -141,8 +152,8 @@ export class TaskStore {
           runtimeBaseUrl: session.runtimeBaseUrl,
           repoCwd: session.repoCwd,
           state: session.state,
-          jobJson: JSON.stringify(session.job),
-          githubToken: session.githubToken,
+          jobJson: JSON.stringify(persistedJob),
+          githubToken: encryptedGithubToken,
           createdNewRepo: session.createdNewRepo,
           guestHost: session.guestHost,
           ...(previewPort != null ? { previewPort } : {}),
@@ -342,7 +353,7 @@ export class TaskStore {
       .from(agentSessions)
       .where(inArray(agentSessions.state, ["active", "review", "sleeping"]));
 
-    return rows.map(rowToSession);
+    return Promise.all(rows.map((row) => hydratePersistedSession(row)));
   }
 
   async getSession(taskId: string): Promise<PersistedSession | undefined> {
@@ -357,7 +368,7 @@ export class TaskStore {
       .limit(1);
 
     const row = rows[0];
-    return row ? rowToSession(row) : undefined;
+    return row ? hydratePersistedSession(row) : undefined;
   }
 
   async listIdleSessions(idleMs: number): Promise<PersistedSession[]> {
@@ -376,7 +387,7 @@ export class TaskStore {
         ),
       );
 
-    return rows.map(rowToSession);
+    return Promise.all(rows.map((row) => hydratePersistedSession(row)));
   }
 
   async loadEvents(taskId: string): Promise<TaskEvent[]> {
@@ -490,14 +501,15 @@ function rowToTask(row: typeof agentTasks.$inferSelect): Task {
 function rowToSession(
   row: typeof agentSessions.$inferSelect,
 ): PersistedSession {
+  const job = JSON.parse(row.jobJson) as ScheduleJob;
   return {
     taskId: row.taskId,
     sandboxName: row.sandboxName,
     runtimeBaseUrl: row.runtimeBaseUrl,
     repoCwd: row.repoCwd,
     state: row.state as AgentSessionState,
-    job: JSON.parse(row.jobJson) as ScheduleJob,
-    githubToken: row.githubToken ?? undefined,
+    job,
+    githubToken: undefined,
     createdNewRepo: row.createdNewRepo,
     guestHost: row.guestHost ?? undefined,
     previewPort:
@@ -507,4 +519,19 @@ function rowToSession(
     lastActiveAt: row.lastActiveAt.toISOString(),
     sleepingAt: row.sleepingAt?.toISOString(),
   };
+}
+
+export async function hydratePersistedSession(
+  row: typeof agentSessions.$inferSelect,
+): Promise<PersistedSession> {
+  const session = rowToSession(row);
+  let githubToken = await decryptSessionGithubToken(row.githubToken);
+  if (!githubToken) {
+    githubToken = session.job.githubToken;
+    if (!githubToken) {
+      githubToken = await resolveJobGithubToken(session.job);
+    }
+  }
+  session.githubToken = githubToken;
+  return session;
 }

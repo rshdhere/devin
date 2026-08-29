@@ -30,5 +30,5 @@ src/
   events.ts
   diagnostics.ts
   runtime.ts
-  runtime.test.ts
+Unit tests live under `tests/integration/packages/types/src/runtime.test.ts`.
 ```

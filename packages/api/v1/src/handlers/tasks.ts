@@ -3,7 +3,11 @@ import { userDashboardSettings } from "@devin/drizzle/schema";
 import { createTaskSchema } from "@devin/validators";
 import { eq } from "drizzle-orm";
 import { Router } from "express";
-import { authenticatedCloneUrl, getGitHubAccessToken } from "../lib/github.js";
+import { getGitHubAccessToken } from "../lib/github.js";
+import {
+  encryptGithubTokenForTransit,
+  tokenFreeCloneUrl,
+} from "@devin/secrets";
 import {
   createTask,
   ensureDesktopComputer,
@@ -97,6 +101,9 @@ tasksRouter.post("/", async (req, res) => {
     const userToken = await getGitHubAccessToken(userId);
     const githubToken =
       userToken?.trim() || process.env.GITHUB_BOT_TOKEN?.trim() || undefined;
+    const githubTokenEncrypted = githubToken
+      ? await encryptGithubTokenForTransit(githubToken)
+      : undefined;
 
     const response = await createTask({
       prompt: parsed.data.prompt,
@@ -115,7 +122,7 @@ tasksRouter.post("/", async (req, res) => {
       issueTitle: parsed.data.issueTitle,
       issueBody: parsed.data.issueBody,
       agentModel: parsed.data.agentModel,
-      githubToken: githubToken ?? undefined,
+      githubTokenEncrypted,
       permissions: settings
         ? {
             canCommit: settings.githubCanCommit,
@@ -126,10 +133,7 @@ tasksRouter.post("/", async (req, res) => {
           }
         : undefined,
       requireReviewBeforePush: settings?.requireReviewBeforePush ?? false,
-      cloneUrl:
-        repository && githubToken
-          ? authenticatedCloneUrl(githubToken, repository)
-          : undefined,
+      cloneUrl: repository ? tokenFreeCloneUrl(repository) : undefined,
     });
 
     res.status(response.status).json(await response.json());

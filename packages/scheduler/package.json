@@ -14,6 +14,7 @@
     "@devin/drizzle": "workspace:*",
     "@devin/events": "workspace:*",
     "@devin/queue": "workspace:*",
+    "@devin/secrets": "workspace:*",
     "@devin/types": "workspace:*",
     "express": "^5.2.1",
     "ws": "^8.18.3"
