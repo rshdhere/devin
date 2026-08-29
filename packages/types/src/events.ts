@@ -1,5 +1,6 @@
 export type TaskEventType =
   | "task.created"
+  | "task.runtime_selected"
   | "task.scheduled"
   | "task.phase_changed"
   | "draft.started"

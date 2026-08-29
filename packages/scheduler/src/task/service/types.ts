@@ -11,6 +11,7 @@ import type {
   Task,
   TaskStatus,
 } from "../types.js";
+import type { StackRuntime } from "@devin/types";
 import type { TaskStore } from "../store.js";
 
 export interface TaskServiceOptions {
@@ -31,6 +32,14 @@ export interface TaskServiceOptions {
   mode?: ServiceMode;
   /** Worker scheduler URL when mode=brain (job execution delegation). */
   executionWorkerUrl?: string;
+  /**
+   * Override Brain LLM runtime selection (tests). Defaults to
+   * `@devin/brain-harness` chooseStackRuntime.
+   */
+  chooseStackRuntime?: (input: {
+    prompt: string;
+    model?: string;
+  }) => Promise<{ runtime: StackRuntime; rationale: string } | null>;
 }
 
 export type SandboxRecord = {

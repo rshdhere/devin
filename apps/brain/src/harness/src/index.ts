@@ -16,6 +16,14 @@ export {
   stackGuidanceLines,
 } from "./stack.js";
 export { resolveOpenAIModel, resolveSummaryModel } from "./openai.js";
+export {
+  chooseStackRuntime,
+  parseStackRuntimeChoice,
+} from "./runtime-chooser.js";
+export type {
+  ChooseStackRuntimeInput,
+  ChooseStackRuntimeResult,
+} from "./runtime-chooser.js";
 export type {
   BrainHarnessEvent,
   BrainHarnessOptions,

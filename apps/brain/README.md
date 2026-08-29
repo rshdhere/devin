@@ -8,6 +8,7 @@ In Devin’s architecture, the brain is the cloud service that drives intelligen
 
 ```text
 Web UI → API server → Brain (:9092)
+                         │  OpenAI chooses sandbox runtime
                          │  OpenAI harness (src/harness)
                          │  POST /internal/v1/jobs  (sandbox provision only)
                          ▼
@@ -22,6 +23,7 @@ Web UI → API server → Brain (:9092)
 ```
 
 - Accepts task create / retry / continue / terminate / wake
+- Selects Firecracker stack runtime via OpenAI before worker provision
 - Persists tasks, events, and sessions when `DATABASE_URL` is set
 - Runs the Brain harness under `src/harness` after worker `sandbox-ready`
 - Tools reach the Devbox only via the worker tool proxy (never guest CNI from EKS)
@@ -55,8 +57,10 @@ Default listen port: **9092** (`BRAIN_PORT`).
 | `EXECUTION_WORKER_URL` | Worker scheduler on the execution host       |
 | `ORCHESTRATOR_URL`     | Orchestrator base URL (optional on Brain)    |
 | `DEFAULT_AGENT`        | `brain` (product); `mock` for template verify |
-| `OPENAI_API_KEY`       | OpenAI key for Brain harness                 |
-| `OPENAI_MODEL`         | Harness model (default `gpt-4o-mini`)        |
+| `OPENAI_API_KEY`       | OpenAI key for Brain harness + runtime selection |
+| `OPENAI_MODEL`         | Harness / runtime-chooser model (default `gpt-4o-mini`) |
+
+Before delegating sandbox provision to the worker, Brain asks OpenAI (same model resolution as the harness) to pick a stack snapshot: `nextjs` | `node` | `go` | `rust` | `python`. The choice is stored on the task/job as `runtime` and emitted as `task.runtime_selected`. If the model call fails, Brain falls back to prompt heuristics. Explicit `runtime` on create still wins.
 
 Worker hosts need `BRAIN_INTERNAL_URL` (this service) so they can `POST .../sandbox-ready`, plus local `TOOL_GATEWAY_GRPC_URL=127.0.0.1:9095`. They do **not** need `OPENAI_API_KEY` for product brain tasks.
 

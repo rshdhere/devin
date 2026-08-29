@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "test": "bun run test:bun && bun run test:vitest",
-    "test:bun": "bun test packages/secrets packages/types packages/scheduler/src/context packages/scheduler/src/greenfield packages/scheduler/src/task/attribution.test.ts packages/scheduler/src/task/store-secrets.test.ts packages/scheduler/src/task/service/agent-prompt.test.ts packages/scheduler/src/task/service/desktop-snapshot-blank.test.ts packages/scheduler/src/task/service/desktop-vnc-html.test.ts apps/brain",
+    "test:bun": "bun test packages/secrets packages/types packages/scheduler/src/context packages/scheduler/src/greenfield packages/scheduler/src/task/attribution.test.ts packages/scheduler/src/task/store-secrets.test.ts packages/scheduler/src/task/service/agent-prompt.test.ts packages/scheduler/src/task/service/desktop-snapshot-blank.test.ts packages/scheduler/src/task/service/desktop-vnc-html.test.ts packages/scheduler/src/task/service/create-task-runtime.test.ts apps/brain",
     "test:vitest": "vitest run",
     "test:playwright": "playwright test tests/session-journey.spec.ts"
   },

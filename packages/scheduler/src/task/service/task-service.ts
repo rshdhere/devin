@@ -1,7 +1,14 @@
 import { EventBus } from "@devin/events";
+import { chooseStackRuntime } from "@devin/brain-harness";
 import { normalizeIngestedJob } from "@devin/secrets";
 import { createQueue, type TaskQueue } from "@devin/queue";
-import { resolveRuntimeForTask } from "@devin/types";
+import {
+  isSandboxRuntime,
+  resolveBrainAgentModel,
+  resolveRuntimeForTask,
+  type SandboxRuntime,
+  type StackRuntime,
+} from "@devin/types";
 import { resolveDefaultAgent } from "../../agent/defaults.js";
 import {
   collectInfraDiagnostics,
@@ -103,6 +110,9 @@ export class TaskService implements TaskServiceHost {
   readonly mode: ServiceMode;
   readonly executionWorkerUrl?: string;
   readonly idleTimeoutMs: number;
+  readonly chooseStackRuntimeFn: NonNullable<
+    TaskServiceOptions["chooseStackRuntime"]
+  >;
   idleWatchdog?: ReturnType<typeof setInterval>;
   workerStarted = false;
   readonly processingTasks = new Set<string>();
@@ -140,6 +150,8 @@ export class TaskService implements TaskServiceHost {
       process.env.EXECUTION_WORKER_URL?.trim() ||
       undefined;
     this.idleTimeoutMs = resolveTimeoutMs("DEVBOX_IDLE_TIMEOUT_SECONDS", 1800);
+    this.chooseStackRuntimeFn =
+      options.chooseStackRuntime ?? chooseStackRuntime;
   }
 
   async initialize(): Promise<void> {
@@ -230,7 +242,8 @@ export class TaskService implements TaskServiceHost {
       requested === "mock" && process.env.ALLOW_TEMPLATE_AGENT === "true"
         ? "mock"
         : "brain";
-    const runtime = resolveRuntimeForTask(
+    const explicitStack = resolveExplicitStackRuntime(input.runtime);
+    const provisionalRuntime = resolveRuntimeForTask(
       agent,
       input.prompt.trim(),
       input.runtime,
@@ -242,7 +255,7 @@ export class TaskService implements TaskServiceHost {
       id: crypto.randomUUID(),
       prompt: input.prompt.trim(),
       agent,
-      runtime,
+      runtime: provisionalRuntime,
       status: "queued",
       userId: input.userId,
       repository: input.repository,
@@ -292,15 +305,46 @@ export class TaskService implements TaskServiceHost {
         prompt: task.prompt,
       });
 
+      if (agent === "brain" && !explicitStack) {
+        const selected = await this.chooseStackRuntimeFn({
+          prompt: task.prompt,
+          model: resolveBrainAgentModel(
+            input.agentModel,
+            process.env.OPENAI_MODEL,
+          ),
+        });
+        const runtime: SandboxRuntime =
+          selected?.runtime ??
+          resolveRuntimeForTask(agent, task.prompt, input.runtime);
+        applyTaskRuntime(this, task.id, resolvedJob, runtime);
+        this.emit(
+          "task.runtime_selected",
+          task.id,
+          selected
+            ? `Runtime selected by Brain: ${runtime}`
+            : `Runtime fallback heuristic: ${runtime}`,
+          {
+            runtime,
+            source: selected ? "llm" : "heuristic",
+            rationale: selected?.rationale,
+          },
+        );
+        await this.taskStore.upsertTask(this.tasks.get(task.id)!);
+      }
+
       if (this.mode === "brain") {
         try {
-          await delegateJobToWorkerImpl(this, resolvedJob);
+          await delegateJobToWorkerImpl(
+            this,
+            this.pendingJobs.get(task.id) ?? resolvedJob,
+          );
           this.emit(
             "task.scheduled",
             task.id,
             "Task delegated to execution worker",
             {
               delegated: true,
+              runtime: this.tasks.get(task.id)?.runtime,
             },
           );
         } catch (error) {
@@ -313,7 +357,7 @@ export class TaskService implements TaskServiceHost {
       }
 
       try {
-        await this.queue.enqueue(resolvedJob);
+        await this.queue.enqueue(this.pendingJobs.get(task.id) ?? resolvedJob);
       } catch (error) {
         const message =
           error instanceof Error ? error.message : "Failed to enqueue task";
@@ -645,6 +689,31 @@ export class TaskService implements TaskServiceHost {
   ): Promise<void> {
     return persistSessionImpl(this, taskId, session, state);
   }
+}
+
+function resolveExplicitStackRuntime(
+  runtime: SandboxRuntime | undefined,
+): StackRuntime | undefined {
+  if (!runtime || !isSandboxRuntime(runtime) || runtime === "agent") {
+    return undefined;
+  }
+  return runtime;
+}
+
+function applyTaskRuntime(
+  svc: TaskService,
+  taskId: string,
+  job: ScheduleJob,
+  runtime: SandboxRuntime,
+): void {
+  const task = svc.tasks.get(taskId);
+  if (task) {
+    task.runtime = runtime;
+    task.updatedAt = new Date().toISOString();
+    svc.tasks.set(taskId, task);
+  }
+  job.runtime = runtime;
+  svc.pendingJobs.set(taskId, job);
 }
 
 export type { TaskServiceOptions } from "./types.js";
