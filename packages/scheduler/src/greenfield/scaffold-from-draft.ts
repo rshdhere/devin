@@ -1,4 +1,5 @@
 import type { DraftPlan } from "./draft-planner.js";
+import { safeScaffoldReadme } from "./safe-readme.js";
 
 export type ScaffoldFile = {
   path: string;
@@ -22,19 +23,7 @@ export function scaffoldFilesFromDraft(
   if (paths.has("README.md")) {
     files.push({
       path: "README.md",
-      content: `# ${title}
-
-${opts.prompt}
-
-## Getting started
-
-\`\`\`bash
-bun install
-bun run start
-\`\`\`
-
-_Scaffold only — the sandbox agent implements the product and commits as it goes._
-`,
+      content: safeScaffoldReadme(title, "node", "bun install\nbun run start"),
     });
   }
 
@@ -114,24 +103,14 @@ _Scaffold only — the sandbox agent implements the product and commits as it go
   if (files.length === 0) {
     files.push({
       path: "README.md",
-      content: `# ${title}\n\n${opts.prompt}\n`,
+      content: safeScaffoldReadme(title, "node", "bun install\nbun run start"),
     });
   }
 
   if (!files.some((file) => file.path === "README.md")) {
     files.unshift({
       path: "README.md",
-      content: `# ${title}
-
-${opts.prompt}
-
-## Getting started
-
-\`\`\`bash
-bun install
-bun run start
-\`\`\`
-`,
+      content: safeScaffoldReadme(title, "node", "bun install\nbun run start"),
     });
   }
 

@@ -37,7 +37,9 @@ describe("buildSystemPrompt", () => {
     });
     expect(prompt).toContain("Stack: Python");
     expect(prompt).toContain("app.py");
-    expect(prompt).toContain("Current repository root listing");
+    expect(prompt).toContain("Repository listing");
+    expect(prompt).toContain('<untrusted source="repo_listing">');
+    expect(prompt).toContain("Instruction hierarchy");
     expect(prompt).toContain("Do not invent a Next.js tree");
     expect(prompt).not.toMatch(/e\.g\. app\/page\.tsx/);
   });

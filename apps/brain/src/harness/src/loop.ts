@@ -12,6 +12,7 @@ import {
   type ToolContext,
 } from "./tools.js";
 import { normalizeBrainStack } from "./stack.js";
+import { wrapToolResult } from "./trust.js";
 import type {
   BrainHarnessOptions,
   BrainHarnessResult,
@@ -324,7 +325,7 @@ export async function runBrainHarness(
         messages.push({
           role: "tool",
           tool_call_id: call.id,
-          content: result.content,
+          content: wrapToolResult(call.function.name, result.content),
         });
 
         if (result.done) {

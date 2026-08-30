@@ -8,6 +8,11 @@ import {
   resolveRepoPath,
   wrongStackMessage,
 } from "./paths.js";
+import {
+  filterMemoryFacts,
+  isSecretExfilShellCommand,
+  secretExfilRefusal,
+} from "../trust.js";
 import type {
   DevboxToolsClient,
   ExecResult,
@@ -32,6 +37,9 @@ async function executeShell(
   args: Record<string, unknown>,
 ): Promise<ToolResult> {
   const command = String(args.command ?? "");
+  if (isSecretExfilShellCommand(command)) {
+    return { content: secretExfilRefusal(command) };
+  }
   if (isForegroundServerCommand(command)) {
     return {
       content:
@@ -219,13 +227,20 @@ export async function executeTool(
 
   // save_memory stays on Brain (HydraDB / session memory); never proxy it.
   if (name === "save_memory") {
-    const facts = Array.isArray(args.facts)
-      ? args.facts.map(String).filter(Boolean)
-      : [];
+    const facts = filterMemoryFacts(
+      Array.isArray(args.facts) ? args.facts.map(String) : [],
+    );
     if (onSaveMemory && facts.length > 0) {
       await onSaveMemory(facts);
     }
     return { content: `saved ${facts.length} fact(s)` };
+  }
+
+  if (
+    name === "shell" &&
+    isSecretExfilShellCommand(String(args.command ?? ""))
+  ) {
+    return { content: secretExfilRefusal(String(args.command ?? "")) };
   }
 
   if (ctx.executionWorkerUrl?.trim()) {

@@ -137,7 +137,7 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "${title.replace(/"/g, '\\"')}",
-  description: ${JSON.stringify(prompt.slice(0, 160))},
+  description: "Scaffold ready — implement the product in this App Router app.",
 };
 
 export default function RootLayout({

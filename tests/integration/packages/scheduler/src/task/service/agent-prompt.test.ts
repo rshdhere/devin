@@ -16,6 +16,7 @@ describe("buildFollowUpAgentPrompt", () => {
     expect(prompt).toContain("This is a follow-up in an existing session.");
     expect(prompt).toContain("Apply ONLY the new user request below.");
     expect(prompt).toContain("make the background black");
+    expect(prompt).toContain('<untrusted source="user_request">');
     expect(prompt).toContain(
       "Do NOT run local servers (`bun run start` / `npm start` / `npm run start`) on follow-ups.",
     );
@@ -40,6 +41,7 @@ describe("buildFollowUpAgentPrompt", () => {
 
     expect(prompt).toContain("same persisted devbox microVM");
     expect(prompt).toContain("Bounded session context");
+    expect(prompt).toContain('<untrusted source="session_context">');
     expect(prompt).toContain("Added the board");
     expect(prompt).toContain("current files are the source of truth");
   });

@@ -24,6 +24,31 @@ export type {
   ChooseStackRuntimeInput,
   ChooseStackRuntimeResult,
 } from "./runtime-chooser.js";
+export {
+  DEFAULT_DIRECT_REPLY,
+  defaultDirectReply,
+  looksLikeDirectReplyPrompt,
+  parseBrainExecutionPlan,
+  planBrainExecution,
+} from "./sandbox-intent.js";
+export type {
+  BrainExecutionPlan,
+  PlanBrainExecutionInput,
+} from "./sandbox-intent.js";
+export {
+  TRUST_POLICY_LINES,
+  filterMemoryFacts,
+  isSecretExfilShellCommand,
+  looksLikeInstructionInjection,
+  sanitizeDirectReply,
+  secretExfilRefusal,
+  wrapRecalledMemory,
+  wrapRepoListing,
+  wrapSessionContext,
+  wrapToolResult,
+  wrapUntrusted,
+  wrapUserRequest,
+} from "./trust.js";
 export type {
   BrainHarnessEvent,
   BrainHarnessOptions,

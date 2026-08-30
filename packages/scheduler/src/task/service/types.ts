@@ -40,6 +40,18 @@ export interface TaskServiceOptions {
     prompt: string;
     model?: string;
   }) => Promise<{ runtime: StackRuntime; rationale: string } | null>;
+  /**
+   * Override Brain sandbox-vs-reply decision (tests). Defaults to
+   * `@devin/brain-harness` planBrainExecution.
+   */
+  planBrainExecution?: (input: {
+    prompt: string;
+    model?: string;
+  }) => Promise<
+    | { action: "reply"; reply: string; rationale: string }
+    | { action: "sandbox"; runtime: StackRuntime; rationale: string }
+    | null
+  >;
 }
 
 export type SandboxRecord = {

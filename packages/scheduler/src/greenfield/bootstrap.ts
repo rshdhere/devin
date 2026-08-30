@@ -1,6 +1,7 @@
 import type { RuntimeClient } from "@devin/agent-sdk";
 import type { StackRuntime } from "@devin/types";
 import { nextjsShellFiles } from "./nextjs-scaffold.js";
+import { safeScaffoldReadme } from "./safe-readme.js";
 
 export type BootstrapEmitter = (
   type: string,
@@ -314,15 +315,17 @@ export async function bootstrapGreenfieldProject(opts: {
     runtime: opts.stackRuntime,
   });
 
-  const readme = `# ${opts.title}
-
-${opts.prompt}
-
-## Getting started
-
-Scaffold created by Devin (${opts.stackRuntime} runtime). The agent will implement the requested functionality next.
-`;
-
+  const runHint =
+    opts.stackRuntime === "go"
+      ? "go run ."
+      : opts.stackRuntime === "rust"
+        ? "cargo run"
+        : opts.stackRuntime === "python"
+          ? "pip install -r requirements.txt && python app.py"
+          : opts.stackRuntime === "nextjs"
+            ? "bun install && bun run dev"
+            : "bun install && bun run start";
+  const readme = safeScaffoldReadme(opts.title, opts.stackRuntime, runHint);
   await opts.runtime.writeFile({
     path: `${opts.repoCwd}/README.md`,
     content: readme,

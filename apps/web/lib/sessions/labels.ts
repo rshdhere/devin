@@ -41,6 +41,8 @@ export function taskStatusLabel(status: TaskStatus): string {
 
 export function eventTypeLabel(type: TaskEventType): string {
   switch (type) {
+    case "task.sandbox_skipped":
+      return "Direct reply";
     case "task.phase_changed":
       return "Phase";
     case "draft.started":

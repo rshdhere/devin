@@ -1,5 +1,12 @@
 import { EventBus } from "@devin/events";
-import { chooseStackRuntime } from "@devin/brain-harness";
+import {
+  chooseStackRuntime,
+  defaultDirectReply,
+  looksLikeDirectReplyPrompt,
+  planBrainExecution,
+  sanitizeDirectReply,
+  type BrainExecutionPlan,
+} from "@devin/brain-harness";
 import { normalizeIngestedJob } from "@devin/secrets";
 import { createQueue, type TaskQueue } from "@devin/queue";
 import {
@@ -113,6 +120,9 @@ export class TaskService implements TaskServiceHost {
   readonly chooseStackRuntimeFn: NonNullable<
     TaskServiceOptions["chooseStackRuntime"]
   >;
+  readonly planBrainExecutionFn: NonNullable<
+    TaskServiceOptions["planBrainExecution"]
+  >;
   idleWatchdog?: ReturnType<typeof setInterval>;
   workerStarted = false;
   readonly processingTasks = new Set<string>();
@@ -152,6 +162,8 @@ export class TaskService implements TaskServiceHost {
     this.idleTimeoutMs = resolveTimeoutMs("DEVBOX_IDLE_TIMEOUT_SECONDS", 1800);
     this.chooseStackRuntimeFn =
       options.chooseStackRuntime ?? chooseStackRuntime;
+    this.planBrainExecutionFn =
+      options.planBrainExecution ?? planBrainExecution;
   }
 
   async initialize(): Promise<void> {
@@ -305,13 +317,43 @@ export class TaskService implements TaskServiceHost {
         prompt: task.prompt,
       });
 
-      if (agent === "brain" && !explicitStack) {
+      const brainModel = resolveBrainAgentModel(
+        input.agentModel,
+        process.env.OPENAI_MODEL,
+      );
+      let runtimeChosen = Boolean(explicitStack);
+
+      if (agent === "brain" && !forcesSandboxWork(input, explicitStack)) {
+        const plan = await this.planBrainExecutionFn({
+          prompt: task.prompt,
+          model: brainModel,
+        });
+        const direct = resolveDirectReply(plan, task.prompt);
+        if (direct) {
+          completeDirectReply(this, task.id, direct);
+          return;
+        }
+        if (plan?.action === "sandbox" && !explicitStack) {
+          applyTaskRuntime(this, task.id, resolvedJob, plan.runtime);
+          this.emit(
+            "task.runtime_selected",
+            task.id,
+            `Runtime selected by Brain: ${plan.runtime}`,
+            {
+              runtime: plan.runtime,
+              source: "llm",
+              rationale: plan.rationale,
+            },
+          );
+          await this.taskStore.upsertTask(this.tasks.get(task.id)!);
+          runtimeChosen = true;
+        }
+      }
+
+      if (agent === "brain" && !explicitStack && !runtimeChosen) {
         const selected = await this.chooseStackRuntimeFn({
           prompt: task.prompt,
-          model: resolveBrainAgentModel(
-            input.agentModel,
-            process.env.OPENAI_MODEL,
-          ),
+          model: brainModel,
         });
         const runtime: SandboxRuntime =
           selected?.runtime ??
@@ -698,6 +740,67 @@ function resolveExplicitStackRuntime(
     return undefined;
   }
   return runtime;
+}
+
+function forcesSandboxWork(
+  input: CreateTaskInput,
+  explicitStack: StackRuntime | undefined,
+): boolean {
+  if (explicitStack) {
+    return true;
+  }
+  if (input.createRepository?.trim() || input.autoCreateRepository) {
+    return true;
+  }
+  return false;
+}
+
+function resolveDirectReply(
+  plan: BrainExecutionPlan | null | undefined,
+  prompt: string,
+): { reply: string; rationale: string; source: "llm" | "heuristic" } | null {
+  if (plan?.action === "reply") {
+    const reply = sanitizeDirectReply(plan.reply.trim());
+    if (reply) {
+      return {
+        reply: reply.length >= 20 ? reply : defaultDirectReply(),
+        rationale: plan.rationale,
+        source: "llm",
+      };
+    }
+  }
+  if (looksLikeDirectReplyPrompt(prompt)) {
+    return {
+      reply: defaultDirectReply(),
+      rationale: "Greeting or small talk does not need a sandbox",
+      source: "heuristic",
+    };
+  }
+  return null;
+}
+
+function completeDirectReply(
+  svc: TaskService,
+  taskId: string,
+  direct: { reply: string; rationale: string; source: "llm" | "heuristic" },
+): void {
+  svc.pendingJobs.delete(taskId);
+  svc.emit(
+    "task.sandbox_skipped",
+    taskId,
+    "Answered without starting a microVM",
+    {
+      source: direct.source,
+      rationale: direct.rationale,
+    },
+  );
+  svc.emit("agent.started", taskId, "Brain replied without a sandbox");
+  svc.emit("agent.output", taskId, direct.reply, { source: "brain-direct" });
+  svc.emit("agent.completed", taskId, "Direct reply complete");
+  svc.updateTask(taskId, "completed", "Answered without starting a microVM");
+  svc.emit("task.completed", taskId, "Answered without starting a microVM", {
+    sandboxSkipped: true,
+  });
 }
 
 function applyTaskRuntime(
