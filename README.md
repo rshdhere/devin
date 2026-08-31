@@ -9,6 +9,4 @@
 
 ## Architecture
 
-[![Devin architecture: Firecracker microVMs, Cursor agent loop, SSE events, and desktop preview](docs/architecture.png)](https://excalidraw.com/#json=5hx4jjSPP5SmJVDGtZb_p,9O029vHsNP2hqMHxNco6pQ)
-
-Click the diagram to open the [interactive architecture overview](https://excalidraw.com/#json=5hx4jjSPP5SmJVDGtZb_p,9O029vHsNP2hqMHxNco6pQ) in Excalidraw.
+See the [interactive architecture overview](https://excalidraw.com/#json=4kEfKHCvhetVQkrKSwEQk,HHEs8TMUMU81rR-hycwjhw) in Excalidraw.
